@@ -1,24 +1,38 @@
 {
   "private": true,
   "name": "new-page",
-  "description": "Replaces your new tab page with a simple React page.",
+  "description": "以空间整理网页、用书签标记 Todo，并通过 WebDAV 同步的 Chrome 新标签页。",
   "version": "1.0.0",
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@tanstack/react-query": "^5.107.1",
+    "lucide-react": "^1.70.0",
     "react": "^18.1.0",
-    "react-dom": "^18.1.0"
+    "react-dom": "^18.1.0",
+    "tailwind-variants": "^4.0.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/chrome": "^0.3.7",
+    "@types/node": "^26.6.6",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
+    "@unocss/postcss": "^66.12.0",
+    "extension": "^4.1.39",
+    "selfsigned": "^5.5.0",
     "typescript": "7.0.2",
-    "extension": "^4.1.39"
+    "unocss": "^66.12.0"
   },
   "scripts": {
     "dev": "extension dev",
+    "dev:chrome": "extension dev --browser chrome",
     "start": "extension start",
     "build": "extension build",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build:chrome && playwright test",
+    "test:e2e": "playwright test",
     "preview": "extension preview",
     "build:chrome": "extension build --browser chrome",
     "build:firefox": "extension build --browser firefox",

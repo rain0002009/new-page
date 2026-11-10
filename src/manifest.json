@@ -13,8 +13,16 @@
       }
     }
   },
-  "name": "new-page",
-  "description": "Replaces your new tab page with a simple React page.",
+  "name": "拾页 · Page Garden",
+  "description": "以空间整理收藏，用 Todo 标记待办，并通过 WebDAV 自动同步。",
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "icons": {
     "16": "images/icon-16.png",
     "32": "images/icon-32.png",
@@ -23,9 +31,9 @@
     "128": "images/icon-128.png"
   },
   "background": {
-    "chromium:service_worker": "background.js",
+    "chromium:service_worker": "background.ts",
     "firefox:scripts": [
-      "background.js"
+      "background.ts"
     ]
   },
   "chrome_url_overrides": {
