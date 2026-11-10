@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, pointerWithin, useSensor, useSensors, type CollisionDetection, type DragEndEvent } from '@dnd-kit/core'
 import { useSortable, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -8,9 +8,10 @@ import type { Act } from './Editor'
 type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string } | { kind: 'tab'; tab: LinkInput; title: string }
 
 export function useDragItem(id: string, item: DragItem) {
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: item, disabled: { droppable: item.kind === 'tab' } })
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: item, disabled: { droppable: item.kind === 'tab' } })
+  const ref = useCallback((node: HTMLElement | null) => { setNodeRef(node); setActivatorNodeRef(node) }, [setNodeRef, setActivatorNodeRef])
   return {
-    ref: setNodeRef,
+    ref,
     ...attributes, role: undefined, ...listeners,
     style: { transform: CSS.Transform.toString(transform), transition },
     'data-dragging': isDragging || undefined,

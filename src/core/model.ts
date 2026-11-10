@@ -160,6 +160,17 @@ export function apply(doc: Document, action: Action): Document {
       const position = (link: Link) => link.todoPosition ?? link.position
       entity.todoPosition = index === siblings.length ? (siblings.at(-1) ? position(siblings.at(-1)!) : 0) + 1024 :
         ((siblings[index - 1] ? position(siblings[index - 1]) : position(siblings[index]) - 2048) + position(siblings[index])) / 2
+      // Legacy collections and concurrent edits can have equal ranks. Rebalance
+      // only when no numeric gap remains, preserving the requested global order.
+      if (!Number.isFinite(entity.todoPosition) ||
+          (index > 0 && entity.todoPosition <= position(siblings[index - 1])) ||
+          (index < siblings.length && entity.todoPosition >= position(siblings[index]))) {
+        siblings.splice(index, 0, entity)
+        siblings.forEach((link, order) => {
+          const rank = (order + 1) * 1024
+          if (link.todoPosition !== rank) { link.todoPosition = rank; link.updatedAt = now }
+        })
+      }
       entity.updatedAt = now
       break
     }

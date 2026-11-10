@@ -45,7 +45,7 @@ export default function FluidBackground() {
       canvas.hidden = true
       return
     }
-    const visibility = () => { if (document.hidden) effect.stop(); else effect.start() }
+    const visibility = () => { if (document.hidden || canvas.hidden) effect.stop(); else effect.start() }
     const lost = (event: Event) => { event.preventDefault(); effect.stop(); canvas.hidden = true }
     document.addEventListener('visibilitychange', visibility)
     canvas.addEventListener('webglcontextlost', lost)

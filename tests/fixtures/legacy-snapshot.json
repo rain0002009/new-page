@@ -1,7 +1,7 @@
 {
   "format": "page-garden-snapshot",
   "version": 1,
-  "id": "c87b5dda6067fcaa7cfd533b87e3d131",
+  "id": "2ee54aef37897f940fab51ef2d7c243f",
   "parents": [],
   "document": {
     "format": "new-page",
@@ -59,8 +59,47 @@
       "legacyB": {
         "id": "legacyB",
         "title": "历史待办 B",
-        "parentId": "legacyCollection",
+        "parentId": "legacyCollectionB",
+        "position": 1024,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "link",
+        "url": "https://react.dev/",
+        "icon": "",
+        "note": "",
+        "todo": true
+      },
+      "legacyCollectionB": {
+        "id": "legacyCollectionB",
+        "title": "历史收藏 B",
+        "parentId": "legacySpace",
         "position": 2048,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "collection",
+        "collapsed": false
+      },
+      "legacyCollectionC": {
+        "id": "legacyCollectionC",
+        "title": "历史收藏 C",
+        "parentId": "legacySpace",
+        "position": 3072,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "collection",
+        "collapsed": false
+      },
+      "legacyC": {
+        "id": "legacyC",
+        "title": "历史待办 C",
+        "parentId": "legacyCollectionC",
+        "position": 1024,
         "updatedAt": 1,
         "deletedAt": null,
         "deletedBy": null,
