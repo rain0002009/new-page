@@ -3,12 +3,13 @@ import { QRCodeSVG } from 'qrcode.react'
 import { Cloud, LoaderCircle, RefreshCw, ScanLine } from 'lucide-react'
 import { rpc, type Snapshot } from '../core/protocol'
 import type { QrState, QuarkConnection } from '../core/quark/auth'
-import { quarkOrigins } from '../core/quark/transport'
+import { allowQuarkAccess, loadQuarkQr } from './quark-login'
 import { Button } from './ui'
 
 export default function QuarkConnectionForm({ connected, initial, done, onError }: { connected: boolean; initial?: Snapshot['connection']; done: (data: Snapshot) => void; onError: (message: string) => void }) {
   const [qr, setQr] = useState<QrState | null>(null)
   const [busy, setBusy] = useState(false)
+  const [stage, setStage] = useState<'permission' | 'qr' | null>(null)
   const [nickname, setNickname] = useState('')
   const [mode, setMode] = useState<'switch' | 'migrate'>(initial?.kind === 'webdav' ? 'migrate' : 'switch')
   const [pending, setPending] = useState<{ config: QuarkConnection; message: string } | null>(null)
@@ -23,15 +24,15 @@ export default function QuarkConnectionForm({ connected, initial, done, onError 
     else if (result.snapshot) { setQr(null); setAuthenticated(null); setPending(null); setError(''); state.done(result.snapshot) }
   }
   async function start() {
-    setBusy(true); setError(''); setPending(null); setAuthenticated(null)
+    setBusy(true); setStage('permission'); setError(''); setPending(null); setAuthenticated(null)
     try {
-      const allowed = await chrome.permissions.request({ origins: quarkOrigins, permissions: ['webRequest', 'declarativeNetRequestWithHostAccess'] })
-      if (!allowed) throw new Error('需要授权访问夸克网盘，才能扫码和自动保存')
-      const result = await rpc({ type: 'quark-qr-start' })
+      await allowQuarkAccess()
+      setStage('qr')
+      const result = await loadQuarkQr()
       if (!result.qr) throw new Error('二维码获取失败，请重试')
       setQr(result.qr)
     } catch (error) { setError(error instanceof Error ? error.message : '获取二维码失败') }
-    finally { setBusy(false) }
+    finally { setBusy(false); setStage(null) }
   }
   useEffect(() => {
     if (!qr || qr.status !== 'pending') return
@@ -74,7 +75,7 @@ export default function QuarkConnectionForm({ connected, initial, done, onError 
     {pending ? <div className="confirmation"><p>{pending.message}</p><Button tone="primary" disabled={busy} onClick={() => {
       setBusy(true)
       void connect(pending.config, true).catch(error => setError(error instanceof Error ? error.message : '连接失败')).finally(() => setBusy(false))
-    }}>确认合并</Button><Button onClick={() => setPending(null)}>取消</Button></div> : <Button tone="primary" disabled={busy} onClick={() => void start()}>{busy ? <LoaderCircle size={17} className="animate-spin" /> : qr ? <RefreshCw size={17} /> : <Cloud size={17} />}{busy ? '正在获取二维码…' : qr ? '刷新二维码' : connected ? '重新扫码 / 切换账号' : '扫码登录夸克'}</Button>}
+    }}>确认合并</Button><Button onClick={() => setPending(null)}>取消</Button></div> : <Button tone="primary" disabled={busy} onClick={() => void start()}>{busy ? <LoaderCircle size={17} className="animate-spin" /> : qr ? <RefreshCw size={17} /> : <Cloud size={17} />}{busy ? stage === 'permission' ? '正在检查 Chrome 授权…' : stage === 'qr' ? '正在获取二维码…' : '正在读取收藏…' : qr ? '刷新二维码' : connected ? '重新扫码 / 切换账号' : '扫码登录夸克'}</Button>}
     <p className="privacy-note">收藏先保存到本机，再自动上传到夸克的「拾页收藏」目录。登录信息只保存在当前设备。</p>
   </div>
 }

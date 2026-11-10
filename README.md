@@ -20,7 +20,7 @@ pnpm build:chrome
 
 ## 使用
 
-首次打开点击“扫码登录夸克”，授权扩展访问夸克和上传服务，再使用夸克 App 扫码确认。昵称可选，默认使用夸克昵称。空数据源会初始化“我的空间”和“日常收藏”；已有数据源直接读取收藏。登录过期可在设置中重新扫码，本地内容仍可编辑。
+扩展安装时声明夸克和上传服务的固定域名权限。首次打开点击“扫码登录夸克”，直接显示二维码，再使用夸克 App 扫码确认。昵称可选，默认使用夸克昵称。空数据源会初始化“我的空间”和“日常收藏”；已有数据源直接读取收藏。登录过期可在设置中重新扫码，本地内容仍可编辑。
 
 已有 WebDAV 数据仍可使用：点击“WebDAV”连接；之后在设置中选择“夸克网盘”，默认提供“把当前收藏迁移到该账号”。不会要求升级或部署你原来的 WebDAV Worker。
 
@@ -59,7 +59,7 @@ pnpm test
 
 自动化只把测试副本的夸克 API 地址映射至隔离 HTTPS 服务，生产包仍调用真实夸克；不使用真实账号或网络数据。另已在隔离 Chrome 中确认真实夸克匿名二维码接口可以显示登录二维码；真实账号的扫码确认及上传仍需用户安装后验证，不能将夹具通过视为完整真实服务验收。
 
-默认使用 Windows 安装的 `C:/Program Files/Google/Chrome/Application/chrome.exe`。其他位置可设置 `CHROME_PATH`。测试使用 Chrome DevTools 的扩展加载能力，需要支持 `Extensions.loadUnpacked` 的 Chrome 版本；仅在隔离的测试配置中启用该调试能力。测试副本预授权 localhost，生产包仍在用户点击连接时申请指定服务器权限。
+默认使用 Windows 安装的 `C:/Program Files/Google/Chrome/Application/chrome.exe`。其他位置可设置 `CHROME_PATH`。测试使用 Chrome DevTools 的扩展加载能力，需要支持 `Extensions.loadUnpacked` 的 Chrome 版本；仅在隔离的测试配置中启用该调试能力。测试副本把固定夸克域名替换为 localhost，保持交付包声明的 API 权限不变；WebDAV 在用户点击连接时申请指定服务器权限。
 
 ## 代码导航
 

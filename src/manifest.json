@@ -18,14 +18,17 @@
   "permissions": [
     "storage",
     "tabs",
-    "alarms"
+    "alarms",
+    "webRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://*.quark.cn/*",
+    "https://*.uc.cn/*",
+    "https://*.aliyuncs.com/*"
   ],
   "optional_host_permissions": [
     "https://*/*"
-  ],
-  "optional_permissions": [
-    "webRequest",
-    "declarativeNetRequestWithHostAccess"
   ],
   "icons": {
     "16": "images/icon-16.png",

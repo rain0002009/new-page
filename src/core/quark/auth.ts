@@ -1,6 +1,7 @@
 import { QuarkClient } from './client'
 import { mergeCookieString } from './transport'
 import type { QuarkEntry } from './types'
+import type { LoginProgress } from './progress'
 
 export type QuarkConnection = { kind: 'quark'; accountId: string; folderId: string; nickname: string }
 export type QrState = { id: string; url: string; expiresAt: string; status: 'pending' | 'expired' | 'confirmed' }
@@ -39,11 +40,13 @@ export async function accountClient(config: QuarkConnection) {
     await edit(state => { if (state.accounts[config.accountId] === previous) state.accounts[config.accountId] = cookie })
   })
 }
-export async function startQr(): Promise<QrState> {
+export async function startQr(progress?: LoginProgress): Promise<QrState> {
+  progress?.('preparing')
   let cookie = ''
   const client = new QuarkClient('', updates => { cookie = mergeCookieString(cookie, updates) })
-  const result = await client.getTokenForQrcodeLogin()
+  const result = await client.getTokenForQrcodeLogin(progress)
   const login: Login = { id: crypto.randomUUID(), token: result.qrToken, url: result.qrUrl, expiresAt: result.expiresAt, cookie, status: 'pending' }
+  progress?.('storing')
   await edit(state => { state.login = login })
   return publicQr(login)
 }

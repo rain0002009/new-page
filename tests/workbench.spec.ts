@@ -78,9 +78,11 @@ async function openClient(existingProfile?: string, quarkMode = false) {
   await cp(resolve('dist/chrome'), extension, { recursive: true })
   const manifestPath = join(extension, 'manifest.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-  // Pre-authorize only the isolated test server; production still requests its optional origin.
+  // Replace the built-in Quark hosts with the isolated server. Keep the shipped
+  // API permissions unchanged so fresh-install tests cover their initialization.
+  expect(manifest.permissions).toEqual(expect.arrayContaining(['webRequest', 'declarativeNetRequestWithHostAccess']))
+  expect(manifest.host_permissions).toEqual(expect.arrayContaining(['https://*.quark.cn/*', 'https://*.uc.cn/*', 'https://*.aliyuncs.com/*']))
   manifest.host_permissions = ['https://localhost/*', 'https://*.localhost/*']
-  manifest.permissions.push('webRequest', 'declarativeNetRequestWithHostAccess')
   await writeFile(manifestPath, JSON.stringify(manifest))
   // Redirect only the isolated test copy's API origins. Production keeps Quark.
   const backgroundPath = join(extension, 'background/service_worker.js')
@@ -125,6 +127,49 @@ async function connectQuark(page: Page) {
   if (fromSettings) await expect(page.getByText(/当前夸克账号：/)).toBeVisible()
   else await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
 }
+
+test('夸克首次安装直接显示二维码，不依赖运行时新增权限或重新加载', async () => {
+  quark.qrPending = true
+  const { page } = await openClient(undefined, true)
+  await page.evaluate(() => {
+    chrome.permissions.request = async () => { throw new Error('首次扫码不应申请新权限') }
+  })
+  await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
+  await expect(page.getByLabel('夸克登录二维码')).toBeVisible()
+})
+
+test('夸克访问权限未启用时明确提示并恢复登录按钮', async () => {
+  const { page } = await openClient(undefined, true)
+  await page.evaluate(() => {
+    chrome.permissions.contains = async () => false
+  })
+  await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('夸克访问权限未启用')
+  await expect(page.getByRole('button', { name: '扫码登录夸克', exact: true })).toBeEnabled()
+})
+
+test('夸克后台未回复时结束二维码等待并可重试', async () => {
+  quark.qrPending = true
+  const { page } = await openClient(undefined, true)
+  await page.clock.install()
+  await page.evaluate(() => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime)
+    let first = true
+    chrome.runtime.sendMessage = ((...args: Parameters<typeof send>) => {
+      if (first && (args[0] as { type?: string })?.type === 'quark-qr-start') {
+        first = false
+        return new Promise(() => {})
+      }
+      return send(...args)
+    }) as typeof chrome.runtime.sendMessage
+  })
+  await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
+  await expect(page.getByRole('button', { name: '正在获取二维码…', exact: true })).toBeVisible()
+  await page.clock.runFor(31_000)
+  await expect(page.getByRole('alert')).toContainText('二维码请求超时')
+  await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
+  await expect(page.getByLabel('夸克登录二维码')).toBeVisible()
+})
 
 test('夸克扫码后签名上传并轮换 Cookie，重开和另一设备读取收藏', async () => {
   quark.loginRedirect = true

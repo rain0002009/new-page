@@ -5,6 +5,7 @@ import { RevisionChanged } from './webdav'
 import { normalizeRemote, remoteKey, remoteStore, isQuark, type Connection, type RemoteRead } from './remote'
 import { startQr, pollQr } from './quark/auth'
 import { quarkOrigins } from './quark/transport'
+import type { LoginProgress } from './quark/progress'
 
 type Source = { config: Connection; doc: Document; base: Document; etag: string | null; resolvedRevision?: string | null; conflicts: Conflict[]; status: Snapshot['status']; error: string; lastSync: number | null }
 type Root = { active: string | null; sources: Record<string, Source> }
@@ -150,8 +151,15 @@ async function connect(request: ConnectRequest): Promise<Result> {
 }
 export async function handle(request: Request): Promise<Result> {
   if (request.type === 'quark-qr-start' || request.type === 'quark-qr-poll') {
+    const progress: LoginProgress | undefined = request.type === 'quark-qr-start' && request.traceId ? stage => {
+      void chrome.runtime.sendMessage({ type: 'quark-login-stage', traceId: request.traceId, stage }).catch(() => undefined)
+    } : undefined
+    progress?.('permissions')
     if (!await chrome.permissions.contains({ origins: quarkOrigins, permissions: ['webRequest', 'declarativeNetRequestWithHostAccess'] })) throw new Error('请点击扫码登录并授权访问夸克网盘')
-    return request.type === 'quark-qr-start' ? { ok: true, qr: await startQr() } : { ok: true, ...await pollQr(request.id) }
+    if (request.type === 'quark-qr-poll') return { ok: true, ...await pollQr(request.id) }
+    const qr = await startQr(progress)
+    progress?.('responding')
+    return { ok: true, qr }
   }
   if (request.type === 'connect') return connect(request)
   if (request.type === 'sync') {

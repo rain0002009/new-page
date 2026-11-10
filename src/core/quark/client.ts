@@ -1,6 +1,7 @@
 import { md5 } from '@noble/hashes/legacy.js'
 import { mergeCookieString, getResponseCookies, quarkFetch } from './transport'
 import { QuarkApiError, type QuarkDownloadLink, type QuarkEntry, type QuarkUploadTicket } from './types'
+import type { LoginProgress } from './progress'
 
 const QUARK_API_BASE = 'https://drive-pc.quark.cn'
 const QUARK_LOGIN_API_BASE = 'https://uop.quark.cn'
@@ -301,7 +302,7 @@ export class QuarkClient {
     return { nickname, userId }
   }
 
-  async getTokenForQrcodeLogin(): Promise<{ qrToken: string; qrUrl: string; expiresAt: string }> {
+  async getTokenForQrcodeLogin(progress?: LoginProgress): Promise<{ qrToken: string; qrUrl: string; expiresAt: string }> {
     const requestId = crypto.randomUUID()
     const url = new URL('/cas/ajax/getTokenForQrcodeLogin', QUARK_LOGIN_API_BASE)
     for (const [key, value] of Object.entries({
@@ -314,9 +315,10 @@ export class QuarkClient {
     const response = await quarkFetch(url, {
       method: 'GET',
       headers: this.createHeaders(),
-    })
+    }, progress)
     await this.captureCookieUpdates(response)
 
+    progress?.('parsing')
     const payload = (await response.json().catch(() => null)) as QuarkQrTokenEnvelope | null
     if (!response.ok || payload?.status !== 2000000 || payload?.message !== 'ok') {
       throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)

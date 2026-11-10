@@ -1,5 +1,6 @@
 // Quark's web API needs browser-forbidden request headers. Scope each temporary
 // rule to this extension and exactly one URL; never change normal browsing.
+import type { LoginProgress } from './progress'
 export const quarkOrigins = ['https://*.quark.cn/*', 'https://*.uc.cn/*', 'https://*.aliyuncs.com/*']
 const ruleId = 73101
 let queue: Promise<unknown> = Promise.resolve()
@@ -27,8 +28,10 @@ function allowedUrl(url: URL) {
     return url.hostname === match[2] || (match[1] && url.hostname.endsWith(`.${match[2]}`))
   })
 }
-export function quarkFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
+export function quarkFetch(input: string | URL, init: RequestInit = {}, progress?: LoginProgress): Promise<Response> {
+  progress?.('queued')
   const task = queue.then(async () => {
+    progress?.('headers')
     let url = new URL(input), method = init.method ?? 'GET', body = init.body
     const headers = new Headers(init.headers), headerRules: chrome.declarativeNetRequest.ModifyHeaderInfo[] = []
     let cookie = headers.get('cookie') ?? ''
@@ -66,6 +69,7 @@ export function quarkFetch(input: string | URL, init: RequestInit = {}): Promise
         }] })
         let response: Response
         try {
+          progress?.('fetching')
           response = await fetch(url, { ...init, method, body, headers, credentials: 'omit', cache: 'no-store', redirect: 'manual', signal })
         } catch { throw new Error('暂时无法连接夸克网盘，本地修改已保留，请检查网络后重试') }
         updates.push(...received)
@@ -82,6 +86,7 @@ export function quarkFetch(input: string | URL, init: RequestInit = {}): Promise
         cookieUpdates.set(response, updates)
         return response
       } finally {
+        progress?.('cleanup')
         chrome.webRequest.onHeadersReceived.removeListener(listener)
         await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] }).catch(() => undefined)
       }

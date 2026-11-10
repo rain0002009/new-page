@@ -12,7 +12,7 @@ export const syncStatusLabels: Record<Snapshot['status'], string> = { synced: 'å
 export type ConnectRequest = { type: 'connect'; config: Connection; nickname: string; mode: 'switch' | 'migrate'; confirmed?: boolean }
 export type Request =
   | { type: 'snapshot' }
-  | { type: 'quark-qr-start' }
+  | { type: 'quark-qr-start'; traceId?: string }
   | { type: 'quark-qr-poll'; id: string }
   | { type: 'action'; sourceId: string; action: Action }
   | ConnectRequest
