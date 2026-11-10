@@ -10,10 +10,10 @@ const button = tv({
 export function Button({ tone, size, className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'primary' | 'ghost' | 'danger'; size?: 'regular' | 'icon' }) {
   return <button type="button" className={button({ tone, size, className })} {...props} onMouseDown={event => { event.stopPropagation(); props.onMouseDown?.(event) }} onTouchStart={event => { event.stopPropagation(); props.onTouchStart?.(event) }} />
 }
-export function Modal({ title, children, close, wide = false }: { title: string; children: ReactNode; close: () => void; wide?: boolean }) {
+export function Modal({ title, children, close, wide = false, className = '' }: { title: string; children: ReactNode; close: () => void; wide?: boolean; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null)
-  useEffect(() => { ref.current?.showModal() }, [])
-  return <dialog ref={ref} aria-label={title} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={event => { event.preventDefault(); close() }} onClick={event => { if (event.target === event.currentTarget) close() }}>
+  useEffect(() => { ref.current?.showModal(); ref.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus() }, [])
+  return <dialog ref={ref} aria-label={title} className={`modal ${wide ? 'modal-wide' : ''} ${className}`} onCancel={event => { event.preventDefault(); close() }} onClick={event => { if (event.target === event.currentTarget) close() }}>
     <div className="modal-header"><h2>{title}</h2><Button size="icon" aria-label="关闭弹窗" onClick={close}><X size={19} /></Button></div>
     {children}
   </dialog>

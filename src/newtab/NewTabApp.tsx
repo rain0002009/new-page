@@ -12,7 +12,7 @@ import TodoList from './TodoList'
 import FluidBackground from './FluidBackground'
 import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
-import { Button } from './ui'
+import { Button, Modal } from './ui'
 import './styles.css'
 
 const stateKey = ['workspace']
@@ -27,13 +27,14 @@ function Workbench() {
   const [message, setMessage] = useState('')
   const [selected, setSelected] = useState('')
   const [page, setPage] = useState('space')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
   useEffect(() => {
     const listener = (event: { type: string }) => { if (event.type === 'changed') void client.invalidateQueries({ queryKey: stateKey }) }
     chrome.runtime.onMessage.addListener(listener)
     const online = () => { if (data?.sourceId) void rpc({ type: 'sync', sourceId: data.sourceId }) }
     const shortcut = (event: KeyboardEvent) => {
-      if (event.key === '/' && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement) && !document.querySelector('dialog[open]')) { event.preventDefault(); setPage('search') }
+      if (event.key === '/' && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement) && !document.querySelector('dialog[open]')) { event.preventDefault(); setSearchOpen(true) }
     }
     if (data?.sourceId) online()
     window.addEventListener('online', online)
@@ -57,6 +58,7 @@ function Workbench() {
   const links = all.filter((e): e is Link => e.kind === 'link')
   const status = syncStatusLabels[data.status]
   function locate(link: Link) {
+    setSearchOpen(false)
     const collection = doc.entities[link.parentId!]
     setSelected(collection.parentId!); setPage('space')
     if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
@@ -68,7 +70,7 @@ function Workbench() {
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className="spaces" aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
       <div className="nav-section"><span className="eyebrow">工作台</span></div><nav>
         <button aria-label={`Todo ${links.filter(l => l.todo).length}`} title="Todo" className={`nav-item ${page === 'todo' ? 'selected' : ''}`} onClick={() => setPage('todo')}><Bookmark size={18} /><span>Todo</span><span className="count">{links.filter(l => l.todo).length}</span></button>
-        <button aria-label="搜索收藏" title="搜索收藏" className={`nav-item ${page === 'search' ? 'selected' : ''}`} onClick={() => setPage('search')}><Search size={18} /><span>搜索收藏</span><kbd>/</kbd></button>
+        <button aria-label="搜索收藏" title="搜索收藏" className={`nav-item ${searchOpen ? 'selected' : ''}`} onClick={() => setSearchOpen(true)}><Search size={18} /><span>搜索收藏</span><kbd>/</kbd></button>
       </nav>
       <div className="sidebar-bottom"><button aria-label="设置" title="设置" className={`nav-item ${page === 'settings' ? 'selected' : ''}`} onClick={() => setPage('settings')}><Settings2 size={18} /><span>设置</span></button><button className="sync-state" onClick={() => setPage('settings')}><span className={`status-dot ${data.status}`} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
@@ -77,10 +79,10 @@ function Workbench() {
       <div className="heading-row"><header className="page-header"><h1>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
       {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <CollectionSection key={collection.id} collection={collection} doc={doc} act={act} edit={setEditor} />)}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
-      {page === 'search' && <SearchView doc={doc} act={act} edit={setEditor} locate={locate} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </main>
     <Button tone="primary" className="inbox-toggle" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} />
+    {searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} wide className="search-modal"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}
     {editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}
   </div></DragBoard>
 }

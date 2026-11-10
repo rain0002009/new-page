@@ -429,11 +429,24 @@ test('创建空间与收藏块，编辑自动保存，并从全空间搜索定�
   await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
   await page.reload()
   await page.getByRole('button', { name: /搜索收藏/ }).click()
+  await expect(page.getByRole('dialog', { name: '搜索收藏', exact: true })).toBeVisible()
   await page.getByRole('searchbox', { name: '搜索全部收藏' }).fill('并发渲染')
   await expect(page.getByRole('link', { name: 'React 参考', exact: true })).toBeVisible()
+  const result = page.getByRole('dialog', { name: '搜索收藏', exact: true }).getByRole('article')
+  await result.getByRole('button', { name: '编辑链接', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '编辑链接', exact: true })).toBeVisible()
+  await page.getByRole('dialog', { name: '编辑链接', exact: true }).getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '搜索收藏', exact: true })).toBeVisible()
+  await page.screenshot({ path: 'test-results/search-dialog.png', fullPage: true })
   await page.getByRole('button', { name: '定位收藏', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '搜索收藏', exact: true })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '工作', exact: true })).toBeVisible()
   await expect(page.getByText('并发渲染的备忘', { exact: true })).toBeVisible()
+  await page.keyboard.press('/')
+  await expect(page.getByRole('dialog', { name: '搜索收藏', exact: true }).getByRole('searchbox')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '工作', exact: true })).toBeVisible()
 })
 
 async function drag(page: Page, source: Locator, target: Locator) {
@@ -446,7 +459,130 @@ async function drag(page: Page, source: Locator, target: Locator) {
   await page.mouse.move(from.x + 14, from.y + 12, { steps: 5 })
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 16 })
   await page.mouse.up()
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
 }
+
+test('收藏卡片移除旧移动图标，空备注不保留多余底部高度', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '紧凑收藏')
+  const card = page.getByRole('article', { name: '链接 紧凑收藏', exact: true })
+  await card.hover()
+  await expect(card.getByRole('button', { name: '移动链接', exact: true })).toHaveCount(0)
+  expect((await card.boundingBox())!.height).toBeLessThan(145)
+})
+
+test('拖动保留完整卡片和原尺寸，落点显示等尺寸占位', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '保留内容的卡片')
+  const card = page.getByRole('article', { name: '链接 保留内容的卡片', exact: true })
+  await card.getByRole('button', { name: '编辑链接', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('备注', { exact: true }).fill('拖动时这段备注也完整保留')
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await addLink(page, '目标卡片')
+  const source = (await card.boundingBox())!
+  const target = (await page.getByRole('article', { name: '链接 目标卡片', exact: true }).boundingBox())!
+  await page.mouse.move(source.x + 65, source.y + 35)
+  await page.mouse.down()
+  await page.mouse.move(target.x + target.width / 2, target.y + 35, { steps: 20 })
+  const preview = page.locator('.drag-preview')
+  await expect(preview.getByText('拖动时这段备注也完整保留', { exact: true })).toBeVisible()
+  await expect(preview.getByText('react.dev', { exact: true })).toBeVisible()
+  const floating = (await preview.boundingBox())!
+  expect(Math.abs(floating.width - source.width)).toBeLessThan(2)
+  expect(Math.abs(floating.height - source.height)).toBeLessThan(2)
+  await expect(card.getByText('拖动时这段备注也完整保留', { exact: true })).not.toBeVisible()
+  await expect.poll(async () => Math.abs((await card.boundingBox())!.x - target.x)).toBeLessThan(3)
+  await page.screenshot({ path: 'test-results/card-drag-placeholder.png', fullPage: true })
+  await page.mouse.up()
+  await expect(page.getByRole('region', { name: '收藏块 日常收藏' }).getByRole('link')).toHaveText(['目标卡片', '保留内容的卡片'])
+})
+
+test('待选网页拖入先显示落点，占位与预览平滑过渡为收藏卡片', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+  const tab = await context.newPage()
+  await tab.goto(`${origin}/web/react`)
+  const inbox = page.getByRole('article', { name: '待选 React 文档', exact: true })
+  const from = (await inbox.boundingBox())!
+  const collection = page.getByRole('region', { name: '收藏块 日常收藏' })
+  const target = (await collection.boundingBox())!
+  await page.mouse.move(from.x + 70, from.y + 25)
+  await page.mouse.down()
+  await page.mouse.move(target.x + 100, target.y + 95, { steps: 20 })
+  const preview = page.locator('.drag-preview')
+  await expect(page.getByRole('img', { name: '收藏放置位置' })).toBeVisible()
+  expect(Math.abs((await preview.boundingBox())!.height - from.height)).toBeLessThan(2)
+  await page.screenshot({ path: 'test-results/inbox-drop-placeholder.png', fullPage: true })
+  const frames = page.evaluate(async () => {
+    const heights: { floating: number; saved: number }[] = []
+    const start = performance.now()
+    while (performance.now() - start < 1200) {
+      const floating = document.querySelector('.drag-preview')?.getBoundingClientRect()
+      const saved = document.querySelector('article[aria-label="链接 React 文档"]')?.getBoundingClientRect()
+      if (floating && saved) heights.push({ floating: floating.height, saved: saved.height })
+      await new Promise(requestAnimationFrame)
+    }
+    return heights
+  })
+  await page.mouse.up()
+  const card = page.getByRole('article', { name: '链接 React 文档', exact: true })
+  expect((await frames).some(frame => frame.floating > from.height + 3 && frame.floating < frame.saved - 3)).toBe(true)
+  await expect(preview).toHaveCount(0)
+  await expect(card).toBeVisible()
+  await expect(collection.getByRole('link')).toHaveCount(1)
+  expect(tab.isClosed()).toBe(false)
+})
+
+test('跨收藏块的落点占位稳定，折叠块取消拖动后保持原状', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '跨块移动项')
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('名称').fill('来源块')
+  await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  const destination = page.getByRole('region', { name: '收藏块 日常收藏' })
+  const sourceBlock = page.getByRole('region', { name: '收藏块 来源块' })
+  await drag(page, destination.getByRole('article'), sourceBlock)
+  await addLink(page, '目标首项')
+  const sourceCard = sourceBlock.getByRole('article')
+  const from = (await sourceCard.boundingBox())!
+  const target = (await destination.getByRole('article').boundingBox())!
+  await page.mouse.move(from.x + 60, from.y + 30)
+  await page.mouse.down()
+  await page.mouse.move(target.x + 60, target.y + 30, { steps: 20 })
+  const marker = page.getByRole('img', { name: '收藏放置位置' })
+  await expect(marker).toBeVisible()
+  const positions = await page.evaluate(async () => {
+    const xs: number[] = []
+    const start = performance.now()
+    while (performance.now() - start < 400) {
+      xs.push(document.querySelector('[aria-label="收藏放置位置"]')!.getBoundingClientRect().x)
+      await new Promise(requestAnimationFrame)
+    }
+    return xs
+  })
+  expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(3)
+  expect(Math.abs((await marker.boundingBox())!.x - target.x)).toBeLessThan(3)
+  await page.mouse.up()
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
+  await expect(destination.getByRole('article')).toHaveCount(2)
+  await expect(sourceBlock.getByRole('article')).toHaveCount(0)
+  await sourceBlock.getByRole('button', { name: '折叠 来源块', exact: true }).click()
+  const moving = (await destination.getByRole('article').first().boundingBox())!
+  const collapsed = (await sourceBlock.boundingBox())!
+  await page.mouse.move(moving.x + 60, moving.y + 30)
+  await page.mouse.down()
+  await page.mouse.move(collapsed.x + 120, collapsed.y + 25, { steps: 20 })
+  await expect(marker).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
+  await expect(marker).toHaveCount(0)
+  await expect(sourceBlock.getByRole('button', { name: '展开 来源块', exact: true })).toBeVisible()
+  await expect(destination.getByRole('article')).toHaveCount(2)
+})
 
 test('Todo 使用独立清单排序，标题可打开，新加入和重新加入置末尾，重开与夸克同步保留', async () => {
   test.setTimeout(90_000)
@@ -966,6 +1102,7 @@ for (const provider of ['夸克', 'WebDAV'] as const) test(`${provider} 旧版�
   await expect.poll(async () => (await page.locator('.drag-preview').boundingBox())!.y).toBeGreaterThan(firstY)
   await page.keyboard.press('Space', { delay: 100 })
   await expect(list.getByRole('link')).toHaveText(['历史待办 A', '历史待办 B', '历史待办 C'])
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
   await list.getByRole('listitem').last().focus()
   await page.keyboard.press('Space', { delay: 100 })
   await expect(page.locator('.drag-preview')).toBeVisible()
@@ -974,6 +1111,7 @@ for (const provider of ['夸克', 'WebDAV'] as const) test(`${provider} 旧版�
   await expect.poll(async () => (await page.locator('.drag-preview').boundingBox())!.y).toBeLessThan(lastY)
   await page.keyboard.press('Space', { delay: 100 })
   await expect(list.getByRole('link')).toHaveText(['历史待办 A', '历史待办 C', '历史待办 B'])
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
   const tab = await context.newPage()
   await tab.goto(`${origin}/web/react`)
   const originalUrl = page.url()

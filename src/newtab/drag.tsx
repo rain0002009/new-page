@@ -1,22 +1,42 @@
-import { useCallback, useState, type ReactNode } from 'react'
-import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, pointerWithin, useSensor, useSensors, type CollisionDetection, type DragEndEvent } from '@dnd-kit/core'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DropAnimation } from '@dnd-kit/core'
 import { useSortable, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { children, todos, type Document, type Entity, type LinkInput } from '../core/model'
 import type { Act } from './Editor'
+import DragPreview, { animateDrop, snapshotElement } from './DragPreview'
 
 type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string } | { kind: 'tab'; tab: LinkInput; title: string }
 
-export function useDragItem(id: string, item: DragItem) {
-  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: item, disabled: { droppable: item.kind === 'tab' } })
-  const ref = useCallback((node: HTMLElement | null) => { setNodeRef(node); setActivatorNodeRef(node) }, [setNodeRef, setActivatorNodeRef])
-  return {
+export function useDragItem(id: string, item: DragItem, disabled = false) {
+  const node = useRef<HTMLElement | null>(null)
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: { ...item, node }, disabled: { draggable: disabled, droppable: disabled || item.kind === 'tab' } })
+  const ref = useCallback((element: HTMLElement | null) => { node.current = element; setNodeRef(element); setActivatorNodeRef(element) }, [setNodeRef, setActivatorNodeRef])
+  return disabled ? {} : {
     ref,
     ...attributes, role: undefined, ...listeners,
-    style: { transform: CSS.Transform.toString(transform), transition },
+    style: { transform: CSS.Translate.toString(transform), transition },
     'data-dragging': isDragging || undefined,
     'data-drop-target': isOver || undefined,
+    'data-drag-id': id,
   }
+}
+
+export function useCollectionPlaceholder(doc: Document, collectionId: string) {
+  const { active, over } = useDndContext()
+  const source = active?.data.current as DragItem | undefined
+  const target = over?.data.current as DragItem | undefined
+  if (!source || !target || (source.kind !== 'tab' && source.kind !== 'link') || (target.kind !== 'link' && target.kind !== 'collection')) return null
+  const parentId = target.kind === 'collection' ? target.entityId : doc.entities[target.entityId]?.parentId
+  if (parentId !== collectionId) return null
+  if (source.kind === 'link' && doc.entities[source.entityId]?.parentId === collectionId) return null
+  if (source.kind === 'link' && doc.entities[doc.entities[source.entityId]?.parentId ?? '']?.parentId !== doc.entities[collectionId]?.parentId) return null
+  return { beforeId: source.kind === 'link' && target.kind === 'link' ? target.entityId : undefined, height: source.kind === 'link' ? active!.rect.current.initial?.height : undefined, target }
+}
+
+export function CollectionPlaceholder({ collectionId, target, height }: { collectionId: string; target: DragItem; height?: number }) {
+  const { setNodeRef } = useDroppable({ id: `drop-slot:${collectionId}`, data: target })
+  return <div ref={setNodeRef} className="card-placeholder" role="img" aria-label="收藏放置位置" style={{ height }} />
 }
 
 const collision: CollisionDetection = args => {
@@ -41,34 +61,56 @@ function beforeId(siblings: Entity[], source: string, target: string) {
 }
 
 export function DragBoard({ doc, act, children: content }: { doc: Document; act: Act; children: ReactNode }) {
-  const [dragging, setDragging] = useState<DragItem | null>(null)
+  const [dragging, setDragging] = useState<HTMLElement | null>(null)
+  const dropTargets = useRef(new WeakMap<HTMLElement, Promise<HTMLElement | null>>())
+  const resolveDrop = useRef<(node: HTMLElement | null) => void>(() => {})
+  const dropAnimation: DropAnimation = async args => {
+    const snapshot = args.dragOverlay.node.querySelector<HTMLElement>('.drag-snapshot')
+    const destination = snapshot && dropTargets.current.get(snapshot)
+    await animateDrop(args, destination ? await destination : null)
+  }
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
-  function finish({ active, over }: DragEndEvent) {
+  async function finish({ active, over }: DragEndEvent) {
     setDragging(null)
     const source = active.data.current as DragItem | undefined
     const target = over?.data.current as DragItem | undefined
-    if (!source || !target || active.id === over?.id || target.kind === 'tab') return
+    const original = active.data.current?.node.current as HTMLElement | null
+    const resolve = resolveDrop.current
+    const settle = async (success: boolean, collectionId?: string) => {
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      const destination = collectionId ? document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(collectionId)}"] .card-grid > .link-card:last-child`) : document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(String(active.id))}"]`)
+      resolve(success ? destination ?? original : original)
+    }
+    if (!source || !target || active.id === over?.id || target.kind === 'tab') { resolve(original); return }
     if (source.kind === 'todo') {
-      if (target.kind === 'todo') void act({ type: 'sort-todo', id: source.entityId, beforeId: beforeId(todos(doc), source.entityId, target.entityId) })
+      if (target.kind === 'todo') await settle(await act({ type: 'sort-todo', id: source.entityId, beforeId: beforeId(todos(doc), source.entityId, target.entityId) }))
+      else resolve(original)
       return
     }
     const entity = doc.entities[target.entityId]
-    if (!entity) return
+    if (!entity) { resolve(original); return }
     if (source.kind === 'tab') {
       const parentId = target.kind === 'collection' ? entity.id : target.kind === 'link' ? entity.parentId : null
-      if (parentId) void act({ type: 'add-links', parentId, links: [source.tab] })
+      if (parentId) await settle(await act({ type: 'add-links', parentId, links: [source.tab] }), parentId)
+      else resolve(original)
       return
     }
     const moving = doc.entities[source.entityId]
-    if (!moving) return
+    if (!moving) { resolve(original); return }
     if (source.kind === target.kind) {
-      void act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind), moving.id, entity.id) })
+      await settle(await act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind), moving.id, entity.id) }))
     } else if (source.kind === 'link' && (target.kind === 'collection' || target.kind === 'space')) {
-      void act({ type: 'move', id: moving.id, parentId: entity.id })
-    }
+      await settle(await act({ type: 'move', id: moving.id, parentId: entity.id }))
+    } else resolve(original)
   }
-  return <DndContext sensors={sensors} collisionDetection={collision} onDragStart={({ active }) => setDragging(active.data.current as DragItem)} onDragEnd={finish} onDragCancel={() => setDragging(null)} accessibility={{ screenReaderInstructions: { draggable: '按空格开始拖动，使用方向键调整位置，再按空格放下，Escape 取消。' } }}>
+  return <DndContext sensors={sensors} collisionDetection={collision} onDragStart={({ active }) => {
+    const node = active.data.current?.node.current as HTMLElement | null
+    const snapshot = node ? snapshotElement(node) : null
+    const destination = new Promise<HTMLElement | null>(resolve => { resolveDrop.current = resolve })
+    if (snapshot) dropTargets.current.set(snapshot, destination)
+    setDragging(snapshot)
+  }} onDragEnd={event => { void finish(event) }} onDragCancel={({ active }) => { resolveDrop.current(active.data.current?.node.current ?? null); setDragging(null) }} accessibility={{ screenReaderInstructions: { draggable: '按空格开始拖动，使用方向键调整位置，再按空格放下，Escape 取消。' } }}>
     {content}
-    <DragOverlay dropAnimation={null} zIndex={50}>{dragging && <div className="drag-preview" aria-hidden="true">{dragging.title}</div>}</DragOverlay>
+    <DragOverlay dropAnimation={dropAnimation} zIndex={50}>{dragging && <DragPreview element={dragging} />}</DragOverlay>
   </DndContext>
 }
