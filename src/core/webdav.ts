@@ -29,9 +29,9 @@ export class WebDAV {
     if (response.status === 401 || response.status === 403) throw new Error('WebDAV 认证或权限失败，请检查用户名、密码及目录权限')
     return response
   }
-  private strongTag(response: Response) {
+  private strongTag(response: Response, method: 'GET' | 'PUT') {
     const tag = response.headers.get('ETag')
-    if (!tag || !/^"[^"\r\n]*"$/.test(tag)) throw new Error('此 WebDAV 未提供可靠的文件版本，无法安全同步；本地数据已保留')
+    if (!tag || !/^"[^"\r\n]*"$/.test(tag)) throw new Error(`此 WebDAV 的 ${method} 响应未提供强 ETag（文件版本标识），无法安全同步。请升级服务端以支持强 ETag 和条件写入；已有本地数据未被删除`)
     return tag
   }
   async verify() {
@@ -45,9 +45,11 @@ export class WebDAV {
       const first = await this.request(probe, 'PUT', { 'If-None-Match': '*', 'Content-Type': 'application/json' }, '{"probe":true}')
       if (!first.ok) throw new Error(`WebDAV 不允许写入（${first.status}）`)
       created = true
+      // Validate the upload response before enabling a source or uploading user data.
+      this.strongTag(first, 'PUT')
       const read = await this.request(probe, 'GET')
       if (!read.ok) throw new Error('WebDAV 不允许读取已写入的文件')
-      this.strongTag(read)
+      this.strongTag(read, 'GET')
       const refused = await this.request(probe, 'PUT', { 'If-Match': `"invalid-${crypto.randomUUID()}"`, 'Content-Type': 'application/json' }, '{"probe":false}')
       const duplicate = await this.request(probe, 'PUT', { 'If-None-Match': '*', 'Content-Type': 'application/json' }, '{"probe":false}')
       if (refused.status !== 412 || duplicate.status !== 412) throw new Error('此 WebDAV 不支持安全的条件写入，无法启用自动同步')
@@ -63,7 +65,7 @@ export class WebDAV {
     if (text.length > 15_000_000) throw new Error('远端文件过大，请先导出备份并整理数据')
     let data: unknown
     try { data = JSON.parse(text) } catch { throw new Error('远端文件不是有效的收藏数据，原文件未被覆盖') }
-    return { doc: readDocument(data), etag: this.strongTag(response) }
+    return { doc: readDocument(data), etag: this.strongTag(response, 'GET') }
   }
   async write(doc: Document, etag: string | null): Promise<string> {
     const response = await this.request(`${this.folder}data-v1.json`, 'PUT', {
@@ -72,6 +74,6 @@ export class WebDAV {
     if (response.status === 412) throw new RevisionChanged('远端已改变，正在重新合并')
     if (!response.ok) throw new Error(`上传失败（${response.status}），本地修改已保留`)
     // Do not GET a potentially newer revision here and attribute its ETag to this write.
-    return this.strongTag(response)
+    return this.strongTag(response, 'PUT')
   }
 }

@@ -9,6 +9,8 @@ let server: Server
 let origin: string
 let unavailable = false
 let unsafeWrites = false
+let omitGetTag = false
+let omitPutTag = false
 let rejectNextWrite = false
 let suspendDataWrites = false
 const files = new Map<string, { body: string; revision: number }>()
@@ -34,7 +36,7 @@ test.beforeAll(async () => {
     const file = files.get(path)
     if (req.method === 'GET') {
       if (!file) { res.writeHead(404).end(); return }
-      res.writeHead(200, { ETag: `"${file.revision}"`, 'Content-Type': 'application/json' }).end(file.body)
+      res.writeHead(200, { ...(!omitGetTag ? { ETag: `"${file.revision}"` } : {}), 'Content-Type': 'application/json' }).end(file.body)
       return
     }
     if (req.method === 'PUT') {
@@ -48,7 +50,7 @@ test.beforeAll(async () => {
       for await (const chunk of req) body += chunk
       const revision = (file?.revision ?? 0) + 1
       files.set(path, { body, revision })
-      res.writeHead(file ? 204 : 201, { ETag: `"${revision}"` }).end()
+      res.writeHead(file ? 204 : 201, !omitPutTag ? { ETag: `"${revision}"` } : {}).end()
       return
     }
     if (req.method === 'DELETE') { files.delete(path); res.writeHead(204).end(); return }
@@ -58,7 +60,7 @@ test.beforeAll(async () => {
   origin = `https://localhost:${(server.address() as { port: number }).port}`
 })
 
-test.beforeEach(() => { files.clear(); unavailable = false; unsafeWrites = false; rejectNextWrite = false; suspendDataWrites = false })
+test.beforeEach(() => { files.clear(); unavailable = false; unsafeWrites = false; omitGetTag = false; omitPutTag = false; rejectNextWrite = false; suspendDataWrites = false })
 test.afterEach(async () => {
   for (const client of clients.splice(0)) {
     await client.context.close()
@@ -433,6 +435,26 @@ test('认证失败与不安全 WebDAV 明确报错，修正后可以连接', asy
   await page.getByRole('button', { name: '连接并开始', exact: true }).click()
   await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
 })
+
+for (const missing of ['GET', 'PUT'] as const) {
+  test(`WebDAV ${missing} 缺少 ETag 时在连接阶段拒绝，清理探测文件且不上传收藏`, async () => {
+    omitGetTag = missing === 'GET'
+    omitPutTag = missing === 'PUT'
+    const { page } = await openClient()
+    await page.getByLabel('昵称', { exact: true }).fill('Rain')
+    await page.getByLabel('WebDAV 地址').fill(`${origin}/dav/`)
+    await page.getByLabel('用户名', { exact: true }).fill('tester')
+    await page.getByLabel('密码或应用专用密码').fill('secret')
+    await page.getByRole('button', { name: '连接并开始', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText(`${missing} 响应未提供强 ETag`)
+    expect(files.size).toBe(0)
+    await page.reload()
+    await expect(page.getByRole('button', { name: '连接并开始', exact: true })).toBeVisible()
+    omitGetTag = false
+    omitPutTag = false
+    await connect(page)
+  })
+}
 
 test('回收站超过三十天清理正文，旧设备刷新不会复活删除收藏', async () => {
   const first = await openClient()
