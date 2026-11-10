@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Layers3, ListPlus, GripVertical, X } from 'lucide-react'
+import { Layers3, X } from 'lucide-react'
 import { safeIcon, type LinkInput } from '../core/model'
-import { startDrag } from './drag'
+import { useDragItem } from './drag'
 import { Button, SiteIcon } from './ui'
 
 export function useWindowTabs() {
@@ -28,8 +28,12 @@ export function useWindowTabs() {
   }, [])
   return { tabs, error }
 }
-export default function TabInbox({ tabs, error, open, close, batch }: { tabs: LinkInput[]; error: string; open: boolean; close: () => void; batch: () => void }) {
-  return <aside className={`tab-inbox ${open ? 'inbox-open' : ''}`} aria-label="待选网页"><header><div><span className="eyebrow">OPEN TABS</span><h2>待选网页 <span>{tabs.length}</span></h2></div><div className="inbox-tools"><Button size="icon" aria-label="收藏当前窗口" title="收藏当前窗口" disabled={!tabs.length} onClick={batch}><ListPlus size={19} /></Button><Button size="icon" className="drawer-close" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></div></header><p className="inbox-hint">拖入收藏块，把此刻留到以后。</p>
-    {error ? <p role="status" className="error-inline">{error}</p> : tabs.length ? <div className="inbox-list">{tabs.map((tab, index) => <article key={`${tab.url}-${index}`} aria-label={`待选 ${tab.title}`} className="inbox-tab" draggable onDragStart={event => startDrag(event, { tab })}><SiteIcon url={tab.icon || ''} title={tab.title} /><div><strong>{tab.title}</strong><span title={tab.url}>{tab.url}</span></div><GripVertical size={13} /></article>)}</div> : <div className="inbox-empty"><Layers3 size={32} strokeWidth={1.2} /><p>当前窗口没有可收藏的普通网页</p></div>}
-    <div className="inbox-footer"><span className="status-dot synced" />当前窗口 · 普通网页 · 拖入即收藏</div></aside>
+export default function TabInbox({ tabs, error, open, close }: { tabs: LinkInput[]; error: string; open: boolean; close: () => void }) {
+  return <aside className={`tab-inbox ${open ? 'inbox-open' : ''}`} aria-label="待选网页"><header><h2>待选网页 <span>{tabs.length}</span></h2><Button size="icon" className="drawer-close" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></header>
+    {error ? <p role="status" className="error-inline">{error}</p> : tabs.length ? <div className="inbox-list">{tabs.map((tab, index) => <InboxTab key={`${tab.url}-${index}`} tab={tab} index={index} />)}</div> : <div className="inbox-empty"><Layers3 size={32} strokeWidth={1.2} /><p>当前窗口没有可收藏的普通网页</p></div>}
+  </aside>
+}
+function InboxTab({ tab, index }: { tab: LinkInput; index: number }) {
+  const drag = useDragItem(`tab:${index}:${tab.url}`, { kind: 'tab', tab, title: tab.title })
+  return <article {...drag} aria-label={`待选 ${tab.title}`} className="inbox-tab"><SiteIcon url={tab.icon || ''} title={tab.title} /><div><strong>{tab.title}</strong><span title={tab.url}>{tab.url}</span></div></article>
 }

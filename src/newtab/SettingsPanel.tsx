@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Cloud, Download, Upload, RotateCcw, Trash2, AlertTriangle, Check } from 'lucide-react'
+import { Cloud, Download, Upload, RotateCcw, Trash2, AlertTriangle } from 'lucide-react'
 import { type Entity, type Conflict, type Document } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
@@ -23,7 +23,7 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
   const deleted = Object.values(data.document.entities).filter(e => !e.purged && e.deletedAt !== null && e.deletedBy === e.id).sort((a, b) => b.deletedAt! - a.deletedAt!)
 
   return <>
-    <section className="settings-card"><h2>个人偏好</h2><label>显示昵称<input aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label><p className="autosave-note"><Check size={13} />有效改动自动保存</p></section>
+    <section className="settings-card"><h2>个人偏好</h2><label>显示昵称<input aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label></section>
     {data.conflicts.length > 0 && <section className="settings-card conflict-section"><h2><AlertTriangle size={16} />选择要保留的版本</h2><p className="muted">两个版本均已保留在本机。处理完后继续同步，你也可以继续整理其他收藏。</p>{data.conflicts.map(conflict => <ConflictChoice key={conflict.id} conflict={conflict} busy={busy} choose={side => void execute(async () => { const result = await rpc({ type: 'resolve', sourceId: data.sourceId!, conflictId: conflict.id, side }); if (result.snapshot) receive(result.snapshot) })} />)}</section>}
     <section className="settings-card"><h2>连接与同步</h2><p className="muted" role="status">{syncStatusLabels[data.status]}{data.error ? ` · ${data.error}` : ''}</p><div className="sync-detail"><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><Button disabled={busy} onClick={() => void execute(async () => { const result = await rpc({ type: 'sync', sourceId: data.sourceId! }); if (result.snapshot) receive(result.snapshot) })}><Cloud size={16} />立即同步</Button></div><ConnectionForm key={data.sourceId} initial={data.connection} connected done={receive} onError={onError} /></section>
     <section className="settings-card"><h2>备份与迁移</h2><p className="muted">备份包含收藏、顺序、待办与回收站；不包含网盘登录信息或 WebDAV 密码。</p>{data.connection?.kind === 'quark' && <p className="muted">夸克的「拾页收藏」目录保留历史版本用于合并与恢复，暂不自动删除。回收站到期清理当前数据后，历史备份仍可能包含旧内容。</p>}<div className="backup-actions"><Button disabled={busy} onClick={() => void execute(async () => {
@@ -37,10 +37,10 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
   </>
 }
 function ConflictChoice({ conflict, busy, choose }: { conflict: Conflict; busy: boolean; choose: (side: 'local' | 'remote') => void }) {
-  const labels: Record<string, string> = { title: '标题', url: '网址', note: '备注', todo: '待办', position: '顺序', parentId: '位置', collapsed: '折叠状态' }
+  const labels: Record<string, string> = { title: '标题', url: '网址', note: '备注', todo: '待办', todoPosition: '待办顺序', position: '顺序', parentId: '位置', collapsed: '折叠状态' }
   return <article className="conflict-item" aria-label={`冲突 ${conflict.local?.title || conflict.remote?.title || '已删除内容'}`}><h3>{conflict.local?.title || conflict.remote?.title || '已删除内容'}</h3><p className="muted">冲突内容：{conflict.fields.map(field => labels[field] || field).join('、')}</p><div className="conflict-versions">{(['local', 'remote'] as const).map(side => <div key={side}><span className="eyebrow">{side === 'local' ? '本地版本' : '远端版本'}</span><Version entity={conflict[side]} /><Button disabled={busy} tone="primary" onClick={() => choose(side)}>{side === 'local' ? '保留本地版本' : '保留远端版本'}</Button></div>)}</div></article>
 }
 function Version({ entity }: { entity: Entity | null }) {
   if (!entity || entity.deletedAt !== null || entity.purged) return <p className="version-deleted">已删除</p>
-  return <div className="version-content"><strong>{entity.title}</strong>{entity.kind === 'link' && <><span>{entity.url}</span><p>{entity.note || '无备注'}</p><small>{entity.todo ? '已加入 Todo' : '未加入 Todo'}</small></>}<small>位置顺序：{entity.position}</small></div>
+  return <div className="version-content"><strong>{entity.title}</strong>{entity.kind === 'link' && <><span>{entity.url}</span>{entity.note && <p>{entity.note}</p>}<small>{entity.todo ? '已加入 Todo' : '未加入 Todo'}</small>{entity.todo && <small>待办顺序：{entity.todoPosition ?? entity.position}</small>}</>}<small>位置顺序：{entity.position}</small></div>
 }

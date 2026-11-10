@@ -10,7 +10,7 @@ const entitySchema = z.discriminatedUnion('kind', [
   z.object({ ...base, kind: z.literal('profile') }),
   z.object({ ...base, kind: z.literal('space') }),
   z.object({ ...base, kind: z.literal('collection'), collapsed: z.boolean() }),
-  z.object({ ...base, kind: z.literal('link'), url: z.string().max(10_000), icon: z.string().max(250_000), note: z.string().max(20_000), todo: z.boolean() }),
+  z.object({ ...base, kind: z.literal('link'), url: z.string().max(10_000), icon: z.string().max(250_000), note: z.string().max(20_000), todo: z.boolean(), todoPosition: z.number().finite().optional() }),
 ])
 const documentSchema = z.object({
   format: z.literal('new-page'), version: z.literal(1),
@@ -31,9 +31,9 @@ export type Action =
   | { type: 'add-space'; title: string }
   | { type: 'add-collection'; parentId: string; title: string }
   | { type: 'add-links'; parentId: string; links: LinkInput[] }
-  | { type: 'batch'; parentId: string; title: string; links: LinkInput[] }
   | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; collapsed?: boolean } }
   | { type: 'todo'; id: string; value: boolean }
+  | { type: 'sort-todo'; id: string; beforeId?: string }
   | { type: 'move'; id: string; parentId: string | null; beforeId?: string }
   | { type: 'delete'; id: string }
   | { type: 'restore'; id: string }
@@ -63,6 +63,7 @@ export function readDocument(value: unknown): Document {
     if (entity.kind === 'link' && !entity.purged) {
       webUrl(entity.url)
       entity.icon = safeIcon(entity.icon)
+      entity.todoPosition ??= entity.position
     }
     const parent = entity.parentId ? doc.entities[entity.parentId] : null
     if ((entity.kind === 'link' && parent?.kind !== 'collection') ||
@@ -86,6 +87,10 @@ export function isActive(doc: Document, entity: Entity) {
 }
 export function active(doc: Document): Entity[] { return Object.values(doc.entities).filter(e => isActive(doc, e)).sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)) }
 export function children(doc: Document, parentId: string | null) { return active(doc).filter(e => e.parentId === parentId) }
+export function todos(doc: Document): Link[] {
+  return active(doc).filter((e): e is Link => e.kind === 'link' && e.todo).sort((a, b) =>
+    (a.todoPosition ?? a.position) - (b.todoPosition ?? b.position) || a.id.localeCompare(b.id))
+}
 function common(kind: Entity['kind'], title: string, parentId: string | null, position = 1024) {
   return { id: kind === 'profile' ? 'profile' : crypto.randomUUID(), kind, title: title.trim() || '未命名', parentId, position, updatedAt: Date.now(), deletedAt: null, deletedBy: null, purged: false }
 }
@@ -102,7 +107,7 @@ function requireEntity(doc: Document, id: string, kind?: Entity['kind']) {
 }
 function appendPosition(doc: Document, parentId: string | null, kind: Entity['kind']) { return Math.max(0, ...children(doc, parentId).filter(e => e.kind === kind).map(e => e.position)) + 1024 }
 export function apply(doc: Document, action: Action): Document {
-  const next = structuredClone(doc)
+  const next = readDocument(doc)
   const now = Date.now()
   const insertCollection = (parentId: string, title: string) => {
     requireEntity(next, parentId, 'space')
@@ -117,10 +122,9 @@ export function apply(doc: Document, action: Action): Document {
       break
     }
     case 'add-collection': insertCollection(action.parentId, action.title); break
-    case 'batch':
     case 'add-links': {
       if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
-      const collection = action.type === 'batch' ? insertCollection(action.parentId, action.title) : requireEntity(next, action.parentId, 'collection') as Collection
+      const collection = requireEntity(next, action.parentId, 'collection') as Collection
       for (const input of action.links) {
         const url = webUrl(input.url)
         const link: Link = { ...common('link', input.title || new URL(url).hostname, collection.id, appendPosition(next, collection.id, 'link')), kind: 'link', url, icon: safeIcon(input.icon ?? ''), note: input.note ?? '', todo: false }
@@ -143,7 +147,21 @@ export function apply(doc: Document, action: Action): Document {
     }
     case 'todo': {
       const entity = requireEntity(next, action.id, 'link') as Link
+      if (action.value && !entity.todo) entity.todoPosition = Math.max(0, ...todos(next).map(e => e.todoPosition ?? e.position)) + 1024
       entity.todo = action.value; entity.updatedAt = now; break
+    }
+    case 'sort-todo': {
+      const entity = requireEntity(next, action.id, 'link') as Link
+      if (!entity.todo) throw new Error('此链接已不在待办中')
+      if (action.beforeId === entity.id) break
+      const siblings = todos(next).filter(e => e.id !== entity.id)
+      const index = action.beforeId ? siblings.findIndex(e => e.id === action.beforeId) : siblings.length
+      if (index < 0) throw new Error('拖拽目标已改变')
+      const position = (link: Link) => link.todoPosition ?? link.position
+      entity.todoPosition = index === siblings.length ? (siblings.at(-1) ? position(siblings.at(-1)!) : 0) + 1024 :
+        ((siblings[index - 1] ? position(siblings[index - 1]) : position(siblings[index]) - 2048) + position(siblings[index])) / 2
+      entity.updatedAt = now
+      break
     }
     case 'move': {
       const entity = requireEntity(next, action.id)

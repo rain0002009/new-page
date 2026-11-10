@@ -1,0 +1,76 @@
+{
+  "format": "page-garden-snapshot",
+  "version": 1,
+  "id": "c87b5dda6067fcaa7cfd533b87e3d131",
+  "parents": [],
+  "document": {
+    "format": "new-page",
+    "version": 1,
+    "entities": {
+      "profile": {
+        "id": "profile",
+        "title": "Rain",
+        "parentId": null,
+        "position": 1024,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "profile"
+      },
+      "legacySpace": {
+        "id": "legacySpace",
+        "title": "历史空间",
+        "parentId": null,
+        "position": 1024,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "space"
+      },
+      "legacyCollection": {
+        "id": "legacyCollection",
+        "title": "历史收藏",
+        "parentId": "legacySpace",
+        "position": 1024,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "collection",
+        "collapsed": false
+      },
+      "legacyA": {
+        "id": "legacyA",
+        "title": "历史待办 A",
+        "parentId": "legacyCollection",
+        "position": 1024,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "link",
+        "url": "https://react.dev/",
+        "icon": "",
+        "note": "保留历史备注",
+        "todo": true
+      },
+      "legacyB": {
+        "id": "legacyB",
+        "title": "历史待办 B",
+        "parentId": "legacyCollection",
+        "position": 2048,
+        "updatedAt": 1,
+        "deletedAt": null,
+        "deletedBy": null,
+        "purged": false,
+        "kind": "link",
+        "url": "https://react.dev/",
+        "icon": "",
+        "note": "",
+        "todo": true
+      }
+    }
+  }
+}

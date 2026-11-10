@@ -76,6 +76,5 @@ export default function QuarkConnectionForm({ connected, initial, done, onError 
       setBusy(true)
       void connect(pending.config, true).catch(error => setError(error instanceof Error ? error.message : '连接失败')).finally(() => setBusy(false))
     }}>确认合并</Button><Button onClick={() => setPending(null)}>取消</Button></div> : <Button tone="primary" disabled={busy} onClick={() => void start()}>{busy ? <LoaderCircle size={17} className="animate-spin" /> : qr ? <RefreshCw size={17} /> : <Cloud size={17} />}{busy ? stage === 'permission' ? '正在检查 Chrome 授权…' : stage === 'qr' ? '正在获取二维码…' : '正在读取收藏…' : qr ? '刷新二维码' : connected ? '重新扫码 / 切换账号' : '扫码登录夸克'}</Button>}
-    <p className="privacy-note">收藏先保存到本机，再自动上传到夸克的「拾页收藏」目录。登录信息只保存在当前设备。</p>
   </div>
 }

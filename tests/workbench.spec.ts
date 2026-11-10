@@ -1,4 +1,4 @@
-import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test'
+import { test, expect, chromium, type BrowserContext, type Page, type Locator } from '@playwright/test'
 import { createServer, type Server } from 'node:https'
 import { mkdtemp, rm, cp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -109,23 +109,23 @@ async function openClient(existingProfile?: string, quarkMode = false) {
   return { context, page, profile, url: page.url() }
 }
 
-async function connect(page: Page, path = '/dav/') {
+async function connect(page: Page, path = '/dav/', spaceTitle = '我的空间') {
   await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
   await page.getByLabel('昵称', { exact: true }).fill('Rain')
   await page.getByLabel('WebDAV 地址').fill(`${origin}${path}`)
   await page.getByLabel('用户名', { exact: true }).fill('tester')
   await page.getByLabel('密码或应用专用密码').fill('secret')
   await page.getByRole('button', { name: '连接并开始' }).click()
-  await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: spaceTitle, exact: true })).toBeVisible()
 }
 
-async function connectQuark(page: Page) {
+async function connectQuark(page: Page, spaceTitle = '我的空间') {
   const fromSettings = await page.getByRole('heading', { name: '设置', exact: true }).count() > 0
   await page.getByRole('button', { name: '夸克网盘', exact: true }).click()
   await page.getByRole('button', { name: /扫码登录夸克|重新扫码 \/ 切换账号/ }).click()
   await expect(page.getByLabel('夸克登录二维码')).toBeVisible()
   if (fromSettings) await expect(page.getByText(/当前夸克账号：/)).toBeVisible()
-  else await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
+  else await expect(page.getByRole('heading', { name: spaceTitle, exact: true })).toBeVisible()
 }
 
 test('夸克首次安装直接显示二维码，不依赖运行时新增权限或重新加载', async () => {
@@ -368,12 +368,13 @@ test('已有 WebDAV 收藏可扫码迁移到夸克，保留收藏和待办', asy
 })
 
 async function addLink(page: Page, title: string, url = 'https://react.dev/') {
-  await page.getByRole('button', { name: '添加链接', exact: true }).first().click()
-  const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('网址', { exact: true }).fill(url)
-  await dialog.getByLabel('标题', { exact: true }).fill(title)
-  await dialog.getByRole('button', { name: '添加', exact: true }).click()
+  const tab = await page.context().newPage()
+  await tab.route('**/*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<title>${title.replaceAll('&', '&amp;').replaceAll('<', '&lt;')}</title><h1>Controlled website</h1>` }))
+  await tab.goto(url)
+  await page.bringToFront()
+  await drag(page, page.getByRole('article', { name: `待选 ${title}`, exact: true }), page.getByRole('region', { name: /^收藏块/ }).first())
   await expect(page.getByRole('link', { name: title, exact: true })).toBeVisible()
+  await tab.close()
 }
 
 test('首次连接后添加收藏，重开仍保留且同步到另一设备', async () => {
@@ -435,7 +436,81 @@ test('创建空间与收藏块，编辑自动保存，并从全空间搜索定�
   await expect(page.getByText('并发渲染的备忘', { exact: true })).toBeVisible()
 })
 
-test('待选网页拖入即收藏，保留原页，并可批量收藏和移入折叠空块', async () => {
+async function drag(page: Page, source: Locator, target: Locator) {
+  await source.scrollIntoViewIfNeeded()
+  const from = (await source.boundingBox())!
+  await target.scrollIntoViewIfNeeded()
+  const to = (await target.boundingBox())!
+  await page.mouse.move(from.x + Math.min(from.width / 2, 80), from.y + Math.min(from.height / 2, 36))
+  await page.mouse.down()
+  await page.mouse.move(from.x + 14, from.y + 12, { steps: 5 })
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 16 })
+  await page.mouse.up()
+}
+
+test('Todo 使用独立清单排序，标题可打开，新加入和重新加入置末尾，重开与夸克同步保留', async () => {
+  test.setTimeout(90_000)
+  const first = await openClient(undefined, true)
+  await connectQuark(first.page)
+  const page = first.page
+  for (const title of ['先处理', '后处理']) {
+    await addLink(page, title)
+    const card = page.getByRole('article', { name: `链接 ${title}`, exact: true })
+    await card.hover()
+    await card.getByRole('button', { name: '加入 Todo', exact: true }).click()
+  }
+  await page.getByRole('button', { name: '新建空间', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('名称').fill('另一个空间')
+  await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  await page.getByRole('button', { name: '另一个空间', exact: true }).click()
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('名称').fill('参考')
+  await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  await addLink(page, '跨空间待办')
+  await page.getByRole('article', { name: '链接 跨空间待办', exact: true }).getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  const list = page.getByRole('list', { name: '待办清单' })
+  await expect(list.getByRole('link')).toHaveText(['先处理', '后处理', '跨空间待办'])
+  await expect(list.getByRole('button', { name: /编辑|删除|移动|定位/ })).toHaveCount(0)
+  await expect(page.getByRole('complementary', { name: '待选网页' })).toBeVisible()
+  await drag(page, list.getByRole('listitem').last(), list.getByRole('listitem').first())
+  await expect(list.getByRole('link')).toHaveText(['跨空间待办', '先处理', '后处理'])
+  const opened = page.context().waitForEvent('page')
+  await list.getByRole('link', { name: '先处理', exact: true }).click()
+  const openedPage = await opened
+  await expect(openedPage).toHaveURL('https://react.dev/')
+  await openedPage.close()
+  await list.getByRole('listitem').filter({ has: page.getByRole('link', { name: '先处理', exact: true }) }).getByRole('button', { name: '完成待办', exact: true }).click()
+  await expect(list.getByRole('link')).toHaveText(['跨空间待办', '后处理'])
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(page.getByRole('region', { name: '收藏块 日常收藏' }).getByRole('link')).toHaveText(['先处理', '后处理'])
+  await page.getByRole('article', { name: '链接 先处理', exact: true }).getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await page.reload()
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(list.getByRole('link')).toHaveText(['跨空间待办', '后处理', '先处理'])
+  await sync(page)
+  const second = await openClient(undefined, true)
+  await connectQuark(second.page)
+  await second.page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(second.page.getByRole('list', { name: '待办清单' }).getByRole('link')).toHaveText(['跨空间待办', '后处理', '先处理'])
+  await second.context.setOffline(true)
+  const secondList = second.page.getByRole('list', { name: '待办清单' })
+  await drag(second.page, secondList.getByRole('listitem').last(), secondList.getByRole('listitem').first())
+  await expect(secondList.getByRole('link')).toHaveText(['先处理', '跨空间待办', '后处理'])
+  await second.context.close()
+  clients.splice(clients.findIndex(client => client.context === second.context), 1)
+  quark.unavailable = true
+  const restarted = await openClient(second.profile, true)
+  await restarted.page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(restarted.page.getByRole('list', { name: '待办清单' }).getByRole('link')).toHaveText(['先处理', '跨空间待办', '后处理'])
+  quark.unavailable = false
+  await sync(restarted.page)
+  await sync(page)
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(list.getByRole('link')).toHaveText(['先处理', '跨空间待办', '后处理'])
+})
+
+test('日常收藏只能从待选网页拖入，无手动和批量入口，空备注留空', async () => {
   const { page, context } = await openClient()
   const tab = await context.newPage()
   await tab.goto(`${origin}/web/react`)
@@ -443,24 +518,23 @@ test('待选网页拖入即收藏，保留原页，并可批量收藏和移入�
   await guide.goto(`${origin}/web/guide`)
   await connect(page)
   const inbox = page.getByRole('complementary', { name: '待选网页' })
+  await expect(page.getByRole('button', { name: /添加链接|添加第一个链接|收藏当前窗口/ })).toHaveCount(0)
   await expect(inbox.getByText('React 文档', { exact: true })).toBeVisible()
-  await inbox.getByRole('article', { name: '待选 React 文档' }).dragTo(page.getByRole('region', { name: '收藏块 日常收藏' }))
+  await drag(page, inbox.getByRole('article', { name: '待选 React 文档' }), page.getByRole('region', { name: '收藏块 日常收藏' }))
   await expect(page.getByRole('link', { name: 'React 文档', exact: true })).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByText('还没有备注', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('改动自动保存', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('一点点收集，一点点生长', { exact: true })).toHaveCount(0)
   expect(tab.isClosed()).toBe(false)
   await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
   await page.getByRole('dialog').getByLabel('名称').fill('稍后阅读')
   await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
   await page.getByRole('button', { name: '折叠 稍后阅读', exact: true }).click()
-  await page.getByRole('article', { name: '链接 React 文档', exact: true }).dragTo(page.getByRole('region', { name: '收藏块 稍后阅读' }))
+  await drag(page, page.getByRole('article', { name: '链接 React 文档', exact: true }), page.getByRole('region', { name: '收藏块 稍后阅读' }))
   await expect(page.getByRole('region', { name: '收藏块 稍后阅读' }).getByRole('link', { name: 'React 文档', exact: true })).toBeVisible()
-  await inbox.getByRole('button', { name: '收藏当前窗口', exact: true }).click()
-  await expect(page.getByRole('dialog').getByRole('textbox')).toHaveCount(1)
-  await page.getByRole('dialog').getByLabel('名称').fill('今天的网页')
-  await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
-  const batch = page.getByRole('region', { name: '收藏块 今天的网页' })
-  await expect(batch.getByRole('link', { name: 'React 文档', exact: true })).toBeVisible()
-  await expect(batch.getByRole('link', { name: 'UnoCSS 指南', exact: true })).toBeVisible()
+  await drag(page, inbox.getByRole('article', { name: '待选 UnoCSS 指南', exact: true }), page.getByRole('region', { name: '收藏块 日常收藏' }))
+  await expect(page.getByRole('link', { name: 'UnoCSS 指南', exact: true })).toBeVisible()
   expect(guide.isClosed()).toBe(false)
   await page.setViewportSize({ width: 820, height: 900 })
   await page.getByRole('button', { name: '打开待选网页', exact: true }).click()
@@ -636,21 +710,21 @@ test('拖拽排序空间、收藏块和卡片，跨空间拒绝且至少保留�
   await connect(page)
   await addLink(page, '排在后面')
   await addLink(page, '排在前面')
-  await page.getByRole('article', { name: '链接 排在前面', exact: true }).dragTo(page.getByRole('article', { name: '链接 排在后面', exact: true }))
+  await drag(page, page.getByRole('article', { name: '链接 排在前面', exact: true }), page.getByRole('article', { name: '链接 排在后面', exact: true }))
   await expect(page.getByRole('region', { name: '收藏块 日常收藏' }).getByRole('link').first()).toHaveText('排在前面')
   await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
   await page.getByRole('dialog').getByLabel('名称').fill('优先阅读')
   await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
-  await page.getByLabel('拖动排序 优先阅读', { exact: true }).dragTo(page.getByLabel('拖动排序 日常收藏', { exact: true }))
+  await drag(page, page.getByRole('region', { name: '收藏块 优先阅读', exact: true }).getByRole('heading', { level: 2 }), page.getByRole('region', { name: '收藏块 日常收藏', exact: true }).getByRole('heading', { level: 2 }))
   await expect(page.getByRole('region', { name: /^收藏块/ }).first()).toHaveAccessibleName('收藏块 优先阅读')
   await page.getByRole('button', { name: '新建空间', exact: true }).click()
   await page.getByRole('dialog').getByLabel('名称').fill('灵感')
   await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
-  await page.getByRole('button', { name: '灵感', exact: true }).dragTo(page.getByRole('button', { name: '我的空间', exact: true }))
+  await drag(page, page.getByRole('button', { name: '灵感', exact: true }), page.getByRole('button', { name: '我的空间', exact: true }))
   await page.reload()
   await expect(page.getByRole('heading', { name: '灵感', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '我的空间', exact: true }).click()
-  await page.getByRole('article', { name: '链接 排在前面', exact: true }).dragTo(page.getByRole('button', { name: '灵感', exact: true }))
+  await drag(page, page.getByRole('article', { name: '链接 排在前面', exact: true }), page.getByRole('button', { name: '灵感', exact: true }))
   await expect(page.getByRole('alert')).toContainText('跨空间')
   await expect(page.getByRole('link', { name: '排在前面', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '删除空间 灵感', exact: true }).click()
@@ -807,7 +881,7 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await page.getByRole('dialog').getByLabel('名称').fill('设计与灵感')
   await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
   const collection = page.getByRole('region', { name: '收藏块 设计与灵感' })
-  await page.getByRole('article', { name: '待选 UnoCSS 指南', exact: true }).dragTo(collection)
+  await drag(page, page.getByRole('article', { name: '待选 UnoCSS 指南', exact: true }), collection)
   await page.screenshot({ path: 'test-results/workbench-desktop.png', fullPage: true })
   await page.setViewportSize({ width: 820, height: 900 })
   await page.getByRole('button', { name: '打开待选网页', exact: true }).click()
@@ -819,6 +893,97 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await expect(page.getByRole('button', { name: '设置', exact: true })).toBeVisible()
   await page.keyboard.press('/')
   await expect(page.getByRole('searchbox', { name: '搜索全部收藏', exact: true })).toBeFocused()
+})
+
+test('浅色流体背景响应鼠标，仍可打开弹窗和正常收藏', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  const clip = { x: 245, y: 5, width: 400, height: 90 }
+  await page.mouse.move(100, 900)
+  const before = await page.screenshot({ clip })
+  await page.mouse.move(260, 35)
+  await page.mouse.move(620, 65, { steps: 25 })
+  await expect.poll(async () => (await page.screenshot({ clip })).equals(before), { timeout: 5000 }).toBe(false)
+  await page.screenshot({ path: 'test-results/fluid-desktop.png', fullPage: true })
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await addLink(page, '流体背景上的收藏')
+})
+
+test('流体初始化不可用时仍能收藏、编辑和处理 Todo', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '无 GPU 时的收藏')
+  await page.addInitScript(`const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+      return kind === 'webgl' || kind === 'webgl2' ? null : original.call(this, kind, ...args);
+    };`)
+  await page.reload()
+  const card = page.getByRole('article', { name: '链接 无 GPU 时的收藏', exact: true })
+  await card.hover()
+  await card.getByRole('button', { name: '编辑链接', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('备注', { exact: true }).fill('备注仍可保存')
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await expect(card.getByText('备注仍可保存', { exact: true })).toBeVisible()
+  await card.getByRole('button', { name: '编辑链接', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('备注', { exact: true }).fill('')
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await expect(card.getByText('备注仍可保存', { exact: true })).toHaveCount(0)
+  await expect(page.getByText(/还没有备注|无备注|有效改动自动保存/)).toHaveCount(0)
+  await addLink(page, '仍可拖入')
+  await card.getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  await page.getByRole('button', { name: '完成待办', exact: true }).click()
+  await expect(page.getByRole('link', { name: '无 GPU 时的收藏', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+for (const provider of ['夸克', 'WebDAV'] as const) test(`${provider} 旧版待办可读取，排序与备份恢复保留，拖入 Todo 不产生操作`, async () => {
+  const legacy = JSON.parse(await readFile(resolve('tests/fixtures/legacy-snapshot.json'), 'utf8'))
+  if (provider === '夸克') {
+    quark.files.set('folder-rain', { fid: 'folder-rain', parent: '0', name: '拾页收藏', directory: true, body: '', account: 'rain' })
+    quark.files.set('legacy', { fid: 'legacy', parent: 'folder-rain', name: `pg1-${legacy.id}-root.json`, directory: false, body: JSON.stringify(legacy), account: 'rain' })
+  } else files.set('/dav/new-page/data-v1.json', { body: JSON.stringify(legacy.document), revision: 1 })
+  const { page, context } = await openClient(undefined, provider === '夸克')
+  if (provider === '夸克') await connectQuark(page, '历史空间')
+  else await connect(page, '/dav/', '历史空间')
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  const list = page.getByRole('list', { name: '待办清单' })
+  await expect(list.getByRole('link')).toHaveText(['历史待办 A', '历史待办 B'])
+  await drag(page, list.getByRole('listitem').last(), list.getByRole('listitem').first())
+  await expect(list.getByRole('link')).toHaveText(['历史待办 B', '历史待办 A'])
+  await list.getByRole('listitem').first().focus()
+  await page.keyboard.press('Space')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Space')
+  await expect(list.getByRole('link')).toHaveText(['历史待办 A', '历史待办 B'])
+  await list.getByRole('listitem').last().focus()
+  await page.keyboard.press('Space')
+  await page.keyboard.press('ArrowUp')
+  await page.keyboard.press('Space')
+  await expect(list.getByRole('link')).toHaveText(['历史待办 B', '历史待办 A'])
+  const tab = await context.newPage()
+  await tab.goto(`${origin}/web/react`)
+  const originalUrl = page.url()
+  const pageCount = context.pages().length
+  await drag(page, page.getByRole('article', { name: '待选 React 文档', exact: true }), list.getByRole('listitem').first())
+  expect(page.url()).toBe(originalUrl)
+  expect(context.pages()).toHaveLength(pageCount)
+  await expect(list.getByRole('link')).toHaveText(['历史待办 B', '历史待办 A'])
+  await page.reload()
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(list.getByRole('link')).toHaveText(['历史待办 B', '历史待办 A'])
+  await sync(page)
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出备份', exact: true }).click()
+  const backup = await readFile((await (await downloadPromise).path())!, 'utf8')
+  const restored = await openClient()
+  await connect(restored.page, '/restored/')
+  await restored.page.getByRole('button', { name: '设置', exact: true }).click()
+  await restored.page.getByLabel('导入备份').setInputFiles({ name: 'restored.json', mimeType: 'application/json', buffer: Buffer.from(backup) })
+  await restored.page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(restored.page.getByRole('list', { name: '待办清单' }).getByRole('link')).toHaveText(['历史待办 B', '历史待办 A'])
 })
 
 test('目标缓存有冲突时拒绝迁移，切回后两个版本仍可选择', async () => {

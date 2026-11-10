@@ -60,9 +60,9 @@ export class QuarkStore {
     let value: Snapshot
     try { value = JSON.parse(text) } catch { throw new Error('夸克收藏文件已损坏，原文件未被覆盖') }
     if (value?.format !== 'page-garden-snapshot' || value.version !== 1 || value.id !== meta.id || canonical(value.parents) !== canonical(meta.parents)) throw new Error('夸克收藏版本格式不兼容，原文件未被覆盖')
-    const doc = readDocument(value.document)
-    if (await contentId(doc, value.parents) !== value.id) throw new Error('夸克收藏内容校验失败，原文件未被覆盖')
-    return doc
+    // Check immutable bytes before readDocument fills in newer optional fields.
+    if (await contentId(value.document, value.parents) !== value.id) throw new Error('夸克收藏内容校验失败，原文件未被覆盖')
+    return readDocument(value.document)
   }
   async read(): Promise<{ doc: Document | null; etag: string | null; conflicts: Conflict[] }> {
     const client = await accountClient(this.config)

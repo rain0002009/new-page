@@ -8,16 +8,16 @@ const button = tv({
   defaultVariants: { tone: 'ghost', size: 'regular' },
 })
 export function Button({ tone, size, className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'primary' | 'ghost' | 'danger'; size?: 'regular' | 'icon' }) {
-  return <button type="button" className={button({ tone, size, className })} {...props} />
+  return <button type="button" className={button({ tone, size, className })} {...props} onMouseDown={event => { event.stopPropagation(); props.onMouseDown?.(event) }} onTouchStart={event => { event.stopPropagation(); props.onTouchStart?.(event) }} />
 }
 export function Modal({ title, children, close, wide = false }: { title: string; children: ReactNode; close: () => void; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => { ref.current?.showModal() }, [])
   return <dialog ref={ref} aria-label={title} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={event => { event.preventDefault(); close() }} onClick={event => { if (event.target === event.currentTarget) close() }}>
-    <div className="modal-header"><div><span className="eyebrow">YOUR LITTLE CORNER</span><h2>{title}</h2></div><Button size="icon" aria-label="关闭弹窗" onClick={close}><X size={19} /></Button></div>
+    <div className="modal-header"><h2>{title}</h2><Button size="icon" aria-label="关闭弹窗" onClick={close}><X size={19} /></Button></div>
     {children}
   </dialog>
 }
 export function SiteIcon({ url = '', title }: { url?: string; title: string }) {
-  return <span className="site-icon" aria-hidden="true" title={title}>{url ? <img src={url} alt="" referrerPolicy="no-referrer" onError={event => { event.currentTarget.style.display = 'none' }} /> : null}<Globe2 size={20} /></span>
+  return <span className="site-icon" aria-hidden="true" title={title}>{url ? <img src={url} alt="" draggable={false} referrerPolicy="no-referrer" onError={event => { event.currentTarget.style.display = 'none' }} /> : null}<Globe2 size={20} /></span>
 }

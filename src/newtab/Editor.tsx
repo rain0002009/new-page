@@ -1,15 +1,15 @@
 import { useState, type FormEvent } from 'react'
-import { Check, Info } from 'lucide-react'
+import { Info } from 'lucide-react'
 import { active, parents, webUrl, type Action, type Document, type Entity } from '../core/model'
 import { Button, Modal } from './ui'
 
 export type Act = (action: Action) => Promise<boolean>
 export type EditorState =
   | { kind: 'space' }
-  | { kind: 'collection' | 'batch' | 'add'; parentId: string }
+  | { kind: 'collection'; parentId: string }
   | { kind: 'edit' | 'rename' | 'delete' | 'move'; entity: Entity }
 
-export default function Editor({ state, doc, act, close, batchLinks = [] }: { state: EditorState; doc: Document; act: Act; close: () => void; batchLinks?: { title: string; url: string; icon: string }[] }) {
+export default function Editor({ state, doc, act, close }: { state: EditorState; doc: Document; act: Act; close: () => void }) {
   const entity = 'entity' in state ? state.entity : null
   const [title, setTitle] = useState(entity?.title ?? '')
   const [url, setUrl] = useState(entity?.kind === 'link' ? entity.url : '')
@@ -19,7 +19,7 @@ export default function Editor({ state, doc, act, close, batchLinks = [] }: { st
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const editing = state.kind === 'edit' || state.kind === 'rename'
-  const titleMap: Record<EditorState['kind'], string> = { space: '新建空间', collection: '新建收藏块', batch: '收藏当前窗口', add: '添加链接', edit: '编辑链接', rename: '重命名', delete: '移到回收站', move: '移动链接' }
+  const titleMap: Record<EditorState['kind'], string> = { space: '新建空间', collection: '新建收藏块', edit: '编辑链接', rename: '重命名', delete: '移到回收站', move: '移动链接' }
   async function autoSave(patch: { title?: string; url?: string; note?: string }) {
     if (!entity || !editing) return
     if (patch.url !== undefined) { try { webUrl(patch.url); setError('') } catch { setError('请输入 HTTP 或 HTTPS 网址；已保存的有效网址保持不变'); return } }
@@ -32,8 +32,6 @@ export default function Editor({ state, doc, act, close, batchLinks = [] }: { st
     let action: Action | null = null
     if (state.kind === 'space') action = { type: 'add-space', title }
     if (state.kind === 'collection') action = { type: 'add-collection', parentId: state.parentId, title }
-    if (state.kind === 'batch') action = { type: 'batch', parentId: state.parentId, title, links: batchLinks }
-    if (state.kind === 'add') action = { type: 'add-links', parentId: state.parentId, links: [{ title, url, note }] }
     if (state.kind === 'move' && entity) {
       const first = active(doc).find(e => e.parentId === parentId && e.id !== entity.id)
       action = { type: 'move', id: entity.id, parentId, beforeId: position === 'first' ? first?.id : undefined }
@@ -52,11 +50,11 @@ export default function Editor({ state, doc, act, close, batchLinks = [] }: { st
   const collections = active(doc).filter(e => e.kind === 'collection' && e.parentId === sourceCollection?.parentId)
   return <Modal title={titleMap[state.kind]} close={close}><form onSubmit={submit}>
     {state.kind === 'move' ? <><label>目标收藏块<select value={parentId} onChange={e => setParentId(e.target.value)}>{collections.map(c => <option value={c.id} key={c.id}>{c.title}</option>)}</select></label><label>位置<select value={position} onChange={e => setPosition(e.target.value)}><option value="last">末尾</option><option value="first">开头</option></select></label></> : <>
-      {(state.kind === 'add' || state.kind === 'edit') && <label>网址<input aria-label="网址" type="url" required value={url} onChange={e => { setUrl(e.target.value); void autoSave({ url: e.target.value }) }} placeholder="https://" /></label>}
-      <label>{['space', 'collection', 'batch', 'rename'].includes(state.kind) ? '名称' : '标题'}<input aria-label={['space', 'collection', 'batch', 'rename'].includes(state.kind) ? '名称' : '标题'} value={title} onChange={e => { setTitle(e.target.value); void autoSave({ title: e.target.value }) }} required={state.kind !== 'add' && state.kind !== 'edit'} maxLength={1000} autoFocus placeholder={state.kind === 'batch' ? '例如：这周的灵感' : '给它起个名字'} /></label>
-      {(state.kind === 'add' || state.kind === 'edit') && <label>备注<textarea aria-label="备注" value={note} onChange={e => { setNote(e.target.value); void autoSave({ note: e.target.value }) }} maxLength={20_000} placeholder="为什么想留下它？" /></label>}
+      {state.kind === 'edit' && <label>网址<input aria-label="网址" type="url" required value={url} onChange={e => { setUrl(e.target.value); void autoSave({ url: e.target.value }) }} placeholder="https://" /></label>}
+      <label>{['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'}<input aria-label={['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'} value={title} onChange={e => { setTitle(e.target.value); void autoSave({ title: e.target.value }) }} required={state.kind !== 'edit'} maxLength={1000} autoFocus  /></label>
+      {state.kind === 'edit' && <label>备注<textarea aria-label="备注" value={note} onChange={e => { setNote(e.target.value); void autoSave({ note: e.target.value }) }} maxLength={20_000} /></label>}
     </>}
     {error && <p className="error-inline" role="status">{error}</p>}
-    {editing ? <p className="autosave-note"><Check size={13} />有效改动自动保存，关闭即可</p> : <div className="modal-actions"><Button onClick={close}>取消</Button><Button type="submit" tone="primary" disabled={busy}>{state.kind === 'add' ? '添加' : state.kind === 'move' ? '移动' : '创建'}</Button></div>}
+    {!editing && <div className="modal-actions"><Button onClick={close}>取消</Button><Button type="submit" tone="primary" disabled={busy}>{state.kind === 'move' ? '移动' : '创建'}</Button></div>}
   </form></Modal>
 }
