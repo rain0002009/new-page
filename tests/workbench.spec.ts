@@ -10,6 +10,7 @@ let origin: string
 let unavailable = false
 let unsafeWrites = false
 let rejectNextWrite = false
+let suspendDataWrites = false
 const files = new Map<string, { body: string; revision: number }>()
 const clients: { context: BrowserContext; profile: string }[] = []
 
@@ -37,6 +38,7 @@ test.beforeAll(async () => {
       return
     }
     if (req.method === 'PUT') {
+      if (path.endsWith('/data-v1.json') && suspendDataWrites) { res.writeHead(503).end(); return }
       if (path.endsWith('/data-v1.json') && rejectNextWrite) { rejectNextWrite = false; res.writeHead(412).end(); return }
       if (!unsafeWrites && ((req.headers['if-none-match'] === '*' && file) ||
           (req.headers['if-match'] && req.headers['if-match'] !== `"${file?.revision}"`))) {
@@ -56,7 +58,7 @@ test.beforeAll(async () => {
   origin = `https://localhost:${(server.address() as { port: number }).port}`
 })
 
-test.beforeEach(() => { files.clear(); unavailable = false; unsafeWrites = false; rejectNextWrite = false })
+test.beforeEach(() => { files.clear(); unavailable = false; unsafeWrites = false; rejectNextWrite = false; suspendDataWrites = false })
 test.afterEach(async () => {
   for (const client of clients.splice(0)) {
     await client.context.close()
@@ -622,4 +624,29 @@ test('切回冲突数据源时用最新远端刷新冲突，双方已一致则�
   await sync(second.page)
   await second.page.getByRole('button', { name: '我的空间', exact: true }).click()
   await expect(second.page.getByRole('link', { name: '双方最终采用的标题', exact: true })).toBeVisible()
+})
+
+
+test('迁移时首次发现目标缓存冲突也拒绝覆盖，切换目标仍保留两版', async () => {
+  const first = await openClient()
+  await connect(first.page)
+  await addLink(first.page, '目标条目')
+  await sync(first.page)
+  const second = await openClient()
+  await connect(second.page)
+  suspendDataWrites = true
+  await renameLink(second.page, '目标条目', '目标尚未上传版本')
+  await second.page.getByRole('button', { name: '设置', exact: true }).click()
+  await second.page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(second.page.getByRole('button', { name: '立即同步', exact: true })).toBeEnabled()
+  await changeSource(second.page, '/away/')
+  suspendDataWrites = false
+  await first.page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await renameLink(first.page, '目标条目', '目标远端修改版本')
+  await sync(first.page)
+  await changeSource(second.page, '/dav/', 'migrate')
+  await expect(second.page.getByRole('alert')).toContainText('目标数据源有未解决冲突')
+  await changeSource(second.page, '/dav/')
+  await expect(second.page.getByText('目标远端修改版本', { exact: true })).toBeVisible()
+  await expect(second.page.getByText('目标尚未上传版本', { exact: true })).toHaveCount(2)
 })

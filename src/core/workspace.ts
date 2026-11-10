@@ -37,6 +37,8 @@ export function schedule(id: string, delay = 600) {
   scheduled.set(id, setTimeout(() => { scheduled.delete(id); void synchronize(id) }, delay))
 }
 export function synchronize(id: string): Promise<void> {
+  const pending = scheduled.get(id)
+  if (pending) { clearTimeout(pending); scheduled.delete(id) }
   const running = inFlight.get(id)
   if (running) return running
   const task = synchronizeSource(id).finally(() => inFlight.delete(id))
@@ -113,7 +115,6 @@ async function connect(request: ConnectRequest): Promise<Result> {
     if (request.mode === 'migrate' && root.active === id) throw new Error('源和目标相同，无需迁移')
     if (request.mode === 'migrate' && previous?.conflicts.length) throw new Error('请先解决当前数据源的冲突再迁移')
     if (request.mode === 'migrate' && root.sources[id]?.conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
-    if (request.mode === 'migrate' && remote.doc && !request.confirmed) return { ok: true, confirmation: '目标已有收藏。确认合并当前数据？已有内容会保留，冲突需要单独选择。' } as const
     const cached = root.sources[id]
     if (cached && !remote.doc && Object.keys(cached.base.entities).length) throw new Error('目标远端文件被移除，未切换或覆盖数据')
     let doc = remote.doc ?? createDocument(request.nickname || '朋友'), conflicts: Conflict[] = []
@@ -123,6 +124,8 @@ async function connect(request: ConnectRequest): Promise<Result> {
       conflicts = refreshConflicts(cached.conflicts, combined.conflicts, doc, remote.doc ?? emptyDocument())
     }
     if (request.mode === 'migrate' && previous) {
+      if (conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
+      if (remote.doc && !request.confirmed) return { ok: true, confirmation: '目标已有收藏。确认合并当前数据？已有内容会保留，冲突需要单独选择。' } as const
       if (!remote.doc && !cached) doc = structuredClone(previous.doc)
       else {
         const combined = merge(emptyDocument(), previous.doc, doc)
