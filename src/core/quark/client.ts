@@ -1,0 +1,932 @@
+import { md5 } from '@noble/hashes/legacy.js'
+import { mergeCookieString, getResponseCookies, quarkFetch } from './transport'
+import { QuarkApiError, type QuarkDownloadLink, type QuarkEntry, type QuarkUploadTicket } from './types'
+
+const QUARK_API_BASE = 'https://drive-pc.quark.cn'
+const QUARK_LOGIN_API_BASE = 'https://uop.quark.cn'
+const QUARK_PAN_API_BASE = 'https://pan.quark.cn'
+const DEFAULT_QUERY = {
+  pr: 'ucpro',
+  fr: 'pc',
+  uc_param_str: '',
+} as const
+const DEFAULT_LOGIN_QUERY = {
+  client_id: '532',
+  v: '1.2',
+} as const
+const LIST_PAGE_SIZE = 200
+
+const DEFAULT_HEADERS = {
+  accept: 'application/json, text/plain, */*',
+  'content-type': 'application/json',
+  origin: 'https://pan.quark.cn',
+  referer: 'https://pan.quark.cn/',
+  'user-agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 Electron/18.3.5.12 Safari/537.36',
+} satisfies HeadersInit
+
+type QuarkListEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+  error?: string
+  data?: {
+    list?: QuarkRawEntry[]
+  }
+}
+
+type QuarkDownloadEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+  error?: string
+  data?: Array<{
+    download_url?: string
+    expires_at?: number
+  }>
+}
+
+type QuarkRawEntry = {
+  fid?: string
+  pdir_fid?: string
+  file_name?: string
+  size?: number
+  dir?: boolean
+  updated_at?: string
+  obj_category?: string
+  format_type?: string
+}
+
+type QuarkCreateDirectoryEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+  data?: {
+    finish?: boolean
+    fid?: string
+  }
+}
+
+type QuarkDeleteEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+}
+
+type QuarkUploadPreEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+  data?: {
+    finish?: boolean
+    task_id?: string
+    upload_id?: string
+    auth_info?: string
+    upload_url?: string
+    obj_key?: string
+    fid?: string
+    bucket?: string
+    format_type?: string
+    callback?: {
+      callbackUrl?: string
+      callbackBody?: string
+    }
+  }
+  metadata?: {
+    part_size?: number
+  }
+}
+
+type QuarkUploadHashEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+  data?: {
+    finish?: boolean
+  }
+}
+
+type QuarkAuthEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+  data?: {
+    auth_key?: string
+  }
+}
+
+type QuarkFinishEnvelope = {
+  code?: number
+  status?: number
+  message?: string
+}
+
+type QuarkAccountInfoEnvelope = {
+  status?: number
+  code?: number
+  message?: string
+  error?: string
+  data?: {
+    nickname?: string
+    user_id?: string | number
+    member_id?: string | number
+  }
+}
+
+type QuarkQrTokenEnvelope = {
+  status?: number
+  message?: string
+  data?: {
+    members?: {
+      token?: string
+    }
+  }
+}
+
+type QuarkQrStatusEnvelope = {
+  status?: number
+  message?: string
+  data?: {
+    members?: {
+      service_ticket?: string
+    }
+  }
+}
+
+export class QuarkClient {
+  private cookie: string
+  private readonly onCookiesUpdated?: (cookieUpdates: string[]) => void | Promise<void>
+
+  constructor(cookie: string, onCookiesUpdated?: (cookieUpdates: string[]) => void | Promise<void>) {
+    this.cookie = cookie
+    this.onCookiesUpdated = onCookiesUpdated
+  }
+
+  async listDirectory(parentFid: string, options?: { page?: number; size?: number }): Promise<QuarkEntry[]> {
+    const url = new URL('/1/clouddrive/file/sort', QUARK_API_BASE)
+    for (const [key, value] of Object.entries({
+      ...DEFAULT_QUERY,
+      pdir_fid: parentFid,
+      _page: String(options?.page ?? 1),
+      _size: String(options?.size ?? LIST_PAGE_SIZE),
+      _fetch_total: '1',
+      _fetch_sub_dirs: '1',
+      _sort: 'file_type:asc,updated_at:desc',
+    })) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'GET',
+      headers: this.createHeaders(),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkListEnvelope | null
+    if (!response.ok) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status, payload?.code)
+    }
+
+    if (!Array.isArray(payload?.data?.list) || (payload.code !== undefined && payload.code !== 0) || (payload.status !== undefined && payload.status !== 200)) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status, payload?.code)
+    }
+
+    return (payload?.data?.list ?? [])
+      .filter((item): item is Required<Pick<QuarkRawEntry, 'fid' | 'file_name'>> & QuarkRawEntry =>
+        typeof item.fid === 'string' && item.fid.length > 0 && typeof item.file_name === 'string',
+      )
+      .map((item) => ({
+        fid: item.fid,
+        parentFid: item.pdir_fid ?? parentFid,
+        name: item.file_name,
+        isDirectory: item.dir === true,
+        size: typeof item.size === 'number' ? item.size : 0,
+        updatedAt: item.updated_at,
+        contentType: inferContentType(item),
+      }))
+  }
+
+  async getDownloadUrl(fid: string): Promise<QuarkDownloadLink> {
+    const url = new URL('/1/clouddrive/file/download', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({ fids: [fid] }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkDownloadEnvelope | null
+    if (!response.ok) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status, payload?.code)
+    }
+
+    if ((payload?.code ?? 0) !== 0 && payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status, payload?.code)
+    }
+
+    const downloadItem = payload?.data?.[0]
+    const downloadUrl = downloadItem?.download_url
+    if (!downloadUrl) {
+      throw new QuarkApiError('Quark did not return a download URL for this file.', 502)
+    }
+
+    return {
+      url: downloadUrl,
+      expiresAt: parseDownloadUrlExpiresAt(downloadUrl, downloadItem?.expires_at),
+    }
+  }
+
+  async findEntryByName(parentFid: string, name: string, maxPages = 5): Promise<QuarkEntry | null> {
+    for (let page = 1; page <= maxPages; page += 1) {
+      const entries = await this.listDirectory(parentFid, { page })
+      const found = entries.find((entry) => entry.name === name)
+      if (found) {
+        return found
+      }
+      if (entries.length < LIST_PAGE_SIZE) {
+        return null
+      }
+    }
+
+    return null
+  }
+
+  async downloadFileText(fid: string): Promise<string> {
+    const link = await this.getDownloadUrl(fid)
+    const response = await quarkFetch(link.url, {
+      method: 'GET',
+      headers: this.createDownloadHeaders(),
+    })
+    await this.captureCookieUpdates(response)
+
+    if (!response.ok) {
+      throw new QuarkApiError(
+        `Failed to download file content (httpStatus=${response.status}).`,
+        response.status,
+      )
+    }
+
+    return await response.text()
+  }
+
+  async getAccountInfo(): Promise<{ nickname?: string; userId?: string }> {
+    const url = new URL('/account/info', QUARK_PAN_API_BASE)
+    url.searchParams.set('fr', 'pc')
+    url.searchParams.set('platform', 'pc')
+
+    const response = await quarkFetch(url, {
+      method: 'GET',
+      headers: this.createHeaders(),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkAccountInfoEnvelope | null
+    if (!response.ok || !payload?.data) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+
+    const nickname = typeof payload.data.nickname === 'string' ? payload.data.nickname : undefined
+    const rawUserId = payload.data.user_id ?? payload.data.member_id
+    const userId =
+      typeof rawUserId === 'string'
+        ? rawUserId
+        : typeof rawUserId === 'number'
+          ? String(rawUserId)
+          : undefined
+
+    return { nickname, userId }
+  }
+
+  async getTokenForQrcodeLogin(): Promise<{ qrToken: string; qrUrl: string; expiresAt: string }> {
+    const requestId = crypto.randomUUID()
+    const url = new URL('/cas/ajax/getTokenForQrcodeLogin', QUARK_LOGIN_API_BASE)
+    for (const [key, value] of Object.entries({
+      ...DEFAULT_LOGIN_QUERY,
+      request_id: requestId,
+    })) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'GET',
+      headers: this.createHeaders(),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkQrTokenEnvelope | null
+    if (!response.ok || payload?.status !== 2000000 || payload?.message !== 'ok') {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+
+    const qrToken = payload?.data?.members?.token
+    if (!qrToken) {
+      throw new QuarkApiError('Quark did not return a QR login token.', 502)
+    }
+
+    const qrUrl = new URL('https://su.quark.cn/4_eMHBJ')
+    for (const [key, value] of Object.entries({
+      token: qrToken,
+      client_id: '532',
+      ssb: 'weblogin',
+      uc_param_str: '',
+      uc_biz_str: 'S:custom|OPT:SAREA@0|OPT:IMMERSIVE@1|OPT:BACK_BTN_STYLE@0',
+    })) {
+      qrUrl.searchParams.set(key, value)
+    }
+
+    return {
+      qrToken,
+      qrUrl: qrUrl.toString(),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    }
+  }
+
+  async getServiceTicketByQrcodeToken(
+    qrToken: string,
+  ): Promise<{ status: 'pending' | 'confirmed' | 'expired'; serviceTicket?: string; error?: string }> {
+    const requestId = crypto.randomUUID()
+    const url = new URL('/cas/ajax/getServiceTicketByQrcodeToken', QUARK_LOGIN_API_BASE)
+    for (const [key, value] of Object.entries({
+      ...DEFAULT_LOGIN_QUERY,
+      token: qrToken,
+      request_id: requestId,
+    })) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'GET',
+      headers: this.createHeaders(),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkQrStatusEnvelope | null
+    if (!response.ok) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+
+    const status = payload?.status
+    const message = payload?.message ?? 'Unknown Quark QR status.'
+    const serviceTicket = payload?.data?.members?.service_ticket
+    if (status === 2000000 && message === 'ok' && serviceTicket) {
+      return {
+        status: 'confirmed',
+        serviceTicket,
+      }
+    }
+
+    if (status === 50004001) {
+      return {
+        status: 'pending',
+      }
+    }
+
+    if (status === 50004002 || status === 50004003 || status === 50004004) {
+      return {
+        status: 'expired',
+        error: message,
+      }
+    }
+
+    return {
+      status: 'pending',
+      error: message,
+    }
+  }
+
+  async getAccountInfoByServiceTicket(serviceTicket: string): Promise<string> {
+    const url = new URL('/account/info', QUARK_PAN_API_BASE)
+    url.searchParams.set('st', serviceTicket)
+    url.searchParams.set('lw', 'scan')
+
+    const response = await quarkFetch(url, {
+      method: 'GET',
+      headers: this.createHeaders(),
+      redirect: 'follow',
+    })
+    await this.captureCookieUpdates(response)
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { message?: string; error?: string } | null
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+
+    const cookieUpdates = getResponseSetCookies(response)
+    if (cookieUpdates.length > 0) {
+      await this.onCookiesUpdated?.(cookieUpdates)
+    }
+
+    return response.url
+  }
+
+  async createDirectory(parentFid: string, name: string): Promise<string | undefined> {
+    const url = new URL('/1/clouddrive/file', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        pdir_fid: parentFid,
+        file_name: name,
+        dir_path: '',
+        dir_init_lock: false,
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkCreateDirectoryEnvelope | null
+    if (!response.ok || payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+    return payload.data?.fid
+  }
+
+  async deleteFile(fileId: string): Promise<void> {
+    const url = new URL('/1/clouddrive/file/delete', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        action_type: 2,
+        exclude_fids: [],
+        filelist: [fileId],
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkDeleteEnvelope | null
+    if (!response.ok || payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+  }
+
+  async renameFile(fileId: string, name: string): Promise<void> {
+    const url = new URL('/1/clouddrive/file/rename', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        fid: fileId,
+        file_name: name,
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkDeleteEnvelope | null
+    if (!response.ok || payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+  }
+
+  async moveFile(fileId: string, targetParentFid: string): Promise<void> {
+    const url = new URL('/1/clouddrive/file/move', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        filelist: [fileId],
+        to_pdir_fid: targetParentFid,
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkDeleteEnvelope | null
+    if (!response.ok || payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+  }
+
+  async prepareUpload(fileName: string, size: number, parentFid: string, mimeType: string): Promise<QuarkUploadTicket> {
+    const url = new URL('/1/clouddrive/file/upload/pre', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const now = Date.now()
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        file_name: fileName,
+        size,
+        pdir_fid: parentFid,
+        format_type: mimeType,
+        ccp_hash_update: true,
+        l_created_at: now,
+        l_updated_at: now,
+        parallel_upload: false,
+        dir_name: '',
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkUploadPreEnvelope | null
+    if (!response.ok || payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+
+    const data = payload?.data
+    if (
+      !data?.task_id ||
+      !data?.auth_info ||
+      !data?.upload_url ||
+      !data?.obj_key ||
+      !data?.bucket ||
+      !data?.fid ||
+      !payload?.metadata?.part_size
+    ) {
+      throw new QuarkApiError('Quark upload preflight response was incomplete.', 502)
+    }
+
+    return {
+      taskId: data.task_id,
+      uploadId: data.upload_id ?? '',
+      uploadUrl: stripProtocol(data.upload_url),
+      bucket: data.bucket,
+      objectKey: data.obj_key,
+      authInfo: data.auth_info,
+      callback: {
+        callbackUrl: data.callback?.callbackUrl ?? '',
+        callbackBody: data.callback?.callbackBody ?? '',
+      },
+      partSize: payload.metadata.part_size,
+      mimeType: data.format_type || mimeType,
+      fileId: data.fid,
+      alreadyFinished: data.finish === true,
+    }
+  }
+
+  async updateUploadHash(md5: string, sha1: string, taskId: string): Promise<boolean> {
+    const url = new URL('/1/clouddrive/file/update/hash', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        md5,
+        sha1,
+        task_id: taskId,
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkUploadHashEnvelope | null
+    if (!response.ok || payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+
+    return payload?.data?.finish === true
+  }
+
+  async authenticateUpload(authInfo: string, authMeta: string, taskId: string): Promise<string> {
+    const url = new URL('/1/clouddrive/file/upload/auth', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        auth_info: authInfo,
+        auth_meta: authMeta,
+        task_id: taskId,
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkAuthEnvelope | null
+    if (!response.ok || payload?.status !== 200 || !payload?.data?.auth_key) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+
+    return payload.data.auth_key
+  }
+
+  async uploadSinglePart(args: {
+    authKey: string
+    mimeType: string
+    utcTime: string
+    bucket: string
+    uploadUrl: string
+    objectKey: string
+    uploadId: string
+    bytes: Uint8Array
+  }): Promise<string> {
+    const url = `https://${args.bucket}.${args.uploadUrl}//${args.objectKey}?partNumber=1&uploadId=${args.uploadId}`
+    const response = await quarkFetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: args.authKey,
+        'Content-Type': args.mimeType,
+        'x-oss-date': args.utcTime,
+        'x-oss-user-agent': 'aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit',
+        Referer: 'https://pan.quark.cn/',
+      },
+      body: new Uint8Array(args.bytes).buffer,
+    })
+
+    if (!response.ok) {
+      throw new QuarkApiError(`Quark upload part failed (${response.status}).`, response.status)
+    }
+
+    const etag = response.headers.get('etag')
+    if (!etag) {
+      throw new QuarkApiError('Quark upload part did not return an ETag.', 502)
+    }
+
+    return etag
+  }
+
+  async commitSinglePartUpload(args: {
+    etag: string
+    callback: { callbackUrl: string; callbackBody: string }
+    bucket: string
+    objectKey: string
+    uploadId: string
+    authInfo: string
+    taskId: string
+    uploadUrl: string
+  }): Promise<void> {
+    const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>\n<CompleteMultipartUpload>\n<Part>\n<PartNumber>1</PartNumber>\n<ETag>${args.etag}</ETag>\n</Part>\n</CompleteMultipartUpload>`
+    const contentMd5 = await digestToBase64('MD5', new TextEncoder().encode(xmlBody))
+    const callbackBase64 = toBase64(JSON.stringify(args.callback))
+    const time = new Date().toUTCString()
+    const authMeta = [
+      'POST',
+      contentMd5,
+      'application/xml',
+      time,
+      `x-oss-callback:${callbackBase64}`,
+      `x-oss-date:${time}`,
+      'x-oss-user-agent:aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit',
+      `/${args.bucket}/${args.objectKey}?uploadId=${args.uploadId}`,
+    ].join('\n')
+    const authKey = await this.authenticateUpload(args.authInfo, authMeta, args.taskId)
+
+    const commitUrl = `https://${args.bucket}.${args.uploadUrl}//${args.objectKey}?uploadId=${args.uploadId}`
+    const response = await quarkFetch(commitUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: authKey,
+        'Content-MD5': contentMd5,
+        'Content-Type': 'application/xml',
+        'x-oss-callback': callbackBase64,
+        'x-oss-date': time,
+        'x-oss-user-agent': 'aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit',
+        Referer: 'https://pan.quark.cn/',
+      },
+      body: xmlBody,
+    })
+
+    if (!response.ok) {
+      throw new QuarkApiError(`Quark upload commit failed (${response.status}).`, response.status)
+    }
+  }
+
+  async finishUpload(objectKey: string, taskId: string): Promise<void> {
+    const url = new URL('/1/clouddrive/file/upload/finish', QUARK_API_BASE)
+    for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
+      url.searchParams.set(key, value)
+    }
+
+    const response = await quarkFetch(url, {
+      method: 'POST',
+      headers: this.createHeaders(),
+      body: JSON.stringify({
+        obj_key: objectKey,
+        task_id: taskId,
+      }),
+    })
+    await this.captureCookieUpdates(response)
+
+    const payload = (await response.json().catch(() => null)) as QuarkFinishEnvelope | null
+    if (!response.ok || payload?.status !== 200) {
+      throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
+    }
+  }
+
+  async uploadSmallFile(args: {
+    fileName: string
+    parentFid: string
+    bytes: Uint8Array
+    mimeType: string
+  }): Promise<{ created: boolean; fid: string }> {
+    const ticket = await this.prepareUpload(args.fileName, args.bytes.byteLength, args.parentFid, args.mimeType)
+    if (ticket.alreadyFinished) {
+      return { created: true, fid: ticket.fileId }
+    }
+
+    const md5 = await digestToHex('MD5', args.bytes)
+    const sha1 = await digestToHex('SHA-1', args.bytes)
+    const finishedByHash = await this.updateUploadHash(md5, sha1, ticket.taskId)
+    if (finishedByHash) {
+      return { created: true, fid: ticket.fileId }
+    }
+
+    if (!ticket.uploadId) {
+      throw new QuarkApiError('Quark upload preflight did not return an uploadId for multipart upload.', 502)
+    }
+
+    if (args.bytes.byteLength > ticket.partSize) {
+      throw new QuarkApiError(
+        `Current Worker upload MVP only supports files up to ${ticket.partSize} bytes.`,
+        413,
+      )
+    }
+
+    const utcTime = new Date().toUTCString()
+    const authMeta = buildUploadPartAuthMeta({
+      mimeType: ticket.mimeType,
+      utcTime,
+      bucket: ticket.bucket,
+      objectKey: ticket.objectKey,
+      uploadId: ticket.uploadId,
+    })
+    const authKey = await this.authenticateUpload(ticket.authInfo, authMeta, ticket.taskId)
+    const etag = await this.uploadSinglePart({
+      authKey,
+      mimeType: ticket.mimeType,
+      utcTime,
+      bucket: ticket.bucket,
+      uploadUrl: ticket.uploadUrl,
+      objectKey: ticket.objectKey,
+      uploadId: ticket.uploadId,
+      bytes: args.bytes,
+    })
+    await this.commitSinglePartUpload({
+      etag,
+      callback: ticket.callback,
+      bucket: ticket.bucket,
+      objectKey: ticket.objectKey,
+      uploadId: ticket.uploadId,
+      authInfo: ticket.authInfo,
+      taskId: ticket.taskId,
+      uploadUrl: ticket.uploadUrl,
+    })
+    await this.finishUpload(ticket.objectKey, ticket.taskId)
+    return { created: true, fid: ticket.fileId }
+  }
+
+  private createHeaders(): HeadersInit {
+    return {
+      ...DEFAULT_HEADERS,
+      cookie: this.cookie,
+    }
+  }
+
+  // Presigned download URLs sign their request headers: sending API JSON
+  // headers (e.g. content-type: application/json) breaks the signature and
+  // the CDN answers 403 SignatureDoesNotMatch.
+  private createDownloadHeaders(): HeadersInit {
+    return {
+      cookie: this.cookie,
+      referer: DEFAULT_HEADERS.referer,
+      origin: DEFAULT_HEADERS.origin,
+      'user-agent': DEFAULT_HEADERS['user-agent'],
+    }
+  }
+
+  private getErrorMessage(
+    payload: { error?: string; message?: string; status?: number; code?: number } | null,
+    status: number,
+  ): string {
+    if (status === 401 || status === 403) return '夸克登录已失效，请重新扫码；本地收藏仍可使用'
+    const parts = [
+      payload?.error ?? payload?.message ?? `Quark upstream request failed (${status}).`,
+      payload?.status !== undefined ? `upstreamStatus=${payload.status}` : '',
+      payload?.code !== undefined ? `upstreamCode=${payload.code}` : '',
+      `httpStatus=${status}`,
+    ].filter(Boolean)
+
+    return parts.join(' | ')
+  }
+
+  private async captureCookieUpdates(response: Response): Promise<void> {
+    const cookieUpdates = getResponseSetCookies(response)
+    if (cookieUpdates.length === 0) {
+      return
+    }
+
+    // Quark rotates session cookies (e.g. __puus) mid-flow — sometimes after the
+    // QR ticket exchange already finished without issuing one. The CDN rejects
+    // downloads with 412 unless the request carries the current __puus, so the
+    // client must keep its own cookie fresh, not just report updates upstream.
+    this.cookie = mergeCookieString(this.cookie, cookieUpdates) ?? this.cookie
+    await this.onCookiesUpdated?.(cookieUpdates)
+  }
+}
+
+function inferContentType(entry: QuarkRawEntry): string {
+  if (entry.dir === true) {
+    return 'httpd/unix-directory'
+  }
+
+  if (entry.obj_category === 'video') {
+    return 'video/mp4'
+  }
+
+  if (entry.obj_category === 'image') {
+    return 'image/*'
+  }
+
+  if (entry.format_type) {
+    return entry.format_type
+  }
+
+  return 'application/octet-stream'
+}
+
+function parseDownloadUrlExpiresAt(downloadUrl: string, fallbackEpochSeconds?: number): number | undefined {
+  try {
+    const url = new URL(downloadUrl)
+    const expires = url.searchParams.get('Expires')
+    if (expires) {
+      const parsed = Number(expires)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed * 1000
+      }
+    }
+  } catch {
+    // Ignore malformed upstream URLs and fall back to payload metadata.
+  }
+
+  if (typeof fallbackEpochSeconds === 'number' && Number.isFinite(fallbackEpochSeconds)) {
+    return fallbackEpochSeconds * 1000
+  }
+
+  return undefined
+}
+
+async function digestToHex(algorithm: 'MD5' | 'SHA-1', data: Uint8Array): Promise<string> {
+  const digest = algorithm === 'MD5' ? md5(data) : await crypto.subtle.digest(algorithm, new Uint8Array(data).buffer)
+  return bytesToHex(new Uint8Array(digest))
+}
+
+async function digestToBase64(algorithm: 'MD5' | 'SHA-1', data: Uint8Array): Promise<string> {
+  const digest = algorithm === 'MD5' ? md5(data) : await crypto.subtle.digest(algorithm, new Uint8Array(data).buffer)
+  return uint8ArrayToBase64(new Uint8Array(digest))
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+function toBase64(value: string): string {
+  return uint8ArrayToBase64(new TextEncoder().encode(value))
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (const value of bytes) {
+    binary += String.fromCharCode(value)
+  }
+
+  return btoa(binary)
+}
+
+function stripProtocol(url: string): string {
+  return url.replace(/^https?:\/\//, '')
+}
+
+function buildUploadPartAuthMeta(args: {
+  mimeType: string
+  utcTime: string
+  bucket: string
+  objectKey: string
+  uploadId: string
+}): string {
+  return [
+    'PUT',
+    '',
+    args.mimeType,
+    args.utcTime,
+    `x-oss-date:${args.utcTime}`,
+    'x-oss-user-agent:aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit',
+    `/${args.bucket}/${args.objectKey}?partNumber=1&uploadId=${args.uploadId}`,
+  ].join('\n')
+}
+
+function getResponseSetCookies(response: Response): string[] { return getResponseCookies(response) }

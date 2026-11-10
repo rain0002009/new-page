@@ -3,8 +3,14 @@ import { ArrowRight, Cloud, LockKeyhole, LoaderCircle } from 'lucide-react'
 import { normalizeConnection } from '../core/webdav'
 import { rpc, type Snapshot } from '../core/protocol'
 import { Button } from './ui'
+import QuarkConnectionForm from './QuarkConnectionForm'
 
-export default function ConnectionForm({ initial, connected, done, onError }: { initial?: Snapshot['connection']; connected: boolean; done: (state: Snapshot) => void; onError: (message: string) => void }) {
+type Props = { initial?: Snapshot['connection']; connected: boolean; done: (state: Snapshot) => void; onError: (message: string) => void }
+export default function ConnectionForm(props: Props) {
+  const [provider, setProvider] = useState<'quark' | 'webdav'>(props.initial?.kind === 'webdav' ? 'webdav' : 'quark')
+  return <div className="connection-options"><div className="provider-options" role="group" aria-label="存储方式"><Button tone={provider === 'quark' ? 'primary' : 'ghost'} onClick={() => setProvider('quark')}>夸克网盘</Button><Button tone={provider === 'webdav' ? 'primary' : 'ghost'} onClick={() => setProvider('webdav')}>WebDAV</Button></div>{provider === 'quark' ? <QuarkConnectionForm {...props} /> : <WebDAVConnectionForm {...props} />}</div>
+}
+function WebDAVConnectionForm({ initial, connected, done, onError }: Props) {
   const [nickname, setNickname] = useState('')
   const [url, setUrl] = useState(initial?.url ?? '')
   const [username, setUsername] = useState(initial?.username ?? '')

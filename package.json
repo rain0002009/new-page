@@ -1,13 +1,15 @@
 {
   "private": true,
   "name": "new-page",
-  "description": "以空间整理网页、用书签标记 Todo，并通过 WebDAV 同步的 Chrome 新标签页。",
+  "description": "以空间整理网页、用书签标记 Todo，并自动保存到夸克网盘的 Chrome 新标签页。",
   "version": "1.0.0",
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@tanstack/react-query": "^5.107.1",
     "lucide-react": "^1.70.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.1.0",
     "react-dom": "^18.1.0",
     "tailwind-variants": "^4.0.1",

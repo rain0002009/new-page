@@ -1,9 +1,12 @@
 import { active, apply, createDocument, equal, parents, prune, readDocument, type Conflict, type Document } from './model'
 import { emptyDocument, merge, refreshConflicts, resolveConflict } from './merge'
 import type { ConnectRequest, Request, Result, Snapshot } from './protocol'
-import { normalizeConnection, RevisionChanged, sourceKey, WebDAV, type Connection } from './webdav'
+import { RevisionChanged } from './webdav'
+import { normalizeRemote, remoteKey, remoteStore, isQuark, type Connection, type RemoteRead } from './remote'
+import { startQr, pollQr } from './quark/auth'
+import { quarkOrigins } from './quark/transport'
 
-type Source = { config: Connection; doc: Document; base: Document; etag: string | null; conflicts: Conflict[]; status: Snapshot['status']; error: string; lastSync: number | null }
+type Source = { config: Connection; doc: Document; base: Document; etag: string | null; resolvedRevision?: string | null; conflicts: Conflict[]; status: Snapshot['status']; error: string; lastSync: number | null }
 type Root = { active: string | null; sources: Record<string, Source> }
 const storageKey = 'new-page.workspace.v1'
 let chain: Promise<unknown> = Promise.resolve()
@@ -27,9 +30,14 @@ function current(root: Root, id: string) {
   if (root.active !== id || !root.sources[id]) throw new Error('数据源已切换，请在当前页面重试')
   return root.sources[id]
 }
+function includeCloudConflicts(local: Conflict[], cloud: Conflict[] = []) {
+  return [...local, ...cloud.filter(candidate => !local.some(value => value.entityId === candidate.entityId &&
+    [candidate.local, candidate.remote].every(version => equal(version, value.local) || equal(version, value.remote))))]
+}
 function snapshot(root: Root): Snapshot {
   const source = root.active ? root.sources[root.active] : null
-  return source ? { sourceId: root.active, document: source.doc, connection: { url: source.config.url, username: source.config.username }, status: source.conflicts.length ? 'conflict' : source.status, conflicts: source.conflicts, error: source.error, lastSync: source.lastSync } : { sourceId: null, document: null, connection: null, status: 'pending', error: '', conflicts: [], lastSync: null }
+  const connection: Snapshot['connection'] = source ? isQuark(source.config) ? { kind: 'quark', url: 'https://pan.quark.cn/', username: source.config.nickname } : { kind: 'webdav', url: source.config.url, username: source.config.username } : null
+  return source ? { sourceId: root.active, document: source.doc, connection, status: source.conflicts.length ? 'conflict' : source.status, conflicts: source.conflicts, error: source.error, lastSync: source.lastSync } : { sourceId: null, document: null, connection: null, status: 'pending', error: '', conflicts: [], lastSync: null }
 }
 export function schedule(id: string, delay = 600) {
   const pending = scheduled.get(id)
@@ -57,19 +65,19 @@ async function synchronizeSource(id: string) {
     })
     if (!initial) return
     broadcast()
-    const client = new WebDAV(initial.config)
-    const remote = await client.read()
+    const client = remoteStore(initial.config, initial.etag)
+    const remote: RemoteRead = await client.read()
     const upload = await atomic(root => {
       const source = root.sources[id]
       if (!source || source.conflicts.length) return null
       // Disappearance of an established file is not a fresh empty account.
       if (!remote.doc && Object.keys(source.base.entities).length) throw new Error('远端数据文件被移除，本地数据已保留；请检查服务器后重试')
       const result = merge(source.base, source.doc, remote.doc ?? emptyDocument())
-      source.doc = prune(result.doc); source.conflicts = result.conflicts
+      source.doc = prune(result.doc); source.conflicts = includeCloudConflicts(result.conflicts, source.resolvedRevision === remote.etag ? [] : remote.conflicts)
       source.base = remote.doc ?? emptyDocument(); source.etag = remote.etag
-      if (result.conflicts.length) { source.status = 'conflict'; return null }
+      if (source.conflicts.length) { source.status = 'conflict'; return null }
       readDocument(source.doc)
-      if (remote.doc && equal(source.doc, remote.doc)) { source.status = 'synced'; source.lastSync = Date.now(); return null }
+      if (remote.doc && equal(source.doc, remote.doc) && !(isQuark(source.config) && remote.etag && JSON.parse(remote.etag).length > 1)) { source.status = 'synced'; source.lastSync = Date.now(); return null }
       return structuredClone(source.doc)
     })
     broadcast()
@@ -94,10 +102,11 @@ async function synchronizeSource(id: string) {
   }
 }
 async function connect(request: ConnectRequest): Promise<Result> {
-  const config = normalizeConnection(request.config), id = await sourceKey(config)
-  if (!await chrome.permissions.contains({ origins: [new URL(config.url).origin + '/*'] })) throw new Error('未获得 WebDAV 服务器访问权限，请重新点击连接并授权')
-  const client = new WebDAV(config)
-  let remote: Awaited<ReturnType<WebDAV['read']>>
+  const config = normalizeRemote(request.config), id = await remoteKey(config)
+  if (!isQuark(config) && !await chrome.permissions.contains({ origins: [new URL(config.url).origin + '/*'] })) throw new Error('未获得 WebDAV 服务器访问权限，请重新点击连接并授权')
+  const knownRevision = await atomic(root => root.sources[id]?.etag ?? null)
+  const client = remoteStore(config, knownRevision)
+  let remote: RemoteRead
   try { await client.verify(); remote = await client.read() } catch (error) {
     const cached = await atomic(root => {
       if (request.mode !== 'switch' || !root.sources[id]) return null
@@ -117,11 +126,11 @@ async function connect(request: ConnectRequest): Promise<Result> {
     if (request.mode === 'migrate' && root.sources[id]?.conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
     const cached = root.sources[id]
     if (cached && !remote.doc && Object.keys(cached.base.entities).length) throw new Error('目标远端文件被移除，未切换或覆盖数据')
-    let doc = remote.doc ?? createDocument(request.nickname || '朋友'), conflicts: Conflict[] = []
+    let doc = remote.doc ?? createDocument(request.nickname || (isQuark(config) ? config.nickname : '朋友')), conflicts: Conflict[] = remote.conflicts ?? []
     if (cached) {
       const combined = merge(cached.base, cached.doc, remote.doc ?? emptyDocument())
       doc = combined.doc
-      conflicts = refreshConflicts(cached.conflicts, combined.conflicts, doc, remote.doc ?? emptyDocument())
+      conflicts = includeCloudConflicts(refreshConflicts(cached.conflicts, combined.conflicts, doc, remote.doc ?? emptyDocument()), cached.resolvedRevision === remote.etag ? [] : remote.conflicts)
     }
     if (request.mode === 'migrate' && previous) {
       if (conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
@@ -132,7 +141,7 @@ async function connect(request: ConnectRequest): Promise<Result> {
         doc = combined.doc; conflicts = combined.conflicts
       }
     }
-    root.sources[id] = { config, doc: prune(doc), base: remote.doc ?? emptyDocument(), etag: remote.etag, conflicts, status: conflicts.length ? 'conflict' : 'pending', error: '', lastSync: cached?.lastSync ?? null }
+    root.sources[id] = { config, doc: prune(doc), base: remote.doc ?? emptyDocument(), etag: remote.etag, resolvedRevision: cached?.resolvedRevision, conflicts, status: conflicts.length ? 'conflict' : 'pending', error: '', lastSync: cached?.lastSync ?? null }
     root.active = id
     return { ok: true, snapshot: snapshot(root) } as const
   })
@@ -140,6 +149,10 @@ async function connect(request: ConnectRequest): Promise<Result> {
   return result
 }
 export async function handle(request: Request): Promise<Result> {
+  if (request.type === 'quark-qr-start' || request.type === 'quark-qr-poll') {
+    if (!await chrome.permissions.contains({ origins: quarkOrigins, permissions: ['webRequest', 'declarativeNetRequestWithHostAccess'] })) throw new Error('请点击扫码登录并授权访问夸克网盘')
+    return request.type === 'quark-qr-start' ? { ok: true, qr: await startQr() } : { ok: true, ...await pollQr(request.id) }
+  }
   if (request.type === 'connect') return connect(request)
   if (request.type === 'sync') {
     await atomic(root => current(root, request.sourceId))
@@ -170,7 +183,7 @@ export async function handle(request: Request): Promise<Result> {
       if (!conflict) throw new Error('此冲突已处理，请刷新')
       source.doc = resolveConflict(source.doc, conflict, request.side)
       source.conflicts = source.conflicts.filter(c => c.id !== conflict.id)
-      if (!source.conflicts.length) readDocument(source.doc)
+      if (!source.conflicts.length) { readDocument(source.doc); source.resolvedRevision = source.etag }
     } else if (request.type === 'import') {
       if (source.conflicts.length) throw new Error('请先解决同步冲突再导入')
       const imported = prune(readDocument(request.data))

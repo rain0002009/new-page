@@ -4,6 +4,7 @@ import { mkdtemp, rm, cp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { generate } from 'selfsigned'
+import { QuarkFixture } from './quark-fixture'
 
 let server: Server
 let origin: string
@@ -15,12 +16,14 @@ let rejectNextWrite = false
 let suspendDataWrites = false
 const files = new Map<string, { body: string; revision: number }>()
 const clients: { context: BrowserContext; profile: string }[] = []
+const quark = new QuarkFixture()
 
 test.beforeAll(async () => {
   const cert = await generate([{ name: 'commonName', value: 'localhost' }], {
     extensions: [{ name: 'subjectAltName', altNames: [{ type: 2, value: 'localhost' }] }],
   })
   server = createServer({ key: cert.private, cert: cert.cert }, async (req, res) => {
+    if (await quark.handle(req, res, origin)) return
     const path = new URL(req.url!, 'https://localhost').pathname
     if (path.startsWith('/web/')) {
       res.setHeader('Content-Type', 'text/html; charset=utf-8')
@@ -60,7 +63,7 @@ test.beforeAll(async () => {
   origin = `https://localhost:${(server.address() as { port: number }).port}`
 })
 
-test.beforeEach(() => { files.clear(); unavailable = false; unsafeWrites = false; omitGetTag = false; omitPutTag = false; rejectNextWrite = false; suspendDataWrites = false })
+test.beforeEach(() => { files.clear(); quark.reset(); unavailable = false; unsafeWrites = false; omitGetTag = false; omitPutTag = false; rejectNextWrite = false; suspendDataWrites = false })
 test.afterEach(async () => {
   for (const client of clients.splice(0)) {
     await client.context.close()
@@ -69,15 +72,25 @@ test.afterEach(async () => {
 })
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())) })
 
-async function openClient(existingProfile?: string) {
+async function openClient(existingProfile?: string, quarkMode = false) {
   const profile = existingProfile ?? await mkdtemp(join(tmpdir(), 'new-page-e2e-'))
   const extension = join(profile, 'extension')
   await cp(resolve('dist/chrome'), extension, { recursive: true })
   const manifestPath = join(extension, 'manifest.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   // Pre-authorize only the isolated test server; production still requests its optional origin.
-  manifest.host_permissions = ['https://localhost/*']
+  manifest.host_permissions = ['https://localhost/*', 'https://*.localhost/*']
+  manifest.permissions.push('webRequest', 'declarativeNetRequestWithHostAccess')
   await writeFile(manifestPath, JSON.stringify(manifest))
+  // Redirect only the isolated test copy's API origins. Production keeps Quark.
+  const backgroundPath = join(extension, 'background/service_worker.js')
+  let background = await readFile(backgroundPath, 'utf8')
+  for (const host of ['https://drive-pc.quark.cn', 'https://uop.quark.cn', 'https://pan.quark.cn']) background = background.replaceAll(host, origin)
+  background = background.replaceAll('https://*.quark.cn/*', 'https://localhost/*').replaceAll('https://*.uc.cn/*', 'https://localhost/*').replaceAll('https://*.aliyuncs.com/*', 'https://*.localhost/*')
+  await writeFile(backgroundPath, background)
+  const newtabPath = join(extension, 'chrome_url_overrides/newtab.js')
+  const newtab = (await readFile(newtabPath, 'utf8')).replaceAll('https://*.quark.cn/*', 'https://localhost/*').replaceAll('https://*.uc.cn/*', 'https://localhost/*').replaceAll('https://*.aliyuncs.com/*', 'https://*.localhost/*')
+  await writeFile(newtabPath, newtab)
   const context = await chromium.launchPersistentContext(profile, {
     executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
     headless: true, ignoreHTTPSErrors: true,
@@ -90,10 +103,12 @@ async function openClient(existingProfile?: string) {
   const { id } = await session.send('Extensions.loadUnpacked', { path: extension })
   const page = await context.newPage()
   await page.goto(`chrome-extension://${id}/chrome_url_overrides/newtab.html`)
+  if (!quarkMode && !existingProfile) await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
   return { context, page, profile, url: page.url() }
 }
 
 async function connect(page: Page, path = '/dav/') {
+  await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
   await page.getByLabel('昵称', { exact: true }).fill('Rain')
   await page.getByLabel('WebDAV 地址').fill(`${origin}${path}`)
   await page.getByLabel('用户名', { exact: true }).fill('tester')
@@ -101,6 +116,211 @@ async function connect(page: Page, path = '/dav/') {
   await page.getByRole('button', { name: '连接并开始' }).click()
   await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
 }
+
+async function connectQuark(page: Page) {
+  const fromSettings = await page.getByRole('heading', { name: '设置', exact: true }).count() > 0
+  await page.getByRole('button', { name: '夸克网盘', exact: true }).click()
+  await page.getByRole('button', { name: /扫码登录夸克|重新扫码 \/ 切换账号/ }).click()
+  await expect(page.getByLabel('夸克登录二维码')).toBeVisible()
+  if (fromSettings) await expect(page.getByText(/当前夸克账号：/)).toBeVisible()
+  else await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
+}
+
+test('夸克扫码后签名上传并轮换 Cookie，重开和另一设备读取收藏', async () => {
+  quark.loginRedirect = true
+  quark.qrPending = true
+  const first = await openClient(undefined, true)
+  await expect(first.page.getByRole('button', { name: '扫码登录夸克', exact: true })).toBeVisible()
+  await first.page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
+  await expect(first.page.getByLabel('夸克登录二维码')).toBeVisible()
+  await first.page.screenshot({ path: test.info().outputPath('quark-login.png') })
+  quark.qrPending = false
+  await expect(first.page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
+  await addLink(first.page, '夸克里的 React')
+  await sync(first.page)
+  const snapshots = quark.snapshots()
+  expect(snapshots.length).toBeGreaterThan(0)
+  expect(snapshots.some(file => file.body.includes('夸克里的 React'))).toBe(true)
+  expect(snapshots.every(file => !file.body.includes('__puus') && !file.body.includes('qr_seed'))).toBe(true)
+  expect(quark.deleted).toBe(0)
+  await first.page.reload()
+  await expect(first.page.getByRole('link', { name: '夸克里的 React', exact: true })).toBeVisible()
+  const second = await openClient(undefined, true)
+  await connectQuark(second.page)
+  await expect(second.page.getByRole('link', { name: '夸克里的 React', exact: true })).toBeVisible()
+})
+
+test('夸克上传失败不删除旧版本，离线新增重开保留并能重试', async () => {
+  const { page } = await openClient(undefined, true)
+  await connectQuark(page)
+  await addLink(page, '已经保存的收藏')
+  await sync(page)
+  const previous = quark.snapshots().map(file => file.fid)
+  quark.failUpload = true
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await addLink(page, '稍后上传的收藏')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page.getByRole('status').first()).toContainText('同步未完成')
+  for (const fid of previous) expect(quark.files.has(fid)).toBe(true)
+  expect(quark.deleted).toBe(0)
+  await page.reload()
+  await expect(page.getByRole('link', { name: '稍后上传的收藏', exact: true })).toBeVisible()
+  quark.failUpload = false
+  await sync(page)
+  expect(quark.snapshots().some(file => file.body.includes('稍后上传的收藏'))).toBe(true)
+})
+
+test('夸克二维码过期可刷新，登录失效时保留本地并支持重新扫码', async () => {
+  const { page } = await openClient(undefined, true)
+  quark.qrExpired = true
+  await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('二维码已过期')
+  quark.qrExpired = false
+  await page.getByRole('button', { name: '刷新二维码', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
+  await addLink(page, '登录失效仍保留')
+  await sync(page)
+  quark.expired = true
+  await page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(page.getByRole('status').first()).toContainText('请重新扫码')
+  await page.reload()
+  await expect(page.getByRole('link', { name: '登录失效仍保留', exact: true })).toBeVisible()
+  quark.expired = false
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '重新扫码 / 切换账号', exact: true }).click()
+  await expect(page.getByText('扫码已完成', { exact: false })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重新扫码 / 切换账号', exact: true })).toBeVisible()
+  await sync(page)
+})
+
+test('夸克两设备同时保存形成分支，不同收藏自动合并且旧版本保留', async () => {
+  const first = await openClient(undefined, true)
+  await connectQuark(first.page)
+  await addLink(first.page, '共同收藏')
+  await sync(first.page)
+  const second = await openClient(undefined, true)
+  await connectQuark(second.page)
+  await first.page.getByRole('button', { name: '我的空间', exact: true }).click()
+  quark.parallelUploads = 2
+  await Promise.all([addLink(first.page, '设备一收藏'), addLink(second.page, '设备二收藏')])
+  await Promise.all([sync(first.page), sync(second.page)])
+  await sync(first.page)
+  await first.page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(first.page.getByRole('link', { name: '设备二收藏', exact: true })).toBeVisible()
+  await sync(second.page)
+  await second.page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(second.page.getByRole('link', { name: '设备一收藏', exact: true })).toBeVisible()
+  expect(quark.deleted).toBe(0)
+})
+
+test('夸克账号切换隔离本地与云端，切回读取自己的收藏', async () => {
+  const { page } = await openClient(undefined, true)
+  await connectQuark(page)
+  await addLink(page, 'Rain 的收藏')
+  await sync(page)
+  quark.nextAccount = 'other'
+  await page.getByRole('button', { name: '重新扫码 / 切换账号', exact: true }).click()
+  await expect(page.getByText('当前夸克账号：other')).toBeVisible()
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'Rain 的收藏', exact: true })).toHaveCount(0)
+  await addLink(page, 'Other 的收藏')
+  await sync(page)
+  expect(quark.snapshots('other').every(file => !file.body.includes('Rain 的收藏'))).toBe(true)
+  quark.nextAccount = 'rain'
+  await page.getByRole('button', { name: '重新扫码 / 切换账号', exact: true }).click()
+  await expect(page.getByText('当前夸克账号：rain')).toBeVisible()
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'Rain 的收藏', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Other 的收藏', exact: true })).toHaveCount(0)
+})
+
+test('夸克并行编辑同一收藏保留两个云端版本，选择后停止反复冲突', async () => {
+  const first = await openClient(undefined, true)
+  await connectQuark(first.page)
+  await addLink(first.page, '需要合并的收藏')
+  await sync(first.page)
+  const second = await openClient(undefined, true)
+  await connectQuark(second.page)
+  await first.page.getByRole('button', { name: '我的空间', exact: true }).click()
+  quark.parallelUploads = 2
+  await Promise.all([renameLink(first.page, '需要合并的收藏', '设备一的标题'), renameLink(second.page, '需要合并的收藏', '设备二的标题')])
+  await Promise.all([sync(first.page), sync(second.page)])
+  await first.page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(first.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toBeVisible()
+  await expect(first.page.getByText('设备一的标题', { exact: true }).first()).toBeVisible()
+  await expect(first.page.getByText('设备二的标题', { exact: true }).first()).toBeVisible()
+  await first.page.getByRole('button', { name: '保留本地版本', exact: true }).first().click()
+  await expect(first.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toHaveCount(0)
+  await sync(first.page)
+  await sync(first.page)
+  expect(quark.snapshots().some(file => file.body.includes('设备一的标题'))).toBe(true)
+  expect(quark.snapshots().some(file => file.body.includes('设备二的标题'))).toBe(true)
+  expect(quark.deleted).toBe(0)
+})
+
+test('夸克远端损坏时不上传空数据，修正后恢复保存', async () => {
+  const { page } = await openClient(undefined, true)
+  await connectQuark(page)
+  await addLink(page, '原始收藏')
+  await sync(page)
+  const count = quark.snapshots().length
+  quark.downloadsCorrupt = true
+  await page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(page.getByRole('status').first()).toContainText('已损坏')
+  expect(quark.snapshots()).toHaveLength(count)
+  await page.reload()
+  await expect(page.getByRole('link', { name: '原始收藏', exact: true })).toBeVisible()
+  quark.downloadsCorrupt = false
+  await sync(page)
+})
+
+test('夸克目录延迟列出已上传版本时不回退本地收藏，列表恢复后正常同步', async () => {
+  const { page } = await openClient(undefined, true)
+  await connectQuark(page)
+  await sync(page)
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await addLink(page, '目录延迟也不能丢的收藏')
+  await sync(page)
+  for (const file of quark.snapshots()) if (file.body.includes('目录延迟也不能丢的收藏')) quark.hiddenVersions.add(file.fid)
+  await page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(page.getByRole('status').first()).toContainText('尚未')
+  await page.reload()
+  await expect(page.getByRole('link', { name: '目录延迟也不能丢的收藏', exact: true })).toBeVisible()
+  quark.hiddenVersions.clear()
+  await sync(page)
+})
+
+test('夸克扫码成功但读取失败时可重试读取，无需重新扫码', async () => {
+  const first = await openClient(undefined, true)
+  await connectQuark(first.page)
+  await addLink(first.page, '重试后读取的收藏')
+  await sync(first.page)
+  quark.downloadsCorrupt = true
+  const second = await openClient(undefined, true)
+  await second.page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
+  await expect(second.page.getByRole('alert')).toContainText('已损坏')
+  await expect(second.page.getByRole('button', { name: '重新读取收藏', exact: true })).toBeVisible()
+  quark.downloadsCorrupt = false
+  await second.page.getByRole('button', { name: '重新读取收藏', exact: true }).click()
+  await expect(second.page.getByRole('link', { name: '重试后读取的收藏', exact: true })).toBeVisible()
+})
+
+test('已有 WebDAV 收藏可扫码迁移到夸克，保留收藏和待办', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '迁移到夸克的收藏')
+  await page.getByRole('article', { name: '链接 迁移到夸克的收藏' }).hover()
+  await page.getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await sync(page)
+  await connectQuark(page)
+  await sync(page)
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(page.getByRole('link', { name: '迁移到夸克的收藏', exact: true })).toBeVisible()
+  const second = await openClient(undefined, true)
+  await connectQuark(second.page)
+  await second.page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(second.page.getByRole('link', { name: '迁移到夸克的收藏', exact: true })).toBeVisible()
+})
 
 async function addLink(page: Page, title: string, url = 'https://react.dev/') {
   await page.getByRole('button', { name: '添加链接', exact: true }).first().click()
@@ -449,7 +669,7 @@ for (const missing of ['GET', 'PUT'] as const) {
     await expect(page.getByRole('alert')).toContainText(`${missing} 响应未提供强 ETag`)
     expect(files.size).toBe(0)
     await page.reload()
-    await expect(page.getByRole('button', { name: '连接并开始', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '扫码登录夸克', exact: true })).toBeVisible()
     omitGetTag = false
     omitPutTag = false
     await connect(page)

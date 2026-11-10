@@ -14,7 +14,7 @@
     }
   },
   "name": "拾页 · Page Garden",
-  "description": "以空间整理收藏，用 Todo 标记待办，并通过 WebDAV 自动同步。",
+  "description": "以空间整理收藏，用 Todo 标记待办，自动保存到夸克网盘。",
   "permissions": [
     "storage",
     "tabs",
@@ -22,6 +22,10 @@
   ],
   "optional_host_permissions": [
     "https://*/*"
+  ],
+  "optional_permissions": [
+    "webRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
   "icons": {
     "16": "images/icon-16.png",
