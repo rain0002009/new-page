@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Cloud, Download, Upload, RotateCcw, Trash2, AlertTriangle, Check } from 'lucide-react'
 import { type Entity, type Conflict, type Document } from '../core/model'
-import { rpc, type Snapshot } from '../core/protocol'
+import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import type { Act } from './Editor'
 import { Button, Modal } from './ui'
@@ -21,11 +21,11 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
     else if (result.snapshot) { receive(result.snapshot); setPending(null) }
   }
   const deleted = Object.values(data.document.entities).filter(e => !e.purged && e.deletedAt !== null && e.deletedBy === e.id).sort((a, b) => b.deletedAt! - a.deletedAt!)
-  const statuses = { synced: '已同步', pending: '待同步', syncing: '正在同步', error: '同步未完成', conflict: '有冲突待处理' }
+
   return <>
     <section className="settings-card"><h2>个人偏好</h2><label>显示昵称<input aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label><p className="autosave-note"><Check size={13} />有效改动自动保存</p></section>
     {data.conflicts.length > 0 && <section className="settings-card conflict-section"><h2><AlertTriangle size={16} />选择要保留的版本</h2><p className="muted">两个版本均已保留在本机。处理完后继续同步，你也可以继续整理其他收藏。</p>{data.conflicts.map(conflict => <ConflictChoice key={conflict.id} conflict={conflict} busy={busy} choose={side => void execute(async () => { const result = await rpc({ type: 'resolve', sourceId: data.sourceId!, conflictId: conflict.id, side }); if (result.snapshot) receive(result.snapshot) })} />)}</section>}
-    <section className="settings-card"><h2>连接与同步</h2><p className="muted" role="status">{statuses[data.status]}{data.error ? ` · ${data.error}` : ''}</p><div className="sync-detail"><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><Button disabled={busy} onClick={() => void execute(async () => { await rpc({ type: 'sync', sourceId: data.sourceId! }) })}><Cloud size={16} />立即同步</Button></div><ConnectionForm key={data.sourceId} initial={data.connection} connected done={receive} onError={onError} /></section>
+    <section className="settings-card"><h2>连接与同步</h2><p className="muted" role="status">{syncStatusLabels[data.status]}{data.error ? ` · ${data.error}` : ''}</p><div className="sync-detail"><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><Button disabled={busy} onClick={() => void execute(async () => { const result = await rpc({ type: 'sync', sourceId: data.sourceId! }); if (result.snapshot) receive(result.snapshot) })}><Cloud size={16} />立即同步</Button></div><ConnectionForm key={data.sourceId} initial={data.connection} connected done={receive} onError={onError} /></section>
     <section className="settings-card"><h2>备份与迁移</h2><p className="muted">备份包含收藏、顺序、待办与回收站；不包含 WebDAV 密码。</p><div className="backup-actions"><Button disabled={busy} onClick={() => void execute(async () => {
       const result = await rpc({ type: 'export', sourceId: data.sourceId! })
       const url = URL.createObjectURL(new Blob([JSON.stringify(result.backup, null, 2)], { type: 'application/json' }))

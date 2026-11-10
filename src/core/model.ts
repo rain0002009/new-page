@@ -24,6 +24,7 @@ export type Conflict = {
   id: string; entityId: string; fields: string[]
   local: Entity | null; remote: Entity | null
   localParents: Entity[]; remoteParents: Entity[]
+  localSpace?: Entity; remoteSpace?: Entity
 }
 export type LinkInput = { title: string; url: string; icon?: string; note?: string }
 export type Action =

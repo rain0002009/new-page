@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Check, Cloud, Edit3, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
 import { active, children, type Action, type Collection, type Link } from '../core/model'
-import { rpc, type Snapshot } from '../core/protocol'
+import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import SettingsPanel from './SettingsPanel'
 import TabInbox, { useWindowTabs } from './TabInbox'
@@ -49,7 +49,7 @@ export default function NewTabApp() {
   const nickname = doc.entities.profile.title
   const collections = space ? children(doc, space.id).filter((e): e is Collection => e.kind === 'collection') : []
   const links = all.filter((e): e is Link => e.kind === 'link')
-  const status = { synced: '已同步', pending: '待同步', syncing: '正在同步', error: '同步未完成', conflict: '有冲突待处理' }[data.status]
+  const status = syncStatusLabels[data.status]
   function locate(link: Link) {
     const collection = doc.entities[link.parentId!]
     setSelected(collection.parentId!); setPage('space')

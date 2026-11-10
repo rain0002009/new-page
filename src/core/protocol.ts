@@ -7,6 +7,7 @@ export type Snapshot = {
   status: 'synced' | 'pending' | 'syncing' | 'error' | 'conflict'
   error: string; lastSync: number | null; conflicts: Conflict[]
 }
+export const syncStatusLabels: Record<Snapshot['status'], string> = { synced: '已同步', pending: '待同步', syncing: '正在同步', error: '同步未完成', conflict: '有冲突待处理' }
 export type ConnectRequest = { type: 'connect'; config: Connection; nickname: string; mode: 'switch' | 'migrate'; confirmed?: boolean }
 export type Request =
   | { type: 'snapshot' }

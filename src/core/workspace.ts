@@ -1,5 +1,5 @@
 import { active, apply, createDocument, equal, parents, prune, readDocument, type Conflict, type Document } from './model'
-import { emptyDocument, merge, resolveConflict } from './merge'
+import { emptyDocument, merge, refreshConflicts, resolveConflict } from './merge'
 import type { ConnectRequest, Request, Result, Snapshot } from './protocol'
 import { normalizeConnection, RevisionChanged, sourceKey, WebDAV, type Connection } from './webdav'
 
@@ -8,6 +8,7 @@ type Root = { active: string | null; sources: Record<string, Source> }
 const storageKey = 'new-page.workspace.v1'
 let chain: Promise<unknown> = Promise.resolve()
 const syncing = new Set<string>()
+const inFlight = new Map<string, Promise<void>>()
 const scheduled = new Map<string, ReturnType<typeof setTimeout>>()
 
 function atomic<T>(work: (root: Root) => T | Promise<T>): Promise<T> {
@@ -35,8 +36,14 @@ export function schedule(id: string, delay = 600) {
   if (pending) clearTimeout(pending)
   scheduled.set(id, setTimeout(() => { scheduled.delete(id); void synchronize(id) }, delay))
 }
-export async function synchronize(id: string) {
-  if (syncing.has(id)) return
+export function synchronize(id: string): Promise<void> {
+  const running = inFlight.get(id)
+  if (running) return running
+  const task = synchronizeSource(id).finally(() => inFlight.delete(id))
+  inFlight.set(id, task)
+  return task
+}
+async function synchronizeSource(id: string) {
   syncing.add(id)
   let retry = false
   try {
@@ -105,6 +112,7 @@ async function connect(request: ConnectRequest): Promise<Result> {
     const previous = root.active ? root.sources[root.active] : null
     if (request.mode === 'migrate' && root.active === id) throw new Error('源和目标相同，无需迁移')
     if (request.mode === 'migrate' && previous?.conflicts.length) throw new Error('请先解决当前数据源的冲突再迁移')
+    if (request.mode === 'migrate' && root.sources[id]?.conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
     if (request.mode === 'migrate' && remote.doc && !request.confirmed) return { ok: true, confirmation: '目标已有收藏。确认合并当前数据？已有内容会保留，冲突需要单独选择。' } as const
     const cached = root.sources[id]
     if (cached && !remote.doc && Object.keys(cached.base.entities).length) throw new Error('目标远端文件被移除，未切换或覆盖数据')
@@ -112,7 +120,7 @@ async function connect(request: ConnectRequest): Promise<Result> {
     if (cached) {
       const combined = merge(cached.base, cached.doc, remote.doc ?? emptyDocument())
       doc = combined.doc
-      conflicts = [...new Map([...cached.conflicts, ...combined.conflicts].map(value => [value.entityId, value])).values()]
+      conflicts = refreshConflicts(cached.conflicts, combined.conflicts, doc, remote.doc ?? emptyDocument())
     }
     if (request.mode === 'migrate' && previous) {
       if (!remote.doc && !cached) doc = structuredClone(previous.doc)
@@ -130,7 +138,11 @@ async function connect(request: ConnectRequest): Promise<Result> {
 }
 export async function handle(request: Request): Promise<Result> {
   if (request.type === 'connect') return connect(request)
-  if (request.type === 'sync') { await atomic(root => current(root, request.sourceId)); schedule(request.sourceId, 0); return { ok: true } }
+  if (request.type === 'sync') {
+    await atomic(root => current(root, request.sourceId))
+    await synchronize(request.sourceId)
+    return atomic(root => ({ ok: true, snapshot: snapshot(root) } as const))
+  }
   const result = await atomic(root => {
     if (request.type === 'snapshot') {
       if (root.active) {
