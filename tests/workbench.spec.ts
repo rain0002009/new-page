@@ -289,7 +289,14 @@ test('夸克并行编辑同一收藏保留两个云端版本，选择后停止�
   await first.page.getByRole('button', { name: '我的空间', exact: true }).click()
   quark.parallelUploads = 2
   await Promise.all([renameLink(first.page, '需要合并的收藏', '设备一的标题'), renameLink(second.page, '需要合并的收藏', '设备二的标题')])
-  await Promise.all([sync(first.page), sync(second.page)])
+  // Auto-sync may already observe the other branch before the manual request.
+  // Both a saved branch and an unresolved conflict are valid at this stage.
+  await Promise.all([first.page, second.page].map(async page => {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '立即同步', exact: true }).click()
+    await expect(page.getByRole('button', { name: '立即同步', exact: true })).toBeEnabled()
+    await expect(page.getByRole('status').first()).toHaveText(/^(已同步|有冲突待处理)$/)
+  }))
   await first.page.getByRole('button', { name: '立即同步', exact: true }).click()
   await expect(first.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toBeVisible()
   await expect(first.page.getByText('设备一的标题', { exact: true }).first()).toBeVisible()
