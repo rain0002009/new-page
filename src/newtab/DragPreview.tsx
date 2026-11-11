@@ -13,7 +13,8 @@ export function snapshotElement(source: HTMLElement) {
   clone.removeAttribute('data-dragging')
   clone.removeAttribute('data-drop-target')
   clone.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'))
-  clone.classList.add('drag-snapshot')
+  clone.classList.remove('cursor-grab')
+  clone.classList.add('drag-snapshot', 'cursor-grabbing')
   clone.inert = true
   clone.setAttribute('aria-hidden', 'true')
   Object.assign(clone.style, { width: `${rect.width}px`, height: `${rect.height}px`, minHeight: '0', margin: '0', transform: 'none', transition: 'none', opacity: '1', pointerEvents: 'none' })
@@ -29,7 +30,7 @@ export default function DragPreview({ element }: { element: HTMLElement }) {
     host.replaceChildren(element)
     return () => { host.replaceChildren() }
   }, [element])
-  return <div className="drag-preview" ref={ref} aria-hidden="true" />
+  return <div className="drag-preview w-full h-full max-w-none p-0 border-0 bg-none overflow-visible whitespace-normal rounded-[15px] shadow-[0_18px_38px_#3443282b] text-[13px] text-ui-ink cursor-grabbing" ref={ref} aria-hidden="true" />
 }
 
 export async function animateDrop({ dragOverlay, transform }: DropAnimationFunctionArguments, target: HTMLElement | null) {

@@ -8,11 +8,12 @@ import DragPreview, { animateDrop, snapshotElement } from './DragPreview'
 
 type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string } | { kind: 'tab'; tab: LinkInput; title: string }
 
-export function useDragItem(id: string, item: DragItem, disabled = false) {
+export function useDragItem(id: string, item: DragItem, className: string, disabled = false) {
   const node = useRef<HTMLElement | null>(null)
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: { ...item, node }, disabled: { draggable: disabled, droppable: disabled || item.kind === 'tab' } })
   const ref = useCallback((element: HTMLElement | null) => { node.current = element; setNodeRef(element); setActivatorNodeRef(element) }, [setNodeRef, setActivatorNodeRef])
-  return disabled ? {} : {
+  return disabled ? { className } : {
+    className: `${className} cursor-grab data-[dragging]:z-2 data-[dragging]:!bg-[#d5e1c680] data-[dragging]:!shadow-none data-[dragging]:[outline:1.5px_dashed_#9caf88] data-[dragging]:outline-offset-[-1px] [&[data-dragging]>*]:invisible [&[data-dragging]::before]:hidden [&[data-drop-target]:not([data-dragging])]:[outline:2px_solid_#b2c495] ${item.kind === 'todo' ? '[&[data-drop-target]:not([data-dragging])]:outline-offset-[-2px]' : '[&[data-drop-target]:not([data-dragging])]:outline-offset-[3px]'}`,
     ref,
     ...attributes, role: undefined, ...listeners,
     style: { transform: CSS.Translate.toString(transform), transition },
@@ -36,7 +37,7 @@ export function useCollectionPlaceholder(doc: Document, collectionId: string) {
 
 export function CollectionPlaceholder({ collectionId, target, height }: { collectionId: string; target: DragItem; height?: number }) {
   const { setNodeRef } = useDroppable({ id: `drop-slot:${collectionId}`, data: target })
-  return <div ref={setNodeRef} className="card-placeholder" role="img" aria-label="收藏放置位置" style={{ height }} />
+  return <div ref={setNodeRef} className="card-placeholder min-h-[124px] rounded-[15px] bg-[#d5e1c680] border-[1.5px] border-dashed border-[#9caf88] animate-[placeholder-in_.16s_ease-out]" role="img" aria-label="收藏放置位置" style={{ height }} />
 }
 
 const collision: CollisionDetection = args => {

@@ -139,6 +139,13 @@ test('夸克首次安装直接显示二维码，不依赖运行时新增权限�
   })
   await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
   await expect(page.getByLabel('夸克登录二维码')).toBeVisible()
+  await page.screenshot({ path: 'test-results/connection-quark-desktop.png', fullPage: true })
+  await page.setViewportSize({ width: 480, height: 900 })
+  const qr = (await page.getByLabel('夸克登录二维码').boundingBox())!
+  expect(qr.x).toBeGreaterThanOrEqual(0)
+  expect(qr.x + qr.width).toBeLessThanOrEqual(480)
+  await expect(page.getByRole('button', { name: '刷新二维码', exact: true })).toBeVisible()
+  await page.screenshot({ path: 'test-results/connection-quark-mobile.png', fullPage: true })
 })
 
 test('夸克访问权限未启用时明确提示并恢复登录按钮', async () => {
@@ -168,6 +175,8 @@ test('夸克后台未回复时结束二维码等待并可重试', async () => {
   })
   await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
   await expect(page.getByRole('button', { name: '正在获取二维码…', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '正在获取二维码…', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '正在获取二维码…', exact: true })).toHaveCSS('opacity', '0.5')
   await page.clock.runFor(31_000)
   await expect(page.getByRole('alert')).toContainText('二维码请求超时')
   await page.getByRole('button', { name: '扫码登录夸克', exact: true }).click()
@@ -517,9 +526,28 @@ test('收藏卡片移除旧移动图标，空备注不保留多余底部高度',
   await connect(page)
   await addLink(page, '紧凑收藏')
   const card = page.getByRole('article', { name: '链接 紧凑收藏', exact: true })
+  const edit = card.getByRole('button', { name: '编辑链接', exact: true })
+  const todo = card.getByRole('button', { name: '加入 Todo', exact: true })
+  const settings = page.getByRole('button', { name: '设置', exact: true })
+  await settings.hover()
+  await settings.focus()
+  await expect(edit).toHaveCSS('opacity', '0')
+  await card.focus()
+  await expect(edit).toHaveCSS('opacity', '1')
+  await expect(todo).toHaveCSS('opacity', '1')
+  await todo.click()
+  await settings.hover()
+  await settings.focus()
+  await expect(edit).toHaveCSS('opacity', '0')
+  await expect(card.getByRole('button', { name: '移出 Todo', exact: true })).toHaveCSS('opacity', '1')
   await card.hover()
   await expect(card.getByRole('button', { name: '移动链接', exact: true })).toHaveCount(0)
   expect((await card.boundingBox())!.height).toBeLessThan(145)
+  await page.setViewportSize({ width: 480, height: 900 })
+  await settings.hover()
+  await settings.focus()
+  await expect(edit).toHaveCSS('opacity', '1')
+  await page.screenshot({ path: 'test-results/card-mobile-actions.png', fullPage: true })
 })
 
 test('拖动保留完整卡片和原尺寸，落点显示等尺寸占位', async () => {
@@ -738,6 +766,7 @@ test('删除收藏块隐藏 Todo，回收站恢复层次与标记，备份不含
   await page.getByRole('article').hover()
   await page.getByRole('button', { name: '加入 Todo', exact: true }).click()
   await page.getByRole('button', { name: '删除 日常收藏', exact: true }).click()
+  await page.screenshot({ path: 'test-results/delete-collection-dialog.png', fullPage: true })
   await page.getByRole('dialog').getByRole('button', { name: '移到回收站', exact: true }).click()
   await page.getByRole('button', { name: /^Todo/ }).click()
   await expect(page.getByRole('link', { name: '值得重读', exact: true })).toHaveCount(0)
@@ -816,6 +845,17 @@ test('离线编辑重开保留，不同条目合并；同条目冲突保留两�
   await expect(second.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toBeVisible()
   await expect(second.page.getByText('远端的新标题', { exact: true })).toHaveCount(2)
   await expect(second.page.getByText('本机的新标题', { exact: true })).toBeVisible()
+  await second.page.screenshot({ path: 'test-results/conflict-desktop.png', fullPage: true })
+  await second.page.setViewportSize({ width: 480, height: 900 })
+  const localVersion = second.page.getByRole('button', { name: '保留本地版本', exact: true })
+  const remoteVersion = second.page.getByRole('button', { name: '保留远端版本', exact: true })
+  await localVersion.scrollIntoViewIfNeeded()
+  const localBounds = (await localVersion.boundingBox())!
+  const remoteBounds = (await remoteVersion.boundingBox())!
+  expect(remoteBounds.y).toBeGreaterThan(localBounds.y + localBounds.height)
+  expect(remoteBounds.x + remoteBounds.width).toBeLessThanOrEqual(480)
+  await second.page.screenshot({ path: 'test-results/conflict-mobile.png', fullPage: true })
+  await second.page.setViewportSize({ width: 1500, height: 960 })
   await second.page.getByRole('button', { name: '保留本地版本', exact: true }).click()
   await expect(second.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toHaveCount(0)
   await sync(second.page)
@@ -1062,6 +1102,7 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await page.getByRole('dialog').getByLabel('备注', { exact: true }).fill('从组件开始，把灵感做成可以使用的东西。')
   await page.getByRole('dialog').getByLabel('网址', { exact: true }).fill('chrome://settings')
   await expect(page.getByRole('dialog')).toContainText('HTTP 或 HTTPS')
+  await page.screenshot({ path: 'test-results/shared-ui-editor.png', fullPage: true })
   await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
   await expect(page.getByRole('link', { name: 'React · 构建交互界面', exact: true })).toHaveAttribute('href', 'https://react.dev/')
   await card.hover()
@@ -1072,6 +1113,26 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   const collection = page.getByRole('region', { name: '收藏块 设计与灵感' })
   await drag(page, page.getByRole('article', { name: '待选 UnoCSS 指南', exact: true }), collection)
   await page.screenshot({ path: 'test-results/workbench-desktop.png', fullPage: true })
+  for (const width of [1800, 1200, 1100, 1000, 650, 360]) {
+    await page.setViewportSize({ width, height: 900 })
+    const main = (await page.getByRole('main').boundingBox())!
+    const sidebar = (await page.locator('.sidebar').boundingBox())!
+    expect(main.x).toBeGreaterThanOrEqual(sidebar.x + sidebar.width)
+    expect(main.x + main.width).toBeLessThanOrEqual(width)
+    expect(main.y + main.height).toBeLessThanOrEqual(900)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await expect(page.getByRole('button', { name: '新建空间', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建收藏块', exact: true })).toBeVisible()
+    const inbox = page.getByRole('complementary', { name: '待选网页' })
+    if (width > 1000) {
+      await expect(inbox).toBeVisible()
+      expect(main.x + main.width).toBeLessThanOrEqual((await inbox.boundingBox())!.x)
+    } else {
+      await expect(inbox).toBeHidden()
+      // Hiding the inbox must also release its grid column.
+      expect(width - main.x - main.width).toBeLessThan(24)
+    }
+  }
   await page.setViewportSize({ width: 820, height: 900 })
   await page.getByRole('button', { name: '打开待选网页', exact: true }).click()
   await expect(page.getByRole('complementary', { name: '待选网页' })).toBeVisible()
@@ -1082,6 +1143,34 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await expect(page.getByRole('button', { name: '设置', exact: true })).toBeVisible()
   await page.keyboard.press('/')
   await expect(page.getByRole('searchbox', { name: '搜索全部收藏', exact: true })).toBeFocused()
+  const searchDialog = page.getByRole('dialog', { name: '搜索收藏', exact: true })
+  const bounds = (await searchDialog.boundingBox())!
+  expect(bounds.x).toBeGreaterThanOrEqual(16)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(480 - 16)
+  expect(bounds.height).toBeLessThanOrEqual(900 * 0.85)
+  await page.keyboard.press('Shift+Tab')
+  const close = searchDialog.getByRole('button', { name: '关闭弹窗', exact: true })
+  await expect(close).toBeFocused()
+  await expect(close).toHaveCSS('outline-style', 'solid')
+  await expect(close).toHaveCSS('outline-width', '2px')
+  await page.screenshot({ path: 'test-results/shared-ui-mobile-search.png', fullPage: true })
+  await page.keyboard.press('Enter')
+  await expect(searchDialog).toHaveCount(0)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  for (const width of [1500, 480]) {
+    await page.setViewportSize({ width, height: 900 })
+    const address = page.getByLabel('WebDAV 地址')
+    await address.focus()
+    await expect(address).toBeFocused()
+    await expect(address).not.toHaveCSS('box-shadow', 'none')
+    const username = (await page.getByLabel('用户名', { exact: true }).boundingBox())!
+    const password = (await page.getByLabel('密码或应用专用密码').boundingBox())!
+    if (width > 650) expect(password.x).toBeGreaterThan(username.x + username.width)
+    else expect(password.y).toBeGreaterThan(username.y + username.height)
+    const viewport = page.getByRole('region', { name: '页面内容', exact: true })
+    expect(await viewport.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
+    await page.screenshot({ path: `test-results/settings-${width}.png`, fullPage: true })
+  }
 })
 
 test('中央内容独立滚动，顶部操作固定且滚动条不占宽度，切页和搜索定位正常', async () => {

@@ -2,6 +2,9 @@ import { useState, type FormEvent } from 'react'
 import { Info } from 'lucide-react'
 import { active, parents, webUrl, type Action, type Document, type Entity } from '../core/model'
 import { Button, Modal } from './ui'
+import { feedbackStyles, formStyles } from './form-styles'
+
+const fields = formStyles()
 
 export type Act = (action: Action) => Promise<boolean>
 export type EditorState =
@@ -35,16 +38,16 @@ export default function Editor({ state, doc, act, close }: { state: EditorState;
   }
   if (state.kind === 'delete' && entity) {
     const count = active(doc).filter(e => e.id === entity.id || parents(doc, e).some(p => p.id === entity.id)).length
-    return <Modal title="移到回收站" close={close}><div className="delete-description"><span className="soft-icon"><Info size={24} /></span><p>将「{entity.title}」移到回收站？</p><p className="muted">{entity.kind === 'space' ? `包括空间内 ${count - 1} 项内容。` : entity.kind === 'collection' ? `包括其中 ${count - 1} 个链接。` : ''}30 天内可以恢复，待办标记也会保留。</p></div>{error && <p role="alert" className="error-inline">{error}</p>}<div className="modal-actions"><Button onClick={close}>取消</Button><Button tone="danger" disabled={busy} onClick={async () => {
+    return <Modal title="移到回收站" close={close}><div><span className="grid place-items-center w-[55px] h-[55px] rounded-[17px] bg-[#eef2e6] text-[#82986b] mb-[28px] [@media(max-width:650px)]:hidden"><Info size={24} /></span><p className="mt-[16px] mb-[8px] text-[14px]">将「{entity.title}」移到回收站？</p><p className="mt-[16px] mb-[8px] text-[11px] text-ui-muted [line-height:1.8]">{entity.kind === 'space' ? `包括空间内 ${count - 1} 项内容。` : entity.kind === 'collection' ? `包括其中 ${count - 1} 个链接。` : ''}30 天内可以恢复，待办标记也会保留。</p></div>{error && <p role="alert" className={feedbackStyles.error()}>{error}</p>}<div className="flex justify-end gap-[8px] mt-[24px]"><Button onClick={close}>取消</Button><Button tone="danger" disabled={busy} onClick={async () => {
       if (entity.kind === 'space' && active(doc).filter(e => e.kind === 'space').length <= 1) { setError('请至少保留一个空间'); return }
       setBusy(true); if (await act({ type: 'delete', id: entity.id })) close(); else setError('删除未完成，请关闭弹窗查看提示后重试'); setBusy(false)
     }}>移到回收站</Button></div></Modal>
   }
   return <Modal title={titleMap[state.kind]} close={close}><form onSubmit={submit}>
-      {state.kind === 'edit' && <label>网址<input aria-label="网址" type="url" required value={url} onChange={e => { setUrl(e.target.value); void autoSave({ url: e.target.value }) }} placeholder="https://" /></label>}
-      <label>{['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'}<input aria-label={['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'} value={title} onChange={e => { setTitle(e.target.value); void autoSave({ title: e.target.value }) }} required={state.kind !== 'edit'} maxLength={1000} autoFocus  /></label>
-      {state.kind === 'edit' && <label>备注<textarea aria-label="备注" value={note} onChange={e => { setNote(e.target.value); void autoSave({ note: e.target.value }) }} maxLength={20_000} /></label>}
-    {error && <p className="error-inline" role="status">{error}</p>}
-    {!editing && <div className="modal-actions"><Button onClick={close}>取消</Button><Button type="submit" tone="primary" disabled={busy}>创建</Button></div>}
+      {state.kind === 'edit' && <label className={fields.label()}>网址<input className={fields.control()} aria-label="网址" type="url" required value={url} onChange={e => { setUrl(e.target.value); void autoSave({ url: e.target.value }) }} placeholder="https://" /></label>}
+      <label className={fields.label()}>{['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'}<input className={fields.control()} aria-label={['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'} value={title} onChange={e => { setTitle(e.target.value); void autoSave({ title: e.target.value }) }} required={state.kind !== 'edit'} maxLength={1000} autoFocus  /></label>
+      {state.kind === 'edit' && <label className={fields.label()}>备注<textarea className={fields.control({ className: 'resize-y min-h-[92px]' })} aria-label="备注" value={note} onChange={e => { setNote(e.target.value); void autoSave({ note: e.target.value }) }} maxLength={20_000} /></label>}
+    {error && <p className={feedbackStyles.error()} role="status">{error}</p>}
+    {!editing && <div className="flex justify-end gap-[8px] mt-[24px]"><Button onClick={close}>取消</Button><Button type="submit" tone="primary" disabled={busy}>创建</Button></div>}
   </form></Modal>
 }

@@ -56,5 +56,5 @@ export default function FluidBackground() {
       effect.destroy()
     }
   }, [])
-  return <canvas ref={ref} className="fluid-background" aria-hidden="true" />
+  return <canvas ref={ref} className="fixed inset-0 w-full h-full pointer-events-none z-0" aria-hidden="true" />
 }

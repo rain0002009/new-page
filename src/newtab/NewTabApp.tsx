@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Edit3, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
+import { tv } from 'tailwind-variants/lite'
 import { active, children, type Action, type Collection, type Entity, type Link } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
@@ -14,7 +15,64 @@ import ContentPanel from './ContentPanel'
 import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal } from './ui'
+import { feedbackStyles } from './form-styles'
 import './styles.css'
+
+const workbench = tv({
+  slots: {
+    shell: 'workbench relative z-1 grid grid-cols-[226px_minmax(0,1fr)_288px] items-start h-[100dvh] overflow-hidden [@media(min-width:1700px)]:grid-cols-[245px_minmax(0,1fr)_320px] [@media(min-width:1000.01px)_and_(max-width:1200px)]:grid-cols-[205px_minmax(0,1fr)_250px] [@media(min-width:650.01px)_and_(max-width:1000px)]:grid-cols-[190px_minmax(0,1fr)] [@media(max-width:650px)]:grid-cols-[69px_minmax(0,1fr)]',
+    sidebar: 'sidebar sticky top-0 z-1 h-[100dvh] flex flex-col pt-[34px] px-[20px] pb-[22px] border-r border-r-solid border-transparent [@media(max-width:1200px)]:pt-[28px] [@media(max-width:1200px)]:px-[14px] [@media(max-width:1200px)]:pb-[20px] [@media(max-width:650px)]:pt-[24px] [@media(max-width:650px)]:px-[9px] [@media(max-width:650px)]:pb-[18px]',
+    profile: 'flex items-center gap-[11px] px-[10px] mb-[24px] text-[13px] [@media(max-width:650px)]:hidden',
+    avatar: 'w-[36px] h-[36px] grid place-items-center bg-[linear-gradient(135deg,#faffef,#d9e6c8)] text-[#6e7c5e] border-[3px] border-solid border-[#fafbf5] rounded-full text-[15px] [font-weight:650] shadow-[0_4px_12px_#71865b12]',
+    section: 'flex items-center justify-between px-[11px] mt-[11px] mb-[9px] min-h-[29px] [@media(max-width:650px)]:hidden',
+    createSection: 'flex items-center justify-between px-[11px] mt-[11px] mb-[9px] min-h-[29px] [@media(max-width:650px)]:justify-center [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mt-0 [@media(max-width:650px)]:mb-[10px]',
+    sectionTitle: 'block text-[10px] [font-weight:650] tracking-[1px] text-[#989e90] [@media(max-width:650px)]:hidden',
+    spaces: 'mb-[22px] overflow-auto max-h-[34vh] [@media(max-width:650px)]:mb-[30px] [@media(max-width:650px)]:max-h-[40vh]',
+    sync: 'flex items-center gap-[7px] mt-[15px] mx-[13px] mb-0 text-[10px] text-[#9aa18f] bg-transparent border-0 [@media(max-width:650px)]:hidden',
+    heading: 'flex items-center justify-between gap-[12px] mb-[10px] [@media(max-width:650px)]:items-start',
+    pageHeader: 'pt-[30px] pb-[28px] [@media(max-width:650px)]:py-[25px]',
+    title: 'text-[28px] tracking-[-.5px] font-semibold [line-height:1.5] [@media(max-width:650px)]:text-[24px]',
+    loading: 'relative z-1 min-h-screen flex flex-col items-center justify-center gap-[18px] text-[#849571] text-[12px] bg-[#f8faef99]',
+    onboarding: 'onboarding relative z-1 min-h-screen grid grid-cols-2 place-items-center p-[32px] [@media(max-width:650px)]:p-[20px]',
+    panel: 'onboarding-panel w-[min(460px,100%)] max-w-[500px] p-[38px] m-auto bg-[#fffffbd4] border border-solid border-white rounded-[24px] shadow-[0_24px_100px_#536c3820] backdrop-blur-[22px] [@media(max-width:650px)]:p-[28px] [@media(max-width:650px)]:max-w-[480px]',
+    connectTitle: 'mt-[32px] mb-[24px] text-[23px] [font-weight:550]',
+    space: 'space-row group/space relative',
+    tools: 'absolute right-[5px] top-[6px] flex bg-[#edf0e6] rounded-[6px] opacity-0 group-hover/space:opacity-100 group-focus-within/space:opacity-100 [@media(max-width:650px)]:hidden',
+  },
+})
+const styles = workbench()
+const navigation = tv({
+  slots: {
+    button: 'nav-item w-full min-w-0 flex items-center gap-[12px] px-[12px] py-[11px] mb-[5px] border-0 rounded-[9px] text-[12px] text-left [transition:background_.2s,box-shadow_.2s,color_.2s] hover:bg-[#e8f0dca6] [@media(max-width:650px)]:justify-center [@media(max-width:650px)]:px-[9px] [@media(max-width:650px)]:py-[13px] [@media(max-width:650px)]:min-h-[43px]',
+    label: 'truncate [@media(max-width:650px)]:hidden',
+    count: 'ml-auto text-[10px] bg-[#e5e8df] min-w-[19px] h-[19px] grid place-items-center rounded-[6px] [@media(max-width:650px)]:hidden',
+    shortcut: 'ml-auto text-[10px] text-[#b6bcad] border border-solid border-[#e2e5d9] rounded-[3px] px-[4px] [@media(max-width:650px)]:hidden',
+    symbol: 'flex',
+    dot: 'w-[5px] h-[5px] rounded-full bg-[#859a70] ml-auto [@media(max-width:650px)]:hidden',
+  },
+  variants: { selected: {
+    true: { button: 'selected bg-[#eff5e480] text-[#506442] font-semibold shadow-[inset_0_1px_0_#ffffff70] hover:text-[#506442]' },
+    false: { button: 'bg-transparent text-[#878e7e] hover:text-[#556548]' },
+  } },
+  defaultVariants: { selected: false },
+})
+const nav = navigation()
+const brand = tv({
+  slots: {
+    base: 'brand flex items-center gap-[10px] text-[23px] font-bold tracking-[2px]',
+    icon: 'h-[40px] text-[#657b52] rounded-[12px_12px_12px_3px] grid place-items-center bg-[linear-gradient(140deg,#f7ffec,#d4e4bf)] shadow-[inset_0_1px_1px_#fff,0_6px_16px_#768e4f18]',
+    caption: 'block tracking-[2.3px] text-[7px] font-medium text-[#98a18d] mt-0',
+  },
+  variants: { sidebar: {
+    true: { base: 'pl-[9px] mb-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mb-[28px]', icon: 'w-[37px] [@media(max-width:650px)]:w-[36px] [@media(max-width:650px)]:m-auto' },
+    false: { base: 'mb-[12px]', icon: 'w-[37px]' },
+  } },
+  defaultVariants: { sidebar: false },
+})
+const statusDot = tv({
+  base: 'w-[5px] h-[5px] rounded-full shrink-0 inline-block',
+  variants: { status: { synced: 'bg-[#9eb18b]', pending: 'bg-[#b2ad71]', syncing: 'bg-[#b2ad71]', error: 'bg-[#c99260]', conflict: 'bg-[#c99260]' } },
+})
 
 export const stateKey = ['workspace']
 export default function NewTabApp() {
@@ -48,8 +106,8 @@ function Workbench() {
     catch (error) { setMessage(error instanceof Error ? error.message : '操作失败'); return false }
   }
   const notification = message || (error instanceof Error ? error.message : '')
-  if (!data) return <main className="loading-screen"><Leaf size={32} /><p>{notification || '正在加载…'}</p>{notification && <Button onClick={() => void client.invalidateQueries({ queryKey: stateKey })}>重试</Button>}</main>
-  if (!data.document) return <main className="onboarding"><section className="onboarding-panel"><Brand /><h1>连接收藏库</h1>{notification && <div role="alert" className="alert">{notification}</div>}<ConnectionForm connected={false} done={receive} onError={setMessage} /></section></main>
+  if (!data) return <main className={styles.loading()}><Leaf size={32} /><p>{notification || '正在加载…'}</p>{notification && <Button onClick={() => void client.invalidateQueries({ queryKey: stateKey })}>重试</Button>}</main>
+  if (!data.document) return <main className={styles.onboarding()}><section className={styles.panel()}><Brand /><h1 className={styles.connectTitle()}>连接收藏库</h1>{notification && <div role="alert" className={feedbackStyles.alert()}>{notification}</div>}<ConnectionForm connected={false} done={receive} onError={setMessage} /></section></main>
   const doc = data.document
   const all = active(doc)
   const spaces = all.filter(e => e.kind === 'space')
@@ -65,31 +123,34 @@ function Workbench() {
     if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
     setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
   }
-  return <DragBoard doc={doc} act={act}><div className="workbench" onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
-    <aside className="sidebar"><Brand /><div className="profile"><span className="avatar">{nickname.slice(0, 1)}</span><strong>{nickname}</strong></div>
-      <div className="nav-section"><span className="eyebrow">我的空间</span><Button size="icon" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
-      <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className="spaces" aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
-      <div className="nav-section"><span className="eyebrow">工作台</span></div><nav>
-        <button aria-label={`Todo ${links.filter(l => l.todo).length}`} title="Todo" className={`nav-item ${page === 'todo' ? 'selected' : ''}`} onClick={() => setPage('todo')}><Bookmark size={18} /><span>Todo</span><span className="count">{links.filter(l => l.todo).length}</span></button>
-        <button aria-label="搜索收藏" title="搜索收藏" className={`nav-item ${searchOpen ? 'selected' : ''}`} onClick={() => setSearchOpen(true)}><Search size={18} /><span>搜索收藏</span><kbd>/</kbd></button>
+  return <DragBoard doc={doc} act={act}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
+    <aside className={styles.sidebar()}><Brand sidebar /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
+      <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
+      <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
+      <div className={styles.section()}><span className={styles.sectionTitle()}>工作台</span></div><nav>
+        <button aria-label={`Todo ${links.filter(l => l.todo).length}`} title="Todo" className={navigation({ selected: page === 'todo' }).button()} onClick={() => setPage('todo')}><Bookmark size={18} /><span className={nav.label()}>Todo</span><span className={nav.count()}>{links.filter(l => l.todo).length}</span></button>
+        <button aria-label="搜索收藏" title="搜索收藏" className={navigation({ selected: searchOpen }).button()} onClick={() => setSearchOpen(true)}><Search size={18} /><span className={nav.label()}>搜索收藏</span><kbd className={nav.shortcut()}>/</kbd></button>
       </nav>
-      <div className="sidebar-bottom"><button aria-label="设置" title="设置" className={`nav-item ${page === 'settings' ? 'selected' : ''}`} onClick={() => setPage('settings')}><Settings2 size={18} /><span>设置</span></button><button className="sync-state" onClick={() => setPage('settings')}><span className={`status-dot ${data.status}`} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
+      <div className="mt-auto"><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}`} header={<>
-      {notification && <div role="alert" className="alert"><span>{notification}</span><Button size="icon" aria-label="关闭提示" onClick={() => setMessage('')}><X size={16} /></Button></div>}
-      <div className="heading-row"><header className="page-header"><h1>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
+      {notification && <div role="alert" className={feedbackStyles.alert()}><span>{notification}</span><Button size="icon" aria-label="关闭提示" onClick={() => setMessage('')}><X size={16} /></Button></div>}
+      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <CollectionSection key={collection.id} collection={collection} doc={doc} act={act} edit={setEditor} />)}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <CollectionSection key={collection.id} collection={collection} doc={doc} act={act} edit={setEditor} />)}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
-    <Button tone="primary" className="inbox-toggle" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} />
-    {searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} wide className="search-modal"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}
+    <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} />
+    {searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}
     {editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}
   </div></DragBoard>
 }
-function Brand() { return <div className="brand"><span><Leaf size={22} strokeWidth={1.8} /></span><div>拾页<small>PAGE GARDEN</small></div></div> }
+function Brand({ sidebar = false }: { sidebar?: boolean }) {
+  const styles = brand({ sidebar })
+  return <div className={styles.base()}><span className={styles.icon()}><Leaf size={22} strokeWidth={1.8} /></span><div className={sidebar ? '[@media(max-width:650px)]:hidden' : undefined}>拾页<small className={styles.caption()}>PAGE GARDEN</small></div></div>
+}
 function SpaceRow({ item, selected, select, rename, remove }: { item: Entity; selected: boolean; select: () => void; rename: () => void; remove: () => void }) {
-  const drag = useDragItem(item.id, { kind: 'space', entityId: item.id, title: item.title })
-  return <div {...drag} className="space-row"><button aria-label={item.title} title={item.title} className={`nav-item ${selected ? 'selected' : ''}`} onClick={select}><span className="space-symbol"><Folder size={17} /></span><span>{item.title}</span>{selected && <span className="selected-dot" />}</button><div className="space-tools"><Button size="icon" aria-label={`重命名空间 ${item.title}`} onClick={rename}><Edit3 size={12} /></Button><Button size="icon" aria-label={`删除空间 ${item.title}`} onClick={remove}><Trash2 size={12} /></Button></div></div>
+  const drag = useDragItem(item.id, { kind: 'space', entityId: item.id, title: item.title }, styles.space())
+  return <div {...drag}><button aria-label={item.title} title={item.title} className={navigation({ selected }).button()} onClick={select}><span className={nav.symbol()}><Folder size={17} /></span><span className={nav.label({ className: 'group-hover/space:max-w-[85px]' })}>{item.title}</span>{selected && <span className={nav.dot()} />}</button><div className={styles.tools()}><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`重命名空间 ${item.title}`} onClick={rename}><Edit3 size={12} /></Button><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`删除空间 ${item.title}`} onClick={remove}><Trash2 size={12} /></Button></div></div>
 }
