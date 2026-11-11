@@ -37,6 +37,8 @@ export type Action =
   | { type: 'move'; id: string; parentId: string | null; beforeId?: string }
   | { type: 'delete'; id: string }
   | { type: 'restore'; id: string }
+  | { type: 'purge'; id: string }
+  | { type: 'empty-trash' }
 
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -214,14 +216,36 @@ export function apply(doc: Document, action: Action): Document {
       restoreGroup(entity)
       break
     }
+    case 'purge': {
+      const entity = next.entities[action.id]
+      if (!entity || entity.deletedAt === null || entity.purged) throw new Error('回收站内容已改变，请刷新后重试')
+      for (const item of Object.values(next.entities)) if (!item.purged && (item.id === entity.id || parents(next, item).some(parent => parent.id === entity.id))) {
+        item.deletedAt ??= now
+        item.deletedBy ??= entity.id
+        purgeEntity(item, now)
+      }
+      break
+    }
+    case 'empty-trash': {
+      const deleted = Object.values(next.entities).filter(item => !item.purged && !isActive(next, item))
+      for (const item of deleted) {
+        item.deletedAt ??= now
+        item.deletedBy ??= item.id
+        purgeEntity(item, now)
+      }
+      break
+    }
   }
   return readDocument(next)
+}
+function purgeEntity(entity: Entity, now: number) {
+  entity.purged = true; entity.title = ''; entity.updatedAt = now
+  if (entity.kind === 'link') { entity.url = ''; entity.icon = ''; entity.note = ''; entity.todo = false }
 }
 export function prune(doc: Document, now = Date.now()): Document {
   const next = structuredClone(doc)
   for (const e of Object.values(next.entities)) if (e.deletedAt !== null && now - e.deletedAt >= 30 * 86400_000 && !e.purged) {
-    e.purged = true; e.title = ''; e.updatedAt = now
-    if (e.kind === 'link') { e.url = ''; e.icon = ''; e.note = ''; e.todo = false }
+    purgeEntity(e, now)
   }
   return next
 }

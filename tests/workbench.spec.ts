@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { generate } from 'selfsigned'
 import { QuarkFixture } from './quark-fixture'
 import type { StoredWorkspace } from '../src/core/local-workspace'
+import type { Document } from '../src/core/model'
 
 type DeferredSnapshotWindow = Window & { releaseSnapshots(): void; pendingSnapshots(): number }
 
@@ -1033,6 +1034,68 @@ for (const missing of ['GET', 'PUT'] as const) {
     await connect(page)
   })
 }
+
+test('回收站支持确认删除和清空，取消保留内容且同步后仍然生效', async () => {
+  test.setTimeout(90_000)
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '单项删除的收藏')
+  await addLink(page, '清空的收藏')
+  await addLink(page, '保留的收藏')
+  for (const title of ['单项删除的收藏', '清空的收藏']) {
+    const card = page.getByRole('article', { name: `链接 ${title}`, exact: true })
+    await card.hover()
+    await card.getByRole('button', { name: '删除链接', exact: true }).click()
+    await expect(card).toHaveCount(0)
+  }
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const remove = page.getByRole('button', { name: '彻底删除 单项删除的收藏', exact: true })
+  await remove.hover()
+  await remove.focus()
+  await expect(remove).toBeFocused()
+  await remove.press('Enter')
+  const dialog = page.getByRole('dialog', { name: '彻底删除', exact: true })
+  await expect(dialog.getByRole('button', { name: '取消', exact: true })).toBeFocused()
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(remove).toBeVisible()
+  await remove.click()
+  await dialog.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(remove).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '恢复 清空的收藏', exact: true })).toBeVisible()
+  await page.screenshot({ path: 'test-results/recycle-bin-desktop.png', fullPage: true })
+  await page.setViewportSize({ width: 360, height: 800 })
+  const clear = page.getByRole('button', { name: '清空回收站', exact: true })
+  const remaining = page.getByRole('button', { name: '彻底删除 清空的收藏', exact: true })
+  await remaining.scrollIntoViewIfNeeded()
+  const bounds = (await remaining.boundingBox())!
+  expect(bounds.x).toBeGreaterThanOrEqual(0)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(360)
+  await page.screenshot({ path: 'test-results/recycle-bin-mobile.png', fullPage: true })
+  await clear.click()
+  const emptyDialog = page.getByRole('dialog', { name: '清空回收站', exact: true })
+  await expect(emptyDialog.getByText('删除后无法从回收站恢复。', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(remaining).toBeVisible()
+  await clear.click()
+  await emptyDialog.getByRole('button', { name: '清空', exact: true }).click()
+  await expect(page.getByText('回收站空空的', { exact: true })).toBeVisible()
+  await expect(clear).toBeDisabled()
+  await page.setViewportSize({ width: 1500, height: 960 })
+  await sync(page)
+  const remote = JSON.parse(files.get('/dav/new-page/data-v1.json')!.body) as Document
+  const purged = Object.values(remote.entities).filter(entity => entity.purged)
+  expect(purged).toHaveLength(2)
+  for (const entity of purged) expect(entity).toMatchObject({ title: '', url: '', icon: '', note: '', todo: false })
+  await page.reload()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page.getByText('回收站空空的', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '清空回收站', exact: true })).toBeDisabled()
+  const other = await openClient()
+  await connect(other.page)
+  await expect(other.page.getByRole('link', { name: '保留的收藏', exact: true })).toBeVisible()
+  await other.page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(other.page.getByText('回收站空空的', { exact: true })).toBeVisible()
+})
 
 test('回收站超过三十天清理正文，旧设备刷新不会复活删除收藏', async () => {
   const first = await openClient()
