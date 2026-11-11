@@ -1,13 +1,16 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="font-sans text-[14px] leading-[1.5] text-ui-text bg-ui-canvas [font-synthesis:none] selection:bg-ui-selection
+  [:where(&)_button]:cursor-pointer [:where(&)_button:disabled]:cursor-default [:where(&)_button:disabled]:opacity-50
+  [:where(&)_:where(button,a,input,textarea):focus-visible]:outline-2 [:where(&)_:where(button,a,input,textarea):focus-visible]:outline-solid [:where(&)_:where(button,a,input,textarea):focus-visible]:outline-ui-focus [:where(&)_:where(button,a,input,textarea):focus-visible]:outline-offset-[3px]
+  motion-reduce:[&_*]:!animate-none motion-reduce:[&_*]:!transition-none motion-reduce:[&_*::before]:!animate-none motion-reduce:[&_*::before]:!transition-none motion-reduce:[&_*::after]:!animate-none motion-reduce:[&_*::after]:!transition-none">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>拾页 · 新标签页</title>
   </head>
-  <body>
+  <body class="min-w-[360px]">
     <noscript>You need to enable JavaScript to run this extension.</noscript>
-    <div id="root"></div>
+    <div id="root" class="relative isolate"></div>
   </body>
   <script src="./scripts.tsx"></script>
 </html>

@@ -16,7 +16,6 @@ import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal } from './ui'
 import { feedbackStyles } from './form-styles'
-import './styles.css'
 
 const workbench = tv({
   slots: {

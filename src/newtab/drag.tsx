@@ -37,7 +37,7 @@ export function useCollectionPlaceholder(doc: Document, collectionId: string) {
 
 export function CollectionPlaceholder({ collectionId, target, height }: { collectionId: string; target: DragItem; height?: number }) {
   const { setNodeRef } = useDroppable({ id: `drop-slot:${collectionId}`, data: target })
-  return <div ref={setNodeRef} className="card-placeholder min-h-[124px] rounded-[15px] bg-[#d5e1c680] border-[1.5px] border-dashed border-[#9caf88] animate-[placeholder-in_.16s_ease-out]" role="img" aria-label="收藏放置位置" style={{ height }} />
+  return <div ref={setNodeRef} className="card-placeholder min-h-[124px] rounded-[15px] bg-[#d5e1c680] border-[1.5px] border-dashed border-[#9caf88] animate-placeholder-in" role="img" aria-label="收藏放置位置" style={{ height }} />
 }
 
 const collision: CollisionDetection = args => {

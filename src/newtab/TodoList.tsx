@@ -11,8 +11,8 @@ const todo = tv({
   slots: {
     list: 'todo-list m-0 p-0 list-none flex flex-col gap-[1px] rounded-[16px] overflow-hidden bg-[#ffffff45] border border-solid border-[#fffefa]',
     row: 'todo-row relative flex items-center gap-[14px] px-[22px] py-[19px] min-h-[76px] bg-[#ffffff36] border-0 border-b border-solid border-[#e1e8d875] last:border-b-0 outline-offset-[-3px] transition-colors duration-200 hover:bg-[#f8ffefad] [@media(max-width:650px)]:px-[13px] [@media(max-width:650px)]:py-[17px] [@media(max-width:650px)]:gap-[10px]',
-    complete: 'h-[22px] w-[22px] shrink-0 p-0 rounded-full border-[1.5px] border-solid border-[#c4cfb6] bg-[#ffffff8a] text-transparent hover:text-[var(--sage)] hover:bg-[#e6eddd] focus-visible:text-[var(--sage)] focus-visible:bg-[#e6eddd]',
-    title: 'min-w-0 truncate flex-1 text-[14px] font-medium hover:text-[var(--sage-deep)] [@media(max-width:650px)]:text-[12px]',
+    complete: 'h-[22px] w-[22px] shrink-0 p-0 rounded-full border-[1.5px] border-solid border-[#c4cfb6] bg-[#ffffff8a] text-transparent hover:text-ui-sage hover:bg-[#e6eddd] focus-visible:text-ui-sage focus-visible:bg-[#e6eddd]',
+    title: 'min-w-0 truncate flex-1 text-[14px] font-medium hover:text-ui-sage-deep [@media(max-width:650px)]:text-[12px]',
   },
 })
 const styles = todo()

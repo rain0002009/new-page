@@ -20,7 +20,7 @@ export function Button({ tone, size, className, ...props }: ButtonHTMLAttributes
 }
 const modal = tv({
   slots: {
-    dialog: 'rounded-[18px] border border-solid border-white bg-ui-dialog p-[25px] max-h-[86vh] text-ui-ink shadow-[0_25px_100px_#334c2b2e] backdrop-blur-[25px] [&::backdrop]:bg-[#3a4b2e30] [&::backdrop]:[backdrop-filter:blur(8px)]',
+    dialog: 'm-auto rounded-[18px] border border-solid border-white bg-ui-dialog p-[25px] max-h-[86vh] text-ui-ink shadow-[0_25px_100px_#334c2b2e] backdrop-blur-[25px] [&::backdrop]:bg-[#3a4b2e30] [&::backdrop]:[backdrop-filter:blur(8px)]',
     header: 'flex items-start justify-between',
     title: 'mt-[6px] text-[20px] [font-weight:550]',
   },

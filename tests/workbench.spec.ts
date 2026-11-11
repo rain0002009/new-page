@@ -590,7 +590,15 @@ test('待选网页拖入先显示落点，占位与预览平滑过渡为收藏�
   await page.mouse.down()
   await page.mouse.move(target.x + 100, target.y + 95, { steps: 20 })
   const preview = page.locator('.drag-preview')
-  await expect(page.getByRole('img', { name: '收藏放置位置' })).toBeVisible()
+  const placeholder = page.getByRole('img', { name: '收藏放置位置' })
+  await expect(placeholder).toBeVisible()
+  await expect(placeholder).toHaveCSS('animation-name', 'placeholder-in')
+  await expect(placeholder).toHaveCSS('animation-duration', '0.16s')
+  expect(await page.evaluate(() => {
+    const hasPlaceholder = (rules: CSSRuleList): boolean => Array.from(rules).some(rule =>
+      rule instanceof CSSKeyframesRule ? rule.name === 'placeholder-in' : rule instanceof CSSGroupingRule && hasPlaceholder(rule.cssRules))
+    return Array.from(document.styleSheets).some(sheet => hasPlaceholder(sheet.cssRules))
+  })).toBe(true)
   expect(Math.abs((await preview.boundingBox())!.height - from.height)).toBeLessThan(2)
   await page.screenshot({ path: 'test-results/inbox-drop-placeholder.png', fullPage: true })
   const frames = page.evaluate(async () => {
@@ -615,6 +623,7 @@ test('待选网页拖入先显示落点，占位与预览平滑过渡为收藏�
 
 test('跨收藏块的落点占位稳定，折叠块取消拖动后保持原状', async () => {
   const { page } = await openClient()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await connect(page)
   await addLink(page, '跨块移动项')
   await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
@@ -625,6 +634,7 @@ test('跨收藏块的落点占位稳定，折叠块取消拖动后保持原状',
   await drag(page, destination.getByRole('article'), sourceBlock)
   await addLink(page, '目标首项')
   const sourceCard = sourceBlock.getByRole('article')
+  await expect(sourceCard).toHaveCSS('transition-property', 'none')
   const from = (await sourceCard.boundingBox())!
   const target = (await destination.getByRole('article').boundingBox())!
   await page.mouse.move(from.x + 60, from.y + 30)
@@ -632,6 +642,7 @@ test('跨收藏块的落点占位稳定，折叠块取消拖动后保持原状',
   await page.mouse.move(target.x + 60, target.y + 30, { steps: 20 })
   const marker = page.getByRole('img', { name: '收藏放置位置' })
   await expect(marker).toBeVisible()
+  await expect(marker).toHaveCSS('animation-name', 'none')
   const positions = await page.evaluate(async () => {
     const xs: number[] = []
     const start = performance.now()
@@ -1088,6 +1099,16 @@ test('非空目标迁移先确认合并，合法备份导入保留已有收藏',
 
 test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原收藏', async () => {
   const { page, context } = await openClient()
+  await expect(page.locator('html')).toHaveCSS('font-size', '14px')
+  await expect(page.locator('html')).toHaveCSS('line-height', '21px')
+  expect(await page.evaluate(() => {
+    const context = document.createElement('canvas').getContext('2d')!
+    context.fillStyle = getComputedStyle(document.documentElement).backgroundColor
+    context.fillRect(0, 0, 1, 1)
+    return Array.from(context.getImageData(0, 0, 1, 1).data)
+  })).toEqual([247, 248, 239, 255])
+  await expect(page.locator('body')).toHaveCSS('margin', '0px')
+  await expect(page.locator('#root')).toHaveCSS('isolation', 'isolate')
   await connect(page)
   const tab = await context.newPage()
   await tab.goto(`${origin}/web/react`)
@@ -1145,6 +1166,8 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await expect(page.getByRole('searchbox', { name: '搜索全部收藏', exact: true })).toBeFocused()
   const searchDialog = page.getByRole('dialog', { name: '搜索收藏', exact: true })
   const bounds = (await searchDialog.boundingBox())!
+  expect(bounds.x + bounds.width / 2).toBeCloseTo(480 / 2, 0)
+  expect(bounds.y + bounds.height / 2).toBeCloseTo(900 / 2, 0)
   expect(bounds.x).toBeGreaterThanOrEqual(16)
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(480 - 16)
   expect(bounds.height).toBeLessThanOrEqual(900 * 0.85)
@@ -1187,6 +1210,14 @@ test('中央内容独立滚动，顶部操作固定且滚动条不占宽度，�
   await page.getByRole('button', { name: '历史空间', exact: true }).click()
 
   const viewport = page.getByRole('region', { name: '页面内容', exact: true })
+  await expect(viewport).toHaveCSS('overscroll-behavior-y', 'contain')
+  await expect(viewport).toHaveCSS('scroll-padding-block', '16px')
+  const scrollbar = page.locator('.content-scroll .os-scrollbar-vertical')
+  await expect(scrollbar).toHaveCSS('right', '3px')
+  await expect(scrollbar).toHaveCSS('width', '14px')
+  const handle = scrollbar.locator('.os-scrollbar-handle')
+  await expect(handle).toHaveCSS('min-height', '44px')
+  await expect(handle).toHaveCSS('transition-duration', '0.18s, 0.18s')
   const heading = page.getByRole('heading', { name: '历史空间', exact: true })
   const create = page.getByRole('button', { name: '新建收藏块', exact: true })
   const beforeHeading = (await heading.boundingBox())!
@@ -1221,6 +1252,9 @@ test('中央内容独立滚动，顶部操作固定且滚动条不占宽度，�
   await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(0)
   await viewport.press('PageDown')
   await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  await expect(viewport).toHaveCSS('outline-style', 'solid')
+  await expect(viewport).toHaveCSS('outline-width', '2px')
+  await expect(viewport).toHaveCSS('outline-offset', '-3px')
   expect((await heading.boundingBox())!.y).toBeCloseTo(mobileHeading.y, 1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(480)
   await page.getByRole('button', { name: '打开待选网页', exact: true }).click()

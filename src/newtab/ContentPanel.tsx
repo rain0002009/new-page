@@ -7,7 +7,8 @@ const panel = tv({
   slots: {
     base: 'main-content relative z-2 min-w-0 min-h-0 h-[calc(100dvh-40px)] my-[20px] mx-[8px] flex flex-col overflow-hidden bg-[linear-gradient(145deg,#ffffff85,#fffffb66)] [backdrop-filter:blur(24px)_saturate(110%)] border border-solid border-[#ffffffc7] rounded-[28px] shadow-[0_22px_65px_-24px_#35463242,0_5px_16px_-7px_#35463226,inset_0_1px_0_#fff] [@media(max-width:650px)]:mt-[10px] [@media(max-width:650px)]:mr-[10px] [@media(max-width:650px)]:mb-[10px] [@media(max-width:650px)]:ml-0 [@media(max-width:650px)]:h-[calc(100dvh-20px)] [@media(max-width:650px)]:rounded-[20px]',
     heading: 'relative z-2 shrink-0 px-[32px] after:content-empty after:absolute after:left-[32px] after:right-[32px] after:bottom-0 after:h-[1px] after:bg-[linear-gradient(90deg,#71865b18,#ffffff70,#71865b18)] after:pointer-events-none [@media(max-width:650px)]:px-[16px] [@media(max-width:650px)]:after:left-[16px] [@media(max-width:650px)]:after:right-[16px]',
-    scroll: 'content-scroll flex-1 min-h-0 min-w-0',
+    scroll: 'content-scroll flex-1 min-h-0 min-w-0 [&_[data-overlayscrollbars-viewport]]:overscroll-y-contain [&_[data-overlayscrollbars-viewport]]:scroll-py-[16px] [&_[data-overlayscrollbars-viewport]:focus-visible]:outline-2 [&_[data-overlayscrollbars-viewport]:focus-visible]:outline-solid [&_[data-overlayscrollbars-viewport]:focus-visible]:outline-ui-focus [&_[data-overlayscrollbars-viewport]:focus-visible]:outline-offset-[-3px]',
+    scrollbar: 'os-theme-garden [--os-size:14px] [--os-padding-perpendicular:4px] [--os-padding-axis:12px] [--os-track-border-radius:99px] [--os-handle-border-radius:99px] [--os-handle-bg:#70856059] [--os-handle-bg-hover:#617b50a6] [--os-handle-bg-active:#526c43d9] [--os-handle-min-size:44px] [--os-handle-interactive-area-offset:4px] [&.os-scrollbar-vertical]:right-[3px] [&_.os-scrollbar-handle]:shadow-[inset_0_0_0_1px_#ffffff45] [&_.os-scrollbar-handle]:[transition:background-color_.18s,box-shadow_.18s] [&_.os-scrollbar-handle:hover]:shadow-[inset_0_0_0_1px_#ffffff70,0_1px_6px_#40552d15]',
     body: 'content-body flow-root pt-[6px] px-[32px] pb-[40px] [@media(max-width:1000px)]:pb-[80px] [@media(max-width:650px)]:px-[16px]',
   },
 })
@@ -21,7 +22,7 @@ export default function ContentPanel({ header, children, scrollKey }: { header: 
     <div className={styles.heading()}>{header}</div>
     <OverlayScrollbarsComponent ref={scroll} className={styles.scroll()} data-overlayscrollbars-initialize options={{
       overflow: { x: 'hidden', y: 'scroll' },
-      scrollbars: { theme: 'os-theme-garden', autoHide: 'leave', autoHideDelay: 650, autoHideSuspend: true, clickScroll: 'instant' },
+      scrollbars: { theme: styles.scrollbar(), autoHide: 'leave', autoHideDelay: 650, autoHideSuspend: true, clickScroll: 'instant' },
     }} events={{ initialized: instance => {
       const viewport = instance.elements().viewport
       viewport.tabIndex = 0
