@@ -10,6 +10,7 @@ import TabInbox, { useWindowTabs } from './TabInbox'
 import { DragBoard, useDragItem } from './drag'
 import TodoList from './TodoList'
 import FluidBackground from './FluidBackground'
+import ContentPanel from './ContentPanel'
 import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal } from './ui'
@@ -74,13 +75,14 @@ function Workbench() {
       </nav>
       <div className="sidebar-bottom"><button aria-label="设置" title="设置" className={`nav-item ${page === 'settings' ? 'selected' : ''}`} onClick={() => setPage('settings')}><Settings2 size={18} /><span>设置</span></button><button className="sync-state" onClick={() => setPage('settings')}><span className={`status-dot ${data.status}`} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
-    <main className="main-content">
+    <ContentPanel scrollKey={`${page}:${space?.id ?? ''}`} header={<>
       {notification && <div role="alert" className="alert"><span>{notification}</span><Button size="icon" aria-label="关闭提示" onClick={() => setMessage('')}><X size={16} /></Button></div>}
       <div className="heading-row"><header className="page-header"><h1>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
+    </>}>
       {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <CollectionSection key={collection.id} collection={collection} doc={doc} act={act} edit={setEditor} />)}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
-    </main>
+    </ContentPanel>
     <Button tone="primary" className="inbox-toggle" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} />
     {searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} wide className="search-modal"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}
     {editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}

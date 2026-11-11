@@ -187,6 +187,12 @@ importers:
       lucide-react:
         specifier: ^1.70.0
         version: 1.70.0(@types/react@18.3.31)(react@18.3.1)
+      overlayscrollbars:
+        specifier: ^2.17.0
+        version: 2.17.0
+      overlayscrollbars-react:
+        specifier: ^0.5.7
+        version: 0.5.7(overlayscrollbars@2.17.0)(react@18.3.1)
       qrcode.react:
         specifier: ^4.2.0
         version: 4.2.0(react@18.3.1)
@@ -2406,6 +2412,15 @@ packages:
     resolution: {integrity: sha512-EAZL3GA1r0dESBulJjUYERfHNKopMlcGUsWAHOGWHwWsfQMLVfNF6B7sIEVCfXEPIivekTe2g9xJKuRnsFBlcQ==}
     engines: {node: '>=18'}
     hasBin: true
+
+  overlayscrollbars-react@0.5.7:
+    resolution: {integrity: sha512-pjWnZNmVkv4J0k/YzdazWJpBuu1mTTKR6K0pzjqK9BfHkB53hREqBGV8LONH23G5ulGXeXBLgD91HjcQuvq2WA==}
+    peerDependencies:
+      overlayscrollbars: ^2.0.0
+      react: '>=16.8.0'
+
+  overlayscrollbars@2.17.0:
+    resolution: {integrity: sha512-tyFSxFVJ2FcTTiEkwMthAb+Ogs8vgpW31Sy5z2TL1Q6Kw7579zrcd4xDm38lmdD934LjiTHyrzR90KMDrbCXoA==}
 
   oxc-parser@0.153.0:
     resolution: {integrity: sha512-cEnpyyV1OJRXv++SFNw0z8i+2o/cr88rVLaOYJafELDoHM5yHvCAbwGRLvxuany6SNLcbblSMUyZaGzH+quSYg==}
@@ -5264,6 +5279,13 @@ snapshots:
   opera-location2@2.1.1:
     dependencies:
       which: 6.0.1
+
+  overlayscrollbars-react@0.5.7(overlayscrollbars@2.17.0)(react@18.3.1):
+    dependencies:
+      overlayscrollbars: 2.17.0
+      react: 18.3.1
+
+  overlayscrollbars@2.17.0: {}
 
   oxc-parser@0.153.0:
     dependencies:

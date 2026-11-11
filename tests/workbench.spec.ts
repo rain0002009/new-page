@@ -1040,6 +1040,63 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await expect(page.getByRole('searchbox', { name: '搜索全部收藏', exact: true })).toBeFocused()
 })
 
+test('中央内容独立滚动，顶部操作固定且滚动条不占宽度，切页和搜索定位正常', async () => {
+  const { page } = await openClient()
+  await page.setViewportSize({ width: 1100, height: 760 })
+  await connect(page)
+  const legacy = JSON.parse(await readFile(resolve('tests/fixtures/legacy-snapshot.json'), 'utf8'))
+  for (let index = 1; index <= 18; index++) {
+    const id = `scroll-link-${index}`
+    legacy.document.entities[id] = { ...legacy.document.entities.legacyA, id, title: `滚动收藏 ${index}`, url: `https://example.com/${index}`, position: (index + 1) * 1024, todo: false }
+  }
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('导入备份').setInputFiles({ name: 'scrolling-library.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(legacy.document)) })
+  await page.getByRole('button', { name: '历史空间', exact: true }).click()
+
+  const viewport = page.getByRole('region', { name: '页面内容', exact: true })
+  const heading = page.getByRole('heading', { name: '历史空间', exact: true })
+  const create = page.getByRole('button', { name: '新建收藏块', exact: true })
+  const beforeHeading = (await heading.boundingBox())!
+  const beforeCreate = (await create.boundingBox())!
+  await viewport.hover()
+  await page.mouse.wheel(0, 560)
+  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBeGreaterThan(300)
+  expect((await heading.boundingBox())!.y).toBeCloseTo(beforeHeading.y, 1)
+  expect((await create.boundingBox())!.y).toBeCloseTo(beforeCreate.y, 1)
+  expect(await viewport.evaluate(element => (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(0)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  await create.click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(0)
+  await page.getByRole('button', { name: '历史空间', exact: true }).click()
+  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(0)
+  await page.getByRole('button', { name: '搜索收藏', exact: true }).click()
+  await page.getByRole('searchbox', { name: '搜索全部收藏', exact: true }).fill('历史待办 C')
+  await page.getByRole('button', { name: '定位收藏', exact: true }).click()
+  await expect(page.getByRole('link', { name: '历史待办 C', exact: true })).toBeInViewport()
+  expect((await heading.boundingBox())!.y).toBeCloseTo(beforeHeading.y, 1)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  await heading.click()
+  await page.screenshot({ path: 'test-results/frosted-panel-desktop.png' })
+
+  await page.setViewportSize({ width: 480, height: 760 })
+  const mobileHeading = (await heading.boundingBox())!
+  await viewport.press('Control+Home')
+  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(0)
+  await viewport.press('PageDown')
+  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  expect((await heading.boundingBox())!.y).toBeCloseTo(mobileHeading.y, 1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(480)
+  await page.getByRole('button', { name: '打开待选网页', exact: true }).click()
+  await expect(page.getByRole('complementary', { name: '待选网页' })).toBeVisible()
+  await page.getByRole('button', { name: '关闭待选网页', exact: true }).click()
+  await heading.click()
+  await page.screenshot({ path: 'test-results/frosted-panel-mobile.png' })
+})
+
 test('浅色流体背景响应鼠标，仍可打开弹窗和正常收藏', async () => {
   const { page } = await openClient()
   await connect(page)

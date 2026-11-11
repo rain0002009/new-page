@@ -13,6 +13,8 @@
     "@tanstack/react-query": "^5.107.1",
     "fluid-prism": "0.0.1",
     "lucide-react": "^1.70.0",
+    "overlayscrollbars": "^2.17.0",
+    "overlayscrollbars-react": "^0.5.7",
     "qrcode.react": "^4.2.0",
     "react": "^18.1.0",
     "react-dom": "^18.1.0",
