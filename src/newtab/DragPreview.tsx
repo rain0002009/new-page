@@ -67,6 +67,9 @@ export async function animateDrop({ dragOverlay, transform }: DropAnimationFunct
   ]
   try { await Promise.all(animations.map(animation => animation.finished.catch(() => {}))) }
   finally {
+    // React removes the overlay after this promise resolves. Hide it before
+    // cancelling the fill, which otherwise flashes its original drop position.
+    dragOverlay.node.style.opacity = '0'
     if (!--hidden.count) { target.style.visibility = hidden.visibility; hiddenTargets.delete(target) }
     animations.forEach(animation => animation.cancel())
   }

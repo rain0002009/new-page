@@ -518,7 +518,25 @@ async function drag(page: Page, source: Locator, target: Locator) {
   await page.mouse.down()
   await page.mouse.move(from.x + 14, from.y + 12, { steps: 5 })
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 16 })
+  const frames = page.evaluate(async () => {
+    const jumps: { distance: number; size: number }[] = []
+    let lastAnimated: DOMRect | undefined
+    const start = performance.now()
+    while (performance.now() - start < 2000) {
+      const preview = document.querySelector<HTMLElement>('.drag-preview')
+      if (!preview) break
+      const overlay = preview.parentElement!
+      if (getComputedStyle(overlay).opacity !== '0') {
+        const rect = preview.getBoundingClientRect()
+        if (overlay.getAnimations({ subtree: true }).length) lastAnimated = rect
+        else if (lastAnimated) jumps.push({ distance: Math.hypot(rect.x - lastAnimated.x, rect.y - lastAnimated.y), size: Math.max(Math.abs(rect.width - lastAnimated.width), Math.abs(rect.height - lastAnimated.height)) })
+      }
+      await new Promise(requestAnimationFrame)
+    }
+    return jumps.filter(frame => frame.distance > 5 || frame.size > 5)
+  })
   await page.mouse.up()
+  expect(await frames, '松手动画结束后，复制体不能闪回松手位置或原尺寸').toEqual([])
   await expect(page.locator('.drag-preview')).toHaveCount(0)
 }
 
@@ -593,6 +611,7 @@ test('待选网页拖入先显示落点，占位与预览平滑过渡为收藏�
   const preview = page.locator('.drag-preview')
   const placeholder = page.getByRole('img', { name: '收藏放置位置' })
   await expect(placeholder).toBeVisible()
+  expect(Math.abs((await collection.boundingBox())!.height - target.height), '空收藏块进入拖拽占位时不能改变高度').toBeLessThan(3)
   await expect(placeholder).toHaveCSS('animation-name', 'placeholder-in')
   await expect(placeholder).toHaveCSS('animation-duration', '0.16s')
   expect(await page.evaluate(() => {
@@ -603,23 +622,79 @@ test('待选网页拖入先显示落点，占位与预览平滑过渡为收藏�
   expect(Math.abs((await preview.boundingBox())!.height - from.height)).toBeLessThan(2)
   await page.screenshot({ path: 'test-results/inbox-drop-placeholder.png', fullPage: true })
   const frames = page.evaluate(async () => {
-    const heights: { floating: number; saved: number }[] = []
+    const heights: { floating: number; saved: number; distance: number }[] = []
     const start = performance.now()
     while (performance.now() - start < 1200) {
-      const floating = document.querySelector('.drag-preview')?.getBoundingClientRect()
+      const preview = document.querySelector<HTMLElement>('.drag-preview')
+      const floating = preview && getComputedStyle(preview.parentElement!).opacity !== '0' ? preview.getBoundingClientRect() : undefined
       const saved = document.querySelector('article[aria-label="链接 React 文档"]')?.getBoundingClientRect()
-      if (floating && saved) heights.push({ floating: floating.height, saved: saved.height })
+      if (floating && saved) heights.push({ floating: floating.height, saved: saved.height, distance: Math.hypot(floating.x - saved.x, floating.y - saved.y) })
       await new Promise(requestAnimationFrame)
     }
     return heights
   })
   await page.mouse.up()
   const card = page.getByRole('article', { name: '链接 React 文档', exact: true })
-  expect((await frames).some(frame => frame.floating > from.height + 3 && frame.floating < frame.saved - 3)).toBe(true)
+  const dropFrames = await frames
+  expect(dropFrames.some(frame => frame.floating > from.height + 3 && frame.floating < frame.saved - 3)).toBe(true)
+  const arrived = dropFrames.findIndex(frame => frame.distance < 3 && Math.abs(frame.floating - frame.saved) < 3)
+  expect(arrived, '预览应平滑到达收藏卡片的位置和尺寸').toBeGreaterThanOrEqual(0)
+  expect(dropFrames.slice(arrived).filter(frame => frame.distance > 5 || Math.abs(frame.floating - frame.saved) > 5), '落位后直到移除预览都不能闪回松手位置或原尺寸').toEqual([])
   await expect(preview).toHaveCount(0)
   await expect(card).toBeVisible()
+  expect(Math.abs((await collection.boundingBox())!.height - target.height), '首条收藏落位后应保持同样的高度').toBeLessThan(3)
   await expect(collection.getByRole('link')).toHaveCount(1)
   expect(tab.isClosed()).toBe(false)
+})
+
+test('空收藏块下边缘悬停和取消保持高度，下方收藏块不跳动', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('名称').fill('下方收藏块')
+  await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  const tab = await context.newPage()
+  await tab.goto(`${origin}/web/react`)
+  const inbox = page.getByRole('article', { name: '待选 React 文档', exact: true })
+  const collection = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
+  const next = page.getByRole('region', { name: '收藏块 下方收藏块', exact: true })
+  for (const width of [1500, 820]) {
+    await page.setViewportSize({ width, height: 960 })
+    if (width === 820) await page.getByRole('button', { name: '打开待选网页', exact: true }).click()
+    const target = (await collection.boundingBox())!
+    const nextY = (await next.boundingBox())!.y
+    if (width === 1500) await page.screenshot({ path: 'test-results/empty-collection-desktop.png', fullPage: true })
+    const source = (await inbox.boundingBox())!
+    await page.mouse.move(source.x + 60, source.y + 25)
+    await page.mouse.down()
+    await page.mouse.move(target.x + 60, target.y + target.height - 14, { steps: 20 })
+    await expect(page.getByRole('img', { name: '收藏放置位置' })).toBeVisible()
+    const frames = await page.evaluate(async () => {
+      const samples: { height: number; nextY: number; placeholders: number }[] = []
+      const start = performance.now()
+      while (performance.now() - start < 350) {
+        samples.push({
+          height: document.querySelector('section[aria-label="收藏块 日常收藏"]')!.getBoundingClientRect().height,
+          nextY: document.querySelector('section[aria-label="收藏块 下方收藏块"]')!.getBoundingClientRect().y,
+          placeholders: document.querySelectorAll('[aria-label="收藏放置位置"]').length,
+        })
+        await new Promise(requestAnimationFrame)
+      }
+      return samples
+    })
+    expect(frames.every(frame => Math.abs(frame.height - target.height) < 3 && Math.abs(frame.nextY - nextY) < 3 && frame.placeholders === 1), `窗口 ${width}px 下，悬停不能反复切换空态和占位或移动下方内容`).toBe(true)
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    await expect(page.locator('.drag-preview')).toHaveCount(0)
+    await expect(page.getByRole('img', { name: '收藏放置位置' })).toHaveCount(0)
+    await expect(collection.getByRole('heading', { name: '暂无收藏', exact: true })).toBeVisible()
+    expect(Math.abs((await collection.boundingBox())!.height - target.height)).toBeLessThan(3)
+    expect(Math.abs((await next.boundingBox())!.y - nextY)).toBeLessThan(3)
+  }
+  const before = (await next.boundingBox())!.y
+  await drag(page, inbox, collection)
+  await expect(collection.getByRole('link', { name: 'React 文档', exact: true })).toBeVisible()
+  expect(Math.abs((await next.boundingBox())!.y - before)).toBeLessThan(3)
 })
 
 test('跨收藏块的落点占位稳定，折叠块取消拖动后保持原状', async () => {
