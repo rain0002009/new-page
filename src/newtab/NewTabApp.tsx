@@ -16,7 +16,7 @@ import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal } from './ui'
 import './styles.css'
 
-const stateKey = ['workspace']
+export const stateKey = ['workspace']
 export default function NewTabApp() {
   return <><FluidBackground /><Workbench /></>
 }

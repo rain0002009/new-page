@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { generate } from 'selfsigned'
 import { QuarkFixture } from './quark-fixture'
+import type { StoredWorkspace } from '../src/core/local-workspace'
+
+type DeferredSnapshotWindow = Window & { releaseSnapshots(): void; pendingSnapshots(): number }
 
 let server: Server
 let origin: string
@@ -394,6 +397,46 @@ test('首次连接后添加收藏，重开仍保留且同步到另一设备', as
   const second = await openClient()
   await connect(second.page)
   await expect(second.page.getByRole('link', { name: 'React 学习', exact: true })).toBeVisible()
+})
+
+test('打开页面先显示本地收藏，后台快照延迟时仍可使用并随后刷新', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '本地先显示的收藏')
+  await page.addInitScript(() => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime) as (request: unknown) => Promise<unknown>
+    const pending: (() => void)[] = []
+    let released = false
+    Object.assign(window, {
+      releaseSnapshots() { released = true; for (const release of pending.splice(0)) release() },
+      pendingSnapshots: () => pending.length,
+    })
+    chrome.runtime.sendMessage = ((request: { type?: string }) => {
+      if (!released && request?.type === 'snapshot') {
+        return new Promise<unknown>(resolve => pending.push(() => resolve(send(request))))
+      }
+      return send(request)
+    }) as typeof chrome.runtime.sendMessage
+  })
+  await page.reload()
+  await expect(page.getByRole('link', { name: '本地先显示的收藏', exact: true })).toBeVisible()
+  await expect(page.getByText('正在加载…', { exact: true })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (window as unknown as DeferredSnapshotWindow).pendingSnapshots())).toBeGreaterThan(0)
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  await expect(page.getByRole('heading', { name: 'Todo', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(page.getByRole('link', { name: '本地先显示的收藏', exact: true })).toBeVisible()
+  // Simulate a change from another page while the background refresh is delayed.
+  await page.evaluate(async () => {
+    const stored = await chrome.storage.local.get('new-page.workspace.v1')
+    const root = stored['new-page.workspace.v1'] as StoredWorkspace
+    const link = Object.values(root.sources[root.active!].doc.entities).find(entity => entity.title === '本地先显示的收藏')!
+    const result = await chrome.runtime.sendMessage({ type: 'action', sourceId: root.active, action: { type: 'edit', id: link.id, patch: { title: '后台更新后的收藏' } } })
+    if (!result.ok) throw new Error(result.error)
+    ;(window as unknown as DeferredSnapshotWindow).releaseSnapshots()
+  })
+  await expect(page.getByRole('link', { name: '后台更新后的收藏', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '本地先显示的收藏', exact: true })).toHaveCount(0)
 })
 
 test('重复网址卡片的 Todo 独立，完成后原收藏保留并可再次加入', async () => {
@@ -950,7 +993,8 @@ test('回收站超过三十天清理正文，旧设备刷新不会复活删除�
   await first.page.getByRole('button', { name: '我的空间', exact: true }).click()
   await first.page.getByRole('article', { name: '链接 会过期的收藏' }).hover()
   await first.page.getByRole('button', { name: '删除链接', exact: true }).click()
-  await first.page.getByRole('dialog').getByRole('button', { name: '移到回收站', exact: true }).click()
+  await expect(first.page.getByRole('link', { name: '会过期的收藏', exact: true })).toHaveCount(0)
+  await expect(first.page.getByRole('dialog')).toHaveCount(0)
   await sync(first.page)
   await expect(first.page.getByRole('button', { name: '恢复 会过期的收藏', exact: true })).toBeVisible()
   // Advance the deletion time through the controlled WebDAV boundary, not private extension state.

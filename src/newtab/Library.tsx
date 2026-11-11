@@ -11,7 +11,7 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
   return <article {...drag} className="link-card" aria-label={`链接 ${link.title}`}>
     <div className="card-top"><SiteIcon url={link.icon} title={link.title} /><div className="card-actions">
       <Button size="icon" aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
-      <Button size="icon" aria-label="删除链接" onClick={() => edit({ kind: 'delete', entity: link })}><Trash2 size={14} /></Button>
+      <Button size="icon" aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
       <Button size="icon" className={link.todo ? 'todo-lit' : ''} aria-label={link.todo ? '移出 Todo' : '加入 Todo'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
     </div></div>
     <a href={link.url} target="_blank" rel="noreferrer" draggable={false} className="link-title">{link.title}</a>

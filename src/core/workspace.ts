@@ -1,15 +1,13 @@
-import { active, apply, createDocument, equal, parents, prune, readDocument, type Conflict, type Document } from './model'
+import { active, apply, createDocument, equal, parents, prune, readDocument, type Conflict } from './model'
 import { emptyDocument, merge, refreshConflicts, resolveConflict } from './merge'
-import type { ConnectRequest, Request, Result, Snapshot } from './protocol'
+import type { ConnectRequest, Request, Result } from './protocol'
 import { RevisionChanged } from './webdav'
 import { normalizeRemote, remoteKey, remoteStore, isQuark, type Connection, type RemoteRead } from './remote'
 import { startQr, pollQr } from './quark/auth'
 import { quarkOrigins } from './quark/transport'
 import type { LoginProgress } from './quark/progress'
+import { storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root } from './local-workspace'
 
-type Source = { config: Connection; doc: Document; base: Document; etag: string | null; resolvedRevision?: string | null; conflicts: Conflict[]; status: Snapshot['status']; error: string; lastSync: number | null }
-type Root = { active: string | null; sources: Record<string, Source> }
-const storageKey = 'new-page.workspace.v1'
 let chain: Promise<unknown> = Promise.resolve()
 const syncing = new Set<string>()
 const inFlight = new Map<string, Promise<void>>()
@@ -34,11 +32,6 @@ function current(root: Root, id: string) {
 function includeCloudConflicts(local: Conflict[], cloud: Conflict[] = []) {
   return [...local, ...cloud.filter(candidate => !local.some(value => value.entityId === candidate.entityId &&
     [candidate.local, candidate.remote].every(version => equal(version, value.local) || equal(version, value.remote))))]
-}
-function snapshot(root: Root): Snapshot {
-  const source = root.active ? root.sources[root.active] : null
-  const connection: Snapshot['connection'] = source ? isQuark(source.config) ? { kind: 'quark', url: 'https://pan.quark.cn/', username: source.config.nickname } : { kind: 'webdav', url: source.config.url, username: source.config.username } : null
-  return source ? { sourceId: root.active, document: source.doc, connection, status: source.conflicts.length ? 'conflict' : source.status, conflicts: source.conflicts, error: source.error, lastSync: source.lastSync } : { sourceId: null, document: null, connection: null, status: 'pending', error: '', conflicts: [], lastSync: null }
 }
 export function schedule(id: string, delay = 600) {
   const pending = scheduled.get(id)
