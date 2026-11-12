@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { OverlayScrollbarsComponent, type OverlayScrollbarsComponentRef } from 'overlayscrollbars-react'
 import { tv } from 'tailwind-variants/lite'
 import 'overlayscrollbars/overlayscrollbars.css'
+import { useDroppable } from '@dnd-kit/core'
 
 const panel = tv({
   slots: {
@@ -16,9 +17,10 @@ const styles = panel()
 
 export default function ContentPanel({ header, children, scrollKey }: { header: ReactNode; children: ReactNode; scrollKey: string }) {
   const scroll = useRef<OverlayScrollbarsComponentRef>(null)
+  const { setNodeRef } = useDroppable({ id: 'collection-content', data: { kind: 'content' }, disabled: !scrollKey.startsWith('space:') })
   useEffect(() => { scroll.current?.osInstance()?.elements().viewport.scrollTo(0, 0) }, [scrollKey])
 
-  return <main className={styles.base()}>
+  return <main ref={setNodeRef} className={styles.base()}>
     <div className={styles.heading()}>{header}</div>
     <OverlayScrollbarsComponent ref={scroll} className={styles.scroll()} data-overlayscrollbars-initialize options={{
       overflow: { x: 'hidden', y: 'scroll' },

@@ -30,7 +30,8 @@ export type LinkInput = { title: string; url: string; icon?: string; note?: stri
 export type Action =
   | { type: 'add-space'; title: string }
   | { type: 'add-collection'; parentId: string; title: string }
-  | { type: 'add-links'; parentId: string; links: LinkInput[] }
+  | { type: 'add-links'; parentId: string; links: LinkInput[]; beforeId?: string }
+  | { type: 'create-collection-with-link'; parentId: string; beforeId?: string; source: { kind: 'link'; id: string } | { kind: 'new'; link: LinkInput } }
   | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; collapsed?: boolean } }
   | { type: 'todo'; id: string; value: boolean }
   | { type: 'sort-todo'; id: string; beforeId?: string }
@@ -111,9 +112,14 @@ function appendPosition(doc: Document, parentId: string | null, kind: Entity['ki
 export function apply(doc: Document, action: Action): Document {
   const next = readDocument(doc)
   const now = Date.now()
-  const insertCollection = (parentId: string, title: string) => {
+  const insertCollection = (parentId: string, title: string, beforeId?: string) => {
     requireEntity(next, parentId, 'space')
-    const collection: Collection = { ...common('collection', title, parentId, appendPosition(next, parentId, 'collection')), kind: 'collection', collapsed: false }
+    const before = beforeId ? requireEntity(next, beforeId, 'collection') : undefined
+    if (before && before.parentId !== parentId) throw new Error('拖拽目标已改变')
+    const siblings = children(next, parentId).filter(e => e.kind === 'collection')
+    const index = before ? siblings.findIndex(e => e.id === before.id) : siblings.length
+    const position = before ? ((siblings[index - 1]?.position ?? before.position - 2048) + before.position) / 2 : appendPosition(next, parentId, 'collection')
+    const collection: Collection = { ...common('collection', title, parentId, position), kind: 'collection', collapsed: false }
     next.entities[collection.id] = collection
     return collection
   }
@@ -124,12 +130,27 @@ export function apply(doc: Document, action: Action): Document {
       break
     }
     case 'add-collection': insertCollection(action.parentId, action.title); break
+    case 'create-collection-with-link': {
+      if (!children(next, action.parentId).some(e => e.kind === 'collection')) throw new Error('请先创建一个收藏块')
+      if (action.source.kind === 'link') {
+        const link = requireEntity(next, action.source.id, 'link')
+        const source = requireEntity(next, link.parentId!, 'collection')
+        if (source.parentId !== action.parentId) throw new Error('链接不能跨空间移动')
+      }
+      const collection = insertCollection(action.parentId, '新收藏', action.beforeId)
+      return apply(next, action.source.kind === 'link' ? { type: 'move', id: action.source.id, parentId: collection.id } : { type: 'add-links', parentId: collection.id, links: [action.source.link] })
+    }
     case 'add-links': {
       if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
       const collection = requireEntity(next, action.parentId, 'collection') as Collection
+      const before = action.beforeId ? requireEntity(next, action.beforeId, 'link') : undefined
+      if (before && before.parentId !== collection.id) throw new Error('拖拽目标已改变')
       for (const input of action.links) {
         const url = webUrl(input.url)
-        const link: Link = { ...common('link', input.title || new URL(url).hostname, collection.id, appendPosition(next, collection.id, 'link')), kind: 'link', url, icon: safeIcon(input.icon ?? ''), note: input.note ?? '', todo: false }
+        const siblings = children(next, collection.id).filter(e => e.kind === 'link')
+        const index = before ? siblings.findIndex(e => e.id === before.id) : siblings.length
+        const position = before ? ((siblings[index - 1]?.position ?? before.position - 2048) + before.position) / 2 : appendPosition(next, collection.id, 'link')
+        const link: Link = { ...common('link', input.title || new URL(url).hostname, collection.id, position), kind: 'link', url, icon: safeIcon(input.icon ?? ''), note: input.note ?? '', todo: false }
         next.entities[link.id] = link
       }
       collection.collapsed = false

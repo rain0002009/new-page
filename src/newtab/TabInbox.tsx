@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Layers3, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { safeIcon, type LinkInput } from '../core/model'
+import { useDndContext } from '@dnd-kit/core'
+import { safeIcon } from '../core/model'
+import type { OpenTab } from './open-tabs'
 import { useDragItem } from './drag'
 import { Button, SiteIcon } from './ui'
 import { feedbackStyles } from './form-styles'
@@ -15,7 +17,7 @@ const inbox = tv({
     list: 'flex-1 overflow-y-auto pt-[25px] pb-[17px] flex flex-col gap-[9px]',
     empty: 'flex flex-1 items-center justify-center flex-col gap-[12px] text-[#b9c3ad] text-center',
     hint: 'text-[10px] text-[#acb59e]',
-    tab: 'inbox-tab flex items-center gap-[9px] py-[12px] px-[10px] border border-solid border-[#ffffff52] bg-[#fffffa42] rounded-[10px] [transition:background_.2s,border-color_.2s] hover:bg-[#fffffa8a] hover:border-[#c4d3b1] active:cursor-grabbing',
+    tab: 'inbox-tab flex items-center gap-[9px] py-[12px] px-[10px] border border-solid border-[#c7d5b894] bg-[#fffffbc9] shadow-[0_2px_8px_#52673c0a] rounded-[10px] [transition:background_.2s,border-color_.2s] hover:bg-[#fffffbf0] hover:border-[#aabd92] active:cursor-grabbing',
     description: 'min-w-0 flex-1',
     tabTitle: 'block text-[11px] [font-weight:550] truncate',
     url: 'block text-[8px] text-[#a2ac96] truncate mt-[4px]',
@@ -29,7 +31,7 @@ const inbox = tv({
 const styles = inbox()
 
 export function useWindowTabs() {
-  const [tabs, setTabs] = useState<LinkInput[]>([])
+  const [tabs, setTabs] = useState<OpenTab[]>([])
   const [error, setError] = useState('')
   useEffect(() => {
     let disposed = false, revision = 0
@@ -40,7 +42,7 @@ export function useWindowTabs() {
         if (owner?.windowId === undefined) return
         const list = await chrome.tabs.query({ windowId: owner.windowId })
         if (disposed || request !== revision) return
-        setTabs(list.filter(tab => /^https?:\/\//i.test(tab.url ?? '')).sort((a, b) => a.index - b.index).map(tab => ({ title: tab.title || new URL(tab.url!).hostname, url: tab.url!, icon: safeIcon(tab.favIconUrl || '') })))
+        setTabs(list.filter(tab => tab.id !== undefined && /^https?:\/\//i.test(tab.url ?? '')).sort((a, b) => a.index - b.index).map(tab => ({ tabId: tab.id!, title: tab.title || new URL(tab.url!).hostname, url: tab.url!, icon: safeIcon(tab.favIconUrl || '') })))
         setError('')
       } catch { if (!disposed) setError('无法读取窗口标签页，请检查扩展权限后重开页面') }
     }
@@ -52,12 +54,17 @@ export function useWindowTabs() {
   }, [])
   return { tabs, error }
 }
-export default function TabInbox({ tabs, error, open, close }: { tabs: LinkInput[]; error: string; open: boolean; close: () => void }) {
+export default function TabInbox({ tabs, error, open, close }: { tabs: OpenTab[]; error: string; open: boolean; close: () => void }) {
+  const { active } = useDndContext()
+  const dragged = active?.data.current?.kind === 'tab' ? active.data.current.tab as OpenTab : undefined
+  // Keep the source mounted until drop so closing the browser tab mid-drag
+  // does not unregister the active item or discard its collected snapshot.
+  const visibleTabs = dragged && !tabs.some(tab => tab.tabId === dragged.tabId) ? [...tabs, dragged] : tabs
   return <aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></header>
-    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : tabs.length ? <div className={styles.list()}>{tabs.map((tab, index) => <InboxTab key={`${tab.url}-${index}`} tab={tab} index={index} />)}</div> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的普通网页</p></div>}
+    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <div className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} />)}</div> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的普通网页</p></div>}
   </aside>
 }
-function InboxTab({ tab, index }: { tab: LinkInput; index: number }) {
-  const drag = useDragItem(`tab:${index}:${tab.url}`, { kind: 'tab', tab, title: tab.title }, styles.tab())
+function InboxTab({ tab }: { tab: OpenTab }) {
+  const drag = useDragItem(`tab:${tab.tabId}`, { kind: 'tab', tab, title: tab.title }, styles.tab())
   return <article {...drag} aria-label={`待选 ${tab.title}`}><SiteIcon size="small" url={tab.icon || ''} title={tab.title} /><div className={styles.description()}><strong className={styles.tabTitle()}>{tab.title}</strong><span className={styles.url()} title={tab.url}>{tab.url}</span></div></article>
 }

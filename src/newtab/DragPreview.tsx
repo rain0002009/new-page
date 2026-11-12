@@ -1,6 +1,9 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { DropAnimationFunctionArguments } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
+import type { OpenTab } from './open-tabs'
+import { linkCard } from './link-card-styles'
+import { SiteIcon } from './ui'
 
 const hiddenTargets = new WeakMap<HTMLElement, { visibility: string; count: number }>()
 
@@ -23,14 +26,24 @@ export function snapshotElement(source: HTMLElement) {
   return clone
 }
 
-export default function DragPreview({ element }: { element: HTMLElement }) {
+export default function DragPreview({ element, tab, collectionId }: { element: HTMLElement; tab?: OpenTab; collectionId?: string }) {
   const ref = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(240)
   useLayoutEffect(() => {
+    if (tab) {
+      const collection = collectionId ? document.querySelector(`[data-drag-id="${window.CSS.escape(collectionId)}"]`) : document.querySelector('.main-content')
+      const cell = collection?.querySelector('.card-placeholder, .link-card')
+      if (cell) setWidth(cell.getBoundingClientRect().width)
+      return
+    }
     const host = ref.current!
     host.replaceChildren(element)
     return () => { host.replaceChildren() }
-  }, [element])
-  return <div className="drag-preview w-full h-full max-w-none p-0 border-0 bg-none overflow-visible whitespace-normal rounded-[15px] shadow-[0_18px_38px_#3443282b] text-[13px] text-ui-ink cursor-grabbing" ref={ref} aria-hidden="true" />
+  }, [element, tab, collectionId])
+  const styles = linkCard()
+  return <div key={tab ? 'card' : 'snapshot'} className="drag-preview w-full h-full max-w-none p-0 border-0 bg-none overflow-visible whitespace-normal rounded-[15px] shadow-[0_18px_38px_#3443282b] text-[13px] text-ui-ink cursor-grabbing" style={tab ? { width, height: 'auto' } : undefined} ref={tab ? undefined : ref} aria-hidden="true">
+    {tab && <article className={styles.base()}><div className={styles.top()}><SiteIcon url={tab.icon || ''} title={tab.title} /></div><span className={styles.title()}>{tab.title}</span><span className={styles.domain()}>{new URL(tab.url).hostname}</span></article>}
+  </div>
 }
 
 export async function animateDrop({ dragOverlay, transform }: DropAnimationFunctionArguments, target: HTMLElement | null) {

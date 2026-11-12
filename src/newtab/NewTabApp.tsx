@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Edit3, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
@@ -16,6 +16,7 @@ import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal } from './ui'
 import { feedbackStyles } from './form-styles'
+import QuickCollectionGap from './QuickCollectionGap'
 
 const workbench = tv({
   slots: {
@@ -122,7 +123,7 @@ function Workbench() {
     if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
     setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
   }
-  return <DragBoard doc={doc} act={act}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
+  return <DragBoard doc={doc} act={act} notify={setMessage}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     <aside className={styles.sidebar()}><Brand sidebar /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
@@ -136,7 +137,7 @@ function Workbench() {
       {notification && <div role="alert" className={feedbackStyles.alert()}><span>{notification}</span><Button size="icon" aria-label="关闭提示" onClick={() => setMessage('')}><X size={16} /></Button></div>}
       <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <CollectionSection key={collection.id} collection={collection} doc={doc} act={act} edit={setEditor} />)}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
