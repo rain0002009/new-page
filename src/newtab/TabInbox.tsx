@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Layers3, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { useDndContext } from '@dnd-kit/core'
@@ -7,6 +7,7 @@ import type { OpenTab } from './open-tabs'
 import { useDragItem } from './drag'
 import { Button, SiteIcon } from './ui'
 import { feedbackStyles } from './form-styles'
+import { useLayoutMotion } from './motion'
 
 const inbox = tv({
   slots: {
@@ -55,13 +56,15 @@ export function useWindowTabs() {
   return { tabs, error }
 }
 export default function TabInbox({ tabs, error, open, close }: { tabs: OpenTab[]; error: string; open: boolean; close: () => void }) {
+  const list = useRef<HTMLDivElement>(null)
+  useLayoutMotion(list, ':scope > [data-drag-id]')
   const { active } = useDndContext()
   const dragged = active?.data.current?.kind === 'tab' ? active.data.current.tab as OpenTab : undefined
   // Keep the source mounted until drop so closing the browser tab mid-drag
   // does not unregister the active item or discard its collected snapshot.
   const visibleTabs = dragged && !tabs.some(tab => tab.tabId === dragged.tabId) ? [...tabs, dragged] : tabs
   return <aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></header>
-    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <div className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} />)}</div> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的普通网页</p></div>}
+    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <div ref={list} className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} />)}</div> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的普通网页</p></div>}
   </aside>
 }
 function InboxTab({ tab }: { tab: OpenTab }) {

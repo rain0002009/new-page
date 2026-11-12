@@ -14,7 +14,7 @@ import FluidBackground from './FluidBackground'
 import ContentPanel from './ContentPanel'
 import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
-import { Button, Modal } from './ui'
+import { Button, Modal, ModalPresence } from './ui'
 import { feedbackStyles } from './form-styles'
 import QuickCollectionGap from './QuickCollectionGap'
 
@@ -142,8 +142,8 @@ function Workbench() {
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
     <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} />
-    {searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}
-    {editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}
+    <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}</ModalPresence>
+    <ModalPresence>{editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}</ModalPresence>
   </div></DragBoard>
 }
 function Brand({ sidebar = false }: { sidebar?: boolean }) {

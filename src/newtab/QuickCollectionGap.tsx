@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { tv } from 'tailwind-variants/lite'
 
+const dwellMs = 600
+
 export type QuickCollectionTarget = { kind: 'new-collection'; spaceId: string; beforeId?: string; ready: boolean }
 
 const line = tv({
@@ -21,14 +23,15 @@ export default function QuickCollectionGap({ spaceId, beforeId }: { spaceId: str
   useEffect(() => {
     setReady(false)
     if (!isOver || !accepts) return
-    const timer = setTimeout(() => setReady(true), 2000)
+    const timer = setTimeout(() => setReady(true), dwellMs)
     return () => clearTimeout(timer)
   }, [isOver, accepts])
-  const hintRect = ready && isOver ? over?.rect : undefined
+  const hintRect = accepts && isOver ? over?.rect : undefined
   return <div ref={setNodeRef} className="relative h-[24px] shrink-0">
     {isOver && accepts && <div role="status" aria-label="快捷建块位置" className="absolute inset-0 pointer-events-none">
       <div className={line({ ready })} />
+      <div className="absolute inset-x-0 top-1/2 h-[2px] origin-left rounded-full bg-[#a4c87b] animate-collection-dwell motion-reduce:hidden" />
     </div>}
-    {hintRect && createPortal(<span className="fixed z-[60] pointer-events-none -translate-y-1/2 rounded-[6px] px-[8px] py-[2px] bg-[#f6fbea] text-[#5d7648] text-[10px] shadow-[0_0_10px_#a6c47840]" style={{ left: hintRect.left + 12, top: hintRect.top + hintRect.height / 2 }}>松手新建收藏块</span>, document.body)}
+    {hintRect && createPortal(<span className="fixed z-[60] pointer-events-none -translate-y-1/2 rounded-[6px] px-[8px] py-[2px] bg-[#f6fbea] text-[#5d7648] text-[10px] shadow-[0_0_10px_#a6c47840] animate-placeholder-in" style={{ left: hintRect.left + 12, top: hintRect.top + hintRect.height / 2 }}>{ready ? '松手新建收藏块' : '停留新建收藏块'}</span>, document.body)}
   </div>
 }

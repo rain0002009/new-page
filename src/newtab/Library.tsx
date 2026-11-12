@@ -7,6 +7,7 @@ import { Button, SiteIcon } from './ui'
 import type { Act, EditorState } from './Editor'
 import { CollectionPlaceholder, useCollectionPlaceholder, useDragItem } from './drag'
 import { linkCard } from './link-card-styles'
+import { MotionRegion } from './motion'
 
 const cardAction = tv({
   base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] hover:text-action-ghost-hover group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
@@ -77,12 +78,12 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`重命名 ${collection.title}`} onClick={() => edit({ kind: 'rename', entity: collection })}><Edit3 size={13} /></Button>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>
-    {(!collection.collapsed || placeholder) && (links.length || placeholder ? <SortableContext items={links.map(link => link.id)} strategy={rectSortingStrategy}>
+    <MotionRegion>{(!collection.collapsed || placeholder) && (links.length || placeholder ? <SortableContext items={links.map(link => link.id)} strategy={rectSortingStrategy}>
       <div className={cardGrid}>{links.map(link => <Fragment key={link.id}>{placeholder?.beforeId === link.id && marker}<Card link={link} act={act} edit={edit} /></Fragment>)}{!placeholder?.beforeId && marker}</div>
     </SortableContext> : <div className="min-h-[124px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[15px] bg-[#fafcf34d]">
       <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
       <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
-    </div>)}
+    </div>)}</MotionRegion>
   </section>
 }
 

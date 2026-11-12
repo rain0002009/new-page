@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { tv, type VariantProps } from 'tailwind-variants/lite'
 import { X, Globe2 } from 'lucide-react'
+import { motionEase, reducedMotion } from './motion'
 
 const button = tv({
   base: 'inline-flex items-center justify-center gap-2 whitespace-nowrap [font-weight:550] transition-colors cursor-pointer disabled:cursor-default disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus outline-offset-[3px]',
@@ -34,10 +35,51 @@ const modal = tv({
   defaultVariants: { size: 'regular' },
 })
 
+const modalPresence = createContext({ present: true, finished: () => {} })
+
+export function ModalPresence({ children }: { children: ReactNode }) {
+  const retained = useRef(children)
+  const latest = useRef(children)
+  latest.current = children
+  if (children) retained.current = children
+  const [exited, setExited] = useState(!children)
+  useLayoutEffect(() => { if (children) setExited(false) }, [children])
+  const finished = useCallback(() => { if (!latest.current) { retained.current = null; setExited(true) } }, [])
+  return <modalPresence.Provider value={{ present: !!children, finished }}>{children || (!exited && retained.current)}</modalPresence.Provider>
+}
+
 export function Modal({ title, children, close, size, className }: { title: string; children: ReactNode; close: () => void; className?: string } & VariantProps<typeof modal>) {
   const ref = useRef<HTMLDialogElement>(null)
+  const interrupted = useRef<{ opacity: string; transform: string; backdrop: string }>()
+  const { present, finished } = useContext(modalPresence)
   const styles = modal({ size })
-  useEffect(() => { ref.current?.showModal(); ref.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus() }, [])
+  useLayoutEffect(() => {
+    const node = ref.current!
+    const focus = document.activeElement as HTMLElement | null
+    node.showModal()
+    const autofocus = node.querySelector<HTMLElement>('[data-autofocus], [autofocus]') ?? node.querySelector<HTMLElement>('input, textarea, select')
+    autofocus?.focus()
+    return () => { node.close(); if (focus?.isConnected) focus.focus({ preventScroll: true }) }
+  }, [])
+  useLayoutEffect(() => {
+    const node = ref.current!
+    node.inert = !present
+    const current = getComputedStyle(node)
+    const from = interrupted.current
+    const animation = node.animate(present ? [
+      { opacity: from?.opacity ?? 0, transform: from?.transform ?? 'translateY(6px) scale(.975)' }, { opacity: 1, transform: 'none' },
+    ] : [
+      { opacity: from?.opacity ?? current.opacity, transform: from?.transform ?? current.transform }, { opacity: 0, transform: 'translateY(4px) scale(.98)' },
+    ], { duration: reducedMotion() ? 0 : present ? 220 : 180, easing: motionEase, fill: 'both' })
+    const backdrop = node.animate([{ opacity: from?.backdrop ?? (present ? 0 : 1) }, { opacity: present ? 1 : 0 }], { duration: reducedMotion() ? 0 : 180, fill: 'both', pseudoElement: '::backdrop' })
+    let cancelled = false
+    void animation.finished.then(() => { if (!cancelled && !present) { node.close(); finished() } }).catch(() => {})
+    return () => {
+      const style = getComputedStyle(node)
+      interrupted.current = { opacity: style.opacity, transform: style.transform, backdrop: getComputedStyle(node, '::backdrop').opacity }
+      cancelled = true; animation.cancel(); backdrop.cancel()
+    }
+  }, [present, finished])
   return <dialog ref={ref} aria-label={title} className={styles.dialog({ className })} onCancel={event => { event.preventDefault(); close() }} onClick={event => { if (event.target === event.currentTarget) close() }}>
     <div className={styles.header()}><h2 className={styles.title()}>{title}</h2><Button size="icon" aria-label="关闭弹窗" onClick={close}><X size={19} /></Button></div>
     {children}

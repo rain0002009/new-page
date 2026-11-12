@@ -3,6 +3,7 @@ import { OverlayScrollbarsComponent, type OverlayScrollbarsComponentRef } from '
 import { tv } from 'tailwind-variants/lite'
 import 'overlayscrollbars/overlayscrollbars.css'
 import { useDroppable } from '@dnd-kit/core'
+import { useLayoutMotion } from './motion'
 
 const panel = tv({
   slots: {
@@ -17,6 +18,8 @@ const styles = panel()
 
 export default function ContentPanel({ header, children, scrollKey }: { header: ReactNode; children: ReactNode; scrollKey: string }) {
   const scroll = useRef<OverlayScrollbarsComponentRef>(null)
+  const body = useRef<HTMLDivElement>(null)
+  useLayoutMotion(body, ':scope > .collection')
   const { setNodeRef } = useDroppable({ id: 'collection-content', data: { kind: 'content' }, disabled: !scrollKey.startsWith('space:') })
   useEffect(() => { scroll.current?.osInstance()?.elements().viewport.scrollTo(0, 0) }, [scrollKey])
 
@@ -31,7 +34,7 @@ export default function ContentPanel({ header, children, scrollKey }: { header: 
       viewport.setAttribute('role', 'region')
       viewport.setAttribute('aria-label', '页面内容')
     } }}>
-      <div className={styles.body()}>{children}</div>
+      <div ref={body} className={styles.body()}>{children}</div>
     </OverlayScrollbarsComponent>
   </main>
 }

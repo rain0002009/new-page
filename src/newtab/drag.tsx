@@ -41,7 +41,7 @@ export function useCollectionPlaceholder(doc: Document, collectionId: string) {
 
 export function CollectionPlaceholder({ collectionId, target, height }: { collectionId: string; target: DragItem; height?: number }) {
   const { setNodeRef } = useDroppable({ id: `drop-slot:${collectionId}`, data: target })
-  return <div ref={setNodeRef} className="card-placeholder min-h-[124px] rounded-[15px] bg-[#d5e1c680] border-[1.5px] border-dashed border-[#9caf88] animate-placeholder-in" role="img" aria-label="收藏放置位置" style={{ height }} />
+  return <div ref={setNodeRef} data-motion-id="drop-slot" className="card-placeholder min-h-[124px] rounded-[15px] bg-[#d5e1c680] border-[1.5px] border-dashed border-[#9caf88] animate-placeholder-in" role="img" aria-label="收藏放置位置" style={{ height }} />
 }
 
 const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
@@ -104,7 +104,7 @@ export function DragBoard({ doc, act, notify, children: content }: { doc: Docume
   const dropAnimation: DropAnimation = async args => {
     const destination = dropTargets.current.get(String(args.active.id))
     await animateDrop(args, destination ? await destination : null)
-    dropTargets.current.delete(String(args.active.id))
+    if (dropTargets.current.get(String(args.active.id)) === destination) dropTargets.current.delete(String(args.active.id))
   }
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: boardKeyboardCoordinates }))
   async function finish({ active, over }: DragEndEvent) {
@@ -168,7 +168,8 @@ export function DragBoard({ doc, act, notify, children: content }: { doc: Docume
 function DragFeedback({ element, source, doc, dropAnimation }: { element: HTMLElement | null; source?: DragItem; doc: Document; dropAnimation: DropAnimation }) {
   const { over } = useDndContext()
   const target = over?.data.current as DragTarget | undefined
-  const tab = source?.kind === 'tab' && target && ['content', 'collection', 'link', 'new-collection'].includes(target.kind) ? source.tab : undefined
+  const tab = source?.kind === 'tab' ? source.tab : undefined
+  const card = !!tab && !!target && ['content', 'collection', 'link', 'new-collection'].includes(target.kind)
   const collectionId = target?.kind === 'collection' ? target.entityId : target?.kind === 'link' ? doc.entities[target.entityId]?.parentId ?? undefined : undefined
-  return <DragOverlay dropAnimation={dropAnimation} zIndex={50}>{element && <DragPreview element={element} tab={tab} collectionId={collectionId} />}</DragOverlay>
+  return <DragOverlay dropAnimation={dropAnimation} zIndex={50}>{element && <DragPreview element={element} tab={tab} card={card} collectionId={collectionId} />}</DragOverlay>
 }

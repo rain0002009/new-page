@@ -17,9 +17,13 @@ export default defineConfig({
     colors,
     font: { sans: '"Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif' },
     animation: {
-      keyframes: { 'placeholder-in': '{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}' },
-      durations: { 'placeholder-in': '.16s' },
-      timingFns: { 'placeholder-in': 'ease-out' },
+      keyframes: {
+        'placeholder-in': '{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}',
+        'collection-dwell': '{from{transform:scaleX(0)}to{transform:scaleX(1)}}',
+      },
+      durations: { 'placeholder-in': '.16s', 'collection-dwell': '.6s' },
+      timingFns: { 'placeholder-in': 'ease-out', 'collection-dwell': 'linear' },
+      counts: { 'collection-dwell': '1' },
     },
   },
 })

@@ -5,7 +5,7 @@ import { type Entity, type Conflict, type Document } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import type { Act } from './Editor'
-import { Button, Modal } from './ui'
+import { Button, Modal, ModalPresence } from './ui'
 import { feedbackStyles, formStyles } from './form-styles'
 
 const styles = tv({
@@ -74,7 +74,7 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
         <div className="flex shrink-0 items-center gap-[8px]"><Button aria-label={`恢复 ${entity.title}`} disabled={busy} onClick={() => void execute(async () => { await act({ type: 'restore', id: entity.id }) })}><RotateCcw size={14} />恢复</Button><Button tone="danger" aria-label={`彻底删除 ${entity.title}`} disabled={busy} onClick={() => { setRecycleError(''); setRecycleAction({ type: 'purge', entity }) }}><Trash2 size={14} />删除</Button></div>
       </div>)}</div> : <p className={styles.empty()}>回收站空空的</p>}
     </section>
-    {recycleAction && <Modal title={recycleAction.type === 'purge' ? '彻底删除' : '清空回收站'} close={() => { if (!busy) setRecycleAction(null) }}>
+    <ModalPresence>{recycleAction && <Modal title={recycleAction.type === 'purge' ? '彻底删除' : '清空回收站'} close={() => { if (!busy) setRecycleAction(null) }}>
       <p className="text-[14px] [overflow-wrap:anywhere]">{recycleAction.type === 'purge' ? `彻底删除「${recycleAction.entity.title}」及其包含的内容？` : '彻底删除回收站中的全部内容？'}</p>
       <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>删除后无法从回收站恢复。</p>
       {recycleError && <p role="alert" className={feedbackStyles.error()}>{recycleError}</p>}
@@ -83,8 +83,8 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
         if (await act(action)) setRecycleAction(null)
         else setRecycleError('删除未完成，请关闭弹窗查看提示后重试')
       })}>{recycleAction.type === 'purge' ? '删除' : '清空'}</Button></div>
-    </Modal>}
-    {pending && <Modal title="合并备份" close={() => setPending(null)}><p className={feedbackStyles.muted()}>{pending.message}</p><div className="flex justify-end gap-[8px] mt-[24px]"><Button onClick={() => setPending(null)}>取消</Button><Button tone="primary" disabled={busy} onClick={() => void execute(() => importBackup(pending.data, true))}>确认导入</Button></div></Modal>}
+    </Modal>}</ModalPresence>
+    <ModalPresence>{pending && <Modal title="合并备份" close={() => setPending(null)}><p className={feedbackStyles.muted()}>{pending.message}</p><div className="flex justify-end gap-[8px] mt-[24px]"><Button onClick={() => setPending(null)}>取消</Button><Button tone="primary" disabled={busy} onClick={() => void execute(() => importBackup(pending.data, true))}>确认导入</Button></div></Modal>}</ModalPresence>
   </>
 }
 function ConflictChoice({ conflict, busy, choose }: { conflict: Conflict; busy: boolean; choose: (side: 'local' | 'remote') => void }) {

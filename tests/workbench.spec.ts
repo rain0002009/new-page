@@ -510,6 +510,7 @@ test('创建空间与收藏块，编辑自动保存，并从全空间搜索定�
 })
 
 async function drag(page: Page, source: Locator, target: Locator) {
+  await expect(page.locator('dialog')).toHaveCount(0)
   await source.scrollIntoViewIfNeeded()
   const from = (await source.boundingBox())!
   await target.scrollIntoViewIfNeeded()
@@ -541,6 +542,7 @@ async function drag(page: Page, source: Locator, target: Locator) {
 }
 
 async function holdAtEdge(page: Page, source: Locator, collection: Locator, edge: 'before' | 'after' = 'after') {
+  await expect(page.locator('dialog')).toHaveCount(0)
   await page.bringToFront()
   const from = (await source.boundingBox())!
   const block = (await collection.boundingBox())!
@@ -548,6 +550,129 @@ async function holdAtEdge(page: Page, source: Locator, collection: Locator, edge
   await page.mouse.down()
   await page.mouse.move(block.x + 90, edge === 'before' ? block.y - 12 : block.y + block.height + 12, { steps: 20 })
 }
+
+async function recordMotion(page: Page) {
+  return page.evaluateHandle(() => {
+    const state = { running: true, frames: [] as { opacity?: number; backdrop?: number; height?: number; x?: number; y?: number }[] }
+    const sample = () => {
+      if (!state.running) return
+      const dialog = document.querySelector('dialog[open]')
+      const preview = document.querySelector('.drag-preview')
+      const card = document.querySelector('article[aria-label="链接 目标首项"]')
+      const rect = card?.getBoundingClientRect()
+      state.frames.push({ opacity: dialog ? Number(getComputedStyle(dialog).opacity) : undefined, backdrop: dialog ? Number(getComputedStyle(dialog, '::backdrop').opacity) : undefined, height: preview?.getBoundingClientRect().height, x: rect?.x, y: rect?.y })
+      requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+    return state
+  })
+}
+
+test('弹窗进入退出平滑，窄窗口和快速重开保持焦点与内容', async () => {
+  const { page } = await openClient()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await connect(page)
+  for (const width of [1500, 480]) {
+    await page.setViewportSize({ width, height: 900 })
+    const launch = page.getByRole('button', { name: '新建收藏块', exact: true })
+    const opening = await recordMotion(page)
+    await launch.click()
+    await expect(page.getByRole('dialog')).toHaveCSS('opacity', '1')
+    const entering = await opening.evaluate(state => { state.running = false; return state.frames })
+    await opening.dispose()
+    expect(entering.some(frame => (frame.opacity ?? 0) > .02 && (frame.opacity ?? 1) < .98), '弹窗进入需要可见的中间状态').toBe(true)
+    expect(entering.some(frame => (frame.backdrop ?? 0) > .02 && (frame.backdrop ?? 1) < .98), '遮罩也应平滑出现').toBe(true)
+    await expect(page.getByRole('dialog').getByLabel('名称')).toBeFocused()
+    await page.screenshot({ path: test.info().outputPath(`modal-${width}.png`) })
+    const closing = await recordMotion(page)
+    if (width === 1500) await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+    else await page.keyboard.press('Escape')
+    await expect(page.locator('dialog')).toHaveCount(0)
+    const exiting = await closing.evaluate(state => { state.running = false; return state.frames })
+    await closing.dispose()
+    expect(exiting.some(frame => (frame.opacity ?? 0) > .02 && (frame.opacity ?? 1) < .98), '关闭时先播放退出动画再卸载').toBe(true)
+    await expect(launch).toBeFocused()
+  }
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await page.keyboard.press('Escape')
+  // Dispatch the same UI button while its prior dialog is still exiting.
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).evaluate(button => (button as HTMLButtonElement).click())
+  await page.getByRole('dialog').getByLabel('名称').fill('快速重开后创建')
+  await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.getByRole('region', { name: '收藏块 快速重开后创建', exact: true })).toBeVisible()
+  await expect(page.locator('dialog')).toHaveCount(0)
+  await page.setViewportSize({ width: 1500, height: 900 })
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await page.mouse.click(2, 2)
+  await expect(page.locator('dialog')).toHaveCount(0)
+})
+
+test('待选预览双向变形连续，插入时卡片让位，取消后布局恢复', async () => {
+  const { page, context } = await openClient()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await connect(page)
+  await addLink(page, '目标首项')
+  await addLink(page, '目标末项')
+  const tab = await context.newPage()
+  await tab.goto(`${origin}/web/guide`)
+  await page.bringToFront()
+  const source = page.getByRole('article', { name: '待选 UnoCSS 指南', exact: true })
+  const from = (await source.boundingBox())!
+  const first = page.getByRole('article', { name: '链接 目标首项', exact: true })
+  const firstRect = (await first.boundingBox())!
+  const main = (await page.getByRole('main').boundingBox())!
+  await page.mouse.move(from.x + 60, from.y + 25)
+  await page.mouse.down()
+  await page.mouse.move(from.x - 12, from.y + 25)
+  await expect(page.locator('.drag-preview')).toBeVisible()
+  await expect(page.getByText('停留新建收藏块', { exact: true })).toHaveCount(0)
+  const sample = async (recorder: Awaited<ReturnType<typeof recordMotion>>) => {
+    await page.waitForTimeout(300)
+    const result = await recorder.evaluate(state => { state.running = false; return state.frames })
+    await recorder.dispose()
+    return result.filter((frame): frame is { height: number; x: number; y: number } => frame.height !== undefined && frame.x !== undefined && frame.y !== undefined)
+  }
+  const intoMain = await recordMotion(page)
+  await page.mouse.move(main.x + 90, main.y + 50)
+  await expect.poll(async () => (await page.locator('.drag-preview').boundingBox())!.height).toBeGreaterThanOrEqual(124)
+  expect((await sample(intoMain)).some(frame => frame.height > from.height + 3 && frame.height < 120), '条目变卡片应经过中间尺寸').toBe(true)
+  const intoSlot = await recordMotion(page)
+  await page.mouse.move(firstRect.x + 35, firstRect.y + 35)
+  await expect(page.getByRole('img', { name: '收藏放置位置' })).toBeVisible()
+  await expect.poll(async () => Math.abs((await first.boundingBox())!.x - firstRect.x - firstRect.width - 13)).toBeLessThan(2)
+  const insertion = await sample(intoSlot)
+  const end = insertion.at(-1)!
+  expect(insertion.some(frame => Math.hypot(frame.x - firstRect.x, frame.y - firstRect.y) > 3 && Math.hypot(frame.x - end.x, frame.y - end.y) > 3), '相邻卡片需要经过中间位置让位').toBe(true)
+  await page.screenshot({ path: test.info().outputPath('insertion-layout.png') })
+  const out = await recordMotion(page)
+  await page.mouse.move(from.x + 50, from.y + 25)
+  await expect.poll(async () => Math.abs((await page.locator('.drag-preview').boundingBox())!.height - from.height)).toBeLessThan(2)
+  expect((await sample(out)).some(frame => frame.height > from.height + 3 && frame.height < 120), '离开中间区域也应连续变回条目').toBe(true)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
+  expect(tab.isClosed()).toBe(false)
+  await expect.poll(async () => Math.abs((await first.boundingBox())!.x - firstRect.x)).toBeLessThan(2)
+  await expect(page.getByRole('region', { name: '收藏块 日常收藏', exact: true }).getByRole('link')).toHaveText(['目标首项', '目标末项'])
+})
+
+test('减少动态效果时直接呈现结果，快捷建块仍保留提示和等待', async () => {
+  const { page, context } = await openClient()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await connect(page)
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCSS('opacity', '1')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('dialog')).toHaveCount(0)
+  const tab = await context.newPage()
+  await tab.goto(`${origin}/web/guide`)
+  await holdAtEdge(page, page.getByRole('article', { name: '待选 UnoCSS 指南', exact: true }), page.getByRole('region', { name: '收藏块 日常收藏', exact: true }))
+  await expect(page.getByText('停留新建收藏块', { exact: true })).toBeVisible()
+  await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible({ timeout: 1000 })
+  await page.mouse.up()
+  await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true }).getByRole('link')).toHaveText('UnoCSS 指南')
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
+})
 
 test('收藏卡片移除旧移动图标，空备注不保留多余底部高度', async () => {
   const { page } = await openClient()
@@ -689,7 +814,7 @@ test('待选网页拖入先显示卡片占位，松手后平滑落位', async ()
   await expect.poll(() => tab.isClosed()).toBe(true)
 })
 
-test('已有收藏链接在块间停留两秒，松手原子建立新收藏', async () => {
+test('已有收藏链接在块间停留0.6秒，松手原子建立新收藏', async () => {
   const { page } = await openClient()
   await connect(page)
   await addLink(page, '快捷移动的链接')
@@ -703,6 +828,7 @@ test('已有收藏链接在块间停留两秒，松手原子建立新收藏', as
   await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
   await page.getByRole('dialog').getByLabel('名称').fill('下方收藏块')
   await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
   const original = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
   const from = (await original.getByRole('article').boundingBox())!
   const block = (await original.boundingBox())!
@@ -710,11 +836,12 @@ test('已有收藏链接在块间停留两秒，松手原子建立新收藏', as
   await page.mouse.down()
   await page.mouse.move(block.x + 90, block.y + block.height + 12, { steps: 20 })
   await expect(page.getByRole('status', { name: '快捷建块位置' })).toBeVisible()
-  await page.waitForTimeout(1000)
+  await expect(page.getByText('停留新建收藏块', { exact: true })).toBeVisible()
+  await page.waitForTimeout(180)
   await expect(page.getByText('松手新建收藏块', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true })).toHaveCount(0)
   await page.mouse.move(block.x + 190, block.y + block.height + 12)
-  await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible({ timeout: 1500 })
+  await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible({ timeout: 800 })
   await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true })).toHaveCount(0)
   await page.screenshot({ path: 'test-results/quick-collection-glow.png', fullPage: true })
   await page.mouse.up()
@@ -764,10 +891,10 @@ test('快捷建块离开和换位置重新计时，提前松手与取消不收�
   const collection = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
   await holdAtEdge(page, source, collection)
   await expect(page.getByRole('status', { name: '快捷建块位置' })).toBeVisible()
-  await page.waitForTimeout(1000)
+  await page.waitForTimeout(250)
   const block = (await collection.boundingBox())!
   await page.mouse.move(block.x + 90, block.y - 12, { steps: 10 })
-  await page.waitForTimeout(1100)
+  await page.waitForTimeout(250)
   await expect(page.getByText('松手新建收藏块', { exact: true })).toHaveCount(0)
   await page.mouse.up()
   await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true })).toHaveCount(0)
@@ -1622,6 +1749,7 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await page.keyboard.press('/')
   await expect(page.getByRole('searchbox', { name: '搜索全部收藏', exact: true })).toBeFocused()
   const searchDialog = page.getByRole('dialog', { name: '搜索收藏', exact: true })
+  await expect(searchDialog).toHaveCSS('opacity', '1')
   const bounds = (await searchDialog.boundingBox())!
   expect(bounds.x + bounds.width / 2).toBeCloseTo(480 / 2, 0)
   expect(bounds.y + bounds.height / 2).toBeCloseTo(900 / 2, 0)
@@ -1969,6 +2097,7 @@ test('键盘仍可直接调整整个收藏块和空间的顺序', async () => {
   await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
   await page.getByRole('dialog').getByLabel('名称').fill('键盘排序收藏块')
   await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
   await page.getByRole('region', { name: '收藏块 键盘排序收藏块', exact: true }).focus()
   await page.keyboard.press('Space', { delay: 100 })
   await expect(page.locator('.drag-preview')).toBeVisible()
@@ -1981,6 +2110,7 @@ test('键盘仍可直接调整整个收藏块和空间的顺序', async () => {
   await page.getByRole('button', { name: '新建空间', exact: true }).click()
   await page.getByRole('dialog').getByLabel('名称').fill('键盘排序空间')
   await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
   await page.getByRole('button', { name: '键盘排序空间', exact: true }).locator('..').focus()
   await page.keyboard.press('Space', { delay: 100 })
   await expect(page.locator('.drag-preview')).toBeVisible()
