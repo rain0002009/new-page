@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { children, todos, type Document, type Entity } from '../core/model'
 import type { Act } from './Editor'
 import DragPreview, { animateDrop, snapshotElement } from './DragPreview'
-import { closeCollectedTab, tabLink, type OpenTab } from './open-tabs'
+import { canSortTabs, closeCollectedTab, tabLink, type OpenTab } from './open-tabs'
 import type { QuickCollectionTarget } from './QuickCollectionGap'
 
 type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string }
@@ -14,7 +14,7 @@ type DropDestination = { kind: 'existing' } | { kind: 'new-link'; collectionId?:
 
 export function useDragItem(id: string, item: DragItem, className: string, disabled = false) {
   const node = useRef<HTMLElement | null>(null)
-  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: { ...item, node }, disabled: { draggable: disabled, droppable: disabled || item.kind === 'tab' } })
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: { ...item, node }, disabled })
   const ref = useCallback((element: HTMLElement | null) => { node.current = element; setNodeRef(element); setActivatorNodeRef(element) }, [setNodeRef, setActivatorNodeRef])
   return disabled ? { className } : {
     className: `${className} cursor-grab data-[dragging]:z-2 data-[dragging]:!bg-[#d5e1c680] data-[dragging]:!shadow-none data-[dragging]:[outline:1.5px_dashed_#9caf88] data-[dragging]:outline-offset-[-1px] [&[data-dragging]>*]:invisible [&[data-dragging]::before]:hidden [&[data-drop-target]:not([data-dragging])]:[outline:2px_solid_#b2c495] ${item.kind === 'todo' ? '[&[data-drop-target]:not([data-dragging])]:outline-offset-[-2px]' : '[&[data-drop-target]:not([data-dragging])]:outline-offset-[3px]'}`,
@@ -50,13 +50,18 @@ const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
   const { active, collisionRect, droppableContainers, droppableRects } = args.context
   if (!collisionRect) return
   const sourceKind = active?.data.current?.kind
+  const sourceTab = sourceKind === 'tab' ? active?.data.current?.tab as OpenTab : undefined
   const linkSource = sourceKind === 'link' || sourceKind === 'tab'
   const center = { x: collisionRect.left + collisionRect.width / 2, y: collisionRect.top + collisionRect.height / 2 }
+  const inbox = sourceTab ? active?.data.current?.node.current?.closest('.tab-inbox')?.getBoundingClientRect() as DOMRect | undefined : undefined
+  const inboxVertical = inbox && center.x >= inbox.left && center.x <= inbox.right && ['ArrowUp', 'ArrowDown'].includes(event.code)
   let distance = Infinity
   let result: { x: number; y: number } | undefined
   for (const container of droppableContainers.getEnabled()) {
     const kind = container.data.current?.kind
-    if (container.id === active?.id || !(linkSource ? ['link', 'collection', 'new-collection'].includes(kind) : kind === sourceKind)) continue
+    if (inboxVertical && kind !== 'tab') continue
+    const tabTarget = sourceTab && kind === 'tab' && canSortTabs(sourceTab, container.data.current?.tab)
+    if (container.id === active?.id || !(linkSource ? tabTarget || ['link', 'collection', 'new-collection'].includes(kind) : kind === sourceKind)) continue
     if (linkSource && kind === 'collection' && container.node.current?.querySelector('.link-card')) continue
     if (kind === 'new-collection' && ['ArrowLeft', 'ArrowRight'].includes(event.code)) continue
     const rect = droppableRects.get(container.id)
@@ -75,8 +80,11 @@ const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
 
 const collision: CollisionDetection = args => {
   const kind = (args.active.data.current as DragItem | undefined)?.kind
+  const source = args.active.data.current as DragItem | undefined
   const droppableContainers = args.droppableContainers.filter(container => {
-    const target = (container.data.current as DragTarget | undefined)?.kind
+    const item = container.data.current as DragTarget | undefined
+    const target = item?.kind
+    if (source?.kind === 'tab' && item?.kind === 'tab') return canSortTabs(source.tab, item.tab)
     if (kind === 'todo' || kind === 'space' || kind === 'collection') return target === kind
     return target === 'link' || target === 'collection' || target === 'content' || target === 'new-collection' || (kind === 'link' && target === 'space')
   })
@@ -96,7 +104,7 @@ function beforeId(siblings: Entity[], source: string, target: string) {
   return from >= 0 && from < to ? siblings[to + 1]?.id : target
 }
 
-export function DragBoard({ doc, act, notify, children: content }: { doc: Document; act: Act; notify: (message: string) => void; children: ReactNode }) {
+export function DragBoard({ doc, act, notify, moveTab, children: content }: { doc: Document; act: Act; notify: (message: string) => void; moveTab: (source: OpenTab, target: OpenTab) => Promise<boolean>; children: ReactNode }) {
   const [dragging, setDragging] = useState<HTMLElement | null>(null)
   const dragSource = useRef<DragItem | undefined>(undefined)
   const dropTargets = useRef(new Map<string, Promise<HTMLElement | null>>())
@@ -118,7 +126,12 @@ export function DragBoard({ doc, act, notify, children: content }: { doc: Docume
       const destination = target.kind === 'new-link' ? Array.from(document.querySelectorAll<HTMLElement>(target.collectionId ? `[data-drag-id="${window.CSS.escape(target.collectionId)}"] .card-grid > .link-card` : '.card-grid > .link-card')).find(node => !doc.entities[node.dataset.dragId!]) : document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(String(active.id))}"]`)
       resolve(success ? destination ?? original : original)
     }
-    if (!source || !target || active.id === over?.id || target.kind === 'tab' || target.kind === 'content') { resolve(original); return }
+    if (!source || !target || active.id === over?.id || target.kind === 'content') { resolve(original); return }
+    if (target.kind === 'tab') {
+      if (source.kind === 'tab' && canSortTabs(source.tab, target.tab)) await settle(await moveTab(source.tab, target.tab))
+      else resolve(original)
+      return
+    }
     if (target.kind === 'new-collection') {
       if (!target.ready || (source.kind !== 'link' && source.kind !== 'tab')) { resolve(original); return }
       const success = await act({ type: 'create-collection-with-link', parentId: target.spaceId, beforeId: target.beforeId, source: source.kind === 'tab' ? { kind: 'new', link: tabLink(source.tab) } : { kind: 'link', id: source.entityId } })

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Layers3, X } from 'lucide-react'
+import { BookmarkPlus, Layers3, LoaderCircle, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { useDndContext } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { safeIcon } from '../core/model'
-import type { OpenTab } from './open-tabs'
+import { canSortTabs, type OpenTab } from './open-tabs'
 import { useDragItem } from './drag'
 import { Button, SiteIcon } from './ui'
 import { feedbackStyles } from './form-styles'
@@ -18,7 +19,7 @@ const inbox = tv({
     list: 'flex-1 overflow-y-auto pt-[25px] pb-[17px] flex flex-col gap-[9px]',
     empty: 'flex flex-1 items-center justify-center flex-col gap-[12px] text-[#b9c3ad] text-center',
     hint: 'text-[10px] text-[#acb59e]',
-    tab: 'inbox-tab flex items-center gap-[9px] py-[12px] px-[10px] border border-solid border-[#c7d5b894] bg-[#fffffbc9] shadow-[0_2px_8px_#52673c0a] rounded-[10px] [transition:background_.2s,border-color_.2s] hover:bg-[#fffffbf0] hover:border-[#aabd92] active:cursor-grabbing',
+    tab: 'inbox-tab relative flex items-center gap-[9px] py-[12px] px-[10px] border border-solid border-[#c7d5b894] bg-[#fffffbc9] shadow-[0_2px_8px_#52673c0a] rounded-[10px] [transition:background_.2s,border-color_.2s] hover:bg-[#fffffbf0] hover:border-[#aabd92] active:cursor-grabbing',
     description: 'min-w-0 flex-1',
     tabTitle: 'block text-[11px] [font-weight:550] truncate',
     url: 'block text-[8px] text-[#a2ac96] truncate mt-[4px]',
@@ -34,6 +35,7 @@ const styles = inbox()
 export function useWindowTabs() {
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [error, setError] = useState('')
+  const [refreshRevision, setRefreshRevision] = useState(0)
   useEffect(() => {
     let disposed = false, revision = 0
     const refresh = async () => {
@@ -43,7 +45,7 @@ export function useWindowTabs() {
         if (owner?.windowId === undefined) return
         const list = await chrome.tabs.query({ windowId: owner.windowId })
         if (disposed || request !== revision) return
-        setTabs(list.filter(tab => tab.id !== undefined && /^https?:\/\//i.test(tab.url ?? '')).sort((a, b) => a.index - b.index).map(tab => ({ tabId: tab.id!, title: tab.title || new URL(tab.url!).hostname, url: tab.url!, icon: safeIcon(tab.favIconUrl || '') })))
+        setTabs(list.filter(tab => tab.id !== undefined && /^https?:\/\//i.test(tab.url ?? '')).sort((a, b) => a.index - b.index).map(tab => ({ tabId: tab.id!, windowId: tab.windowId, pinned: tab.pinned, index: tab.index, title: tab.title || new URL(tab.url!).hostname, url: tab.url!, icon: safeIcon(tab.favIconUrl || '') })))
         setError('')
       } catch { if (!disposed) setError('无法读取窗口标签页，请检查扩展权限后重开页面') }
     }
@@ -52,10 +54,10 @@ export function useWindowTabs() {
     events.forEach(event => event.addListener(listener))
     void refresh()
     return () => { disposed = true; events.forEach(event => event.removeListener(listener)) }
-  }, [])
-  return { tabs, error }
+  }, [refreshRevision])
+  return { tabs, error, refresh: () => setRefreshRevision(value => value + 1) }
 }
-export default function TabInbox({ tabs, error, open, close }: { tabs: OpenTab[]; error: string; open: boolean; close: () => void }) {
+export default function TabInbox({ tabs, error, open, close, collect, collecting, notify }: { tabs: OpenTab[]; error: string; open: boolean; close: () => void; collect: () => void; collecting: boolean; notify: (message: string) => void }) {
   const list = useRef<HTMLDivElement>(null)
   useLayoutMotion(list, ':scope > [data-drag-id]')
   const { active } = useDndContext()
@@ -63,11 +65,21 @@ export default function TabInbox({ tabs, error, open, close }: { tabs: OpenTab[]
   // Keep the source mounted until drop so closing the browser tab mid-drag
   // does not unregister the active item or discard its collected snapshot.
   const visibleTabs = dragged && !tabs.some(tab => tab.tabId === dragged.tabId) ? [...tabs, dragged] : tabs
-  return <aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></header>
-    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <div ref={list} className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} />)}</div> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的普通网页</p></div>}
+  return <aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><div className="flex items-center gap-[2px]"><Button size="icon" aria-label="一键收藏" title="一键收藏全部待选网页" disabled={!tabs.length || !!error || collecting} aria-busy={collecting} onClick={collect}>{collecting ? <LoaderCircle size={17} className="animate-spin" /> : <BookmarkPlus size={17} />}</Button><Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></div></header>
+    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <SortableContext items={visibleTabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}><div ref={list} className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} notify={notify} />)}</div></SortableContext> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的普通网页</p></div>}
   </aside>
 }
-function InboxTab({ tab }: { tab: OpenTab }) {
+function InboxTab({ tab, notify }: { tab: OpenTab; notify: (message: string) => void }) {
+  const [closing, setClosing] = useState(false)
+  const { active, over } = useDndContext()
+  const source = active?.data.current?.kind === 'tab' ? active.data.current.tab as OpenTab : undefined
+  const inserting = source && source.tabId !== tab.tabId && over?.id === `tab:${tab.tabId}` && canSortTabs(source, tab)
   const drag = useDragItem(`tab:${tab.tabId}`, { kind: 'tab', tab, title: tab.title }, styles.tab())
-  return <article {...drag} aria-label={`待选 ${tab.title}`}><SiteIcon size="small" url={tab.icon || ''} title={tab.title} /><div className={styles.description()}><strong className={styles.tabTitle()}>{tab.title}</strong><span className={styles.url()} title={tab.url}>{tab.url}</span></div></article>
+  async function closeTab() {
+    setClosing(true)
+    try { await chrome.tabs.remove(tab.tabId) }
+    catch (error) { if (!(error instanceof Error && /No tab with id/i.test(error.message))) notify('无法关闭标签页，请重试') }
+    finally { setClosing(false) }
+  }
+  return <article {...drag} aria-label={`待选 ${tab.title}`}><SiteIcon size="small" url={tab.icon || ''} title={tab.title} /><div className={styles.description()}><strong className={styles.tabTitle()}>{tab.title}</strong><span className={styles.url()} title={tab.url}>{tab.url}</span></div><Button size="custom" className="h-[26px] w-[26px] shrink-0 p-0" aria-label={`关闭标签页 ${tab.title}`} title={`关闭标签页 ${tab.title}`} disabled={closing} onKeyDown={event => event.stopPropagation()} onClick={() => void closeTab()}><X size={14} /></Button>{inserting && <span role="img" aria-label="标签页放置位置" className={`pointer-events-none absolute left-0 right-0 h-[2px] rounded-full bg-[#829b65] ${source.index < tab.index ? 'bottom-[-6px]' : 'top-[-6px]'}`} />}</article>
 }

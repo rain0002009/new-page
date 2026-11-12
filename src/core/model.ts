@@ -31,6 +31,7 @@ export type Action =
   | { type: 'add-space'; title: string }
   | { type: 'add-collection'; parentId: string; title: string }
   | { type: 'add-links'; parentId: string; links: LinkInput[]; beforeId?: string }
+  | { type: 'collect-tabs'; parentId: string; title: string; links: LinkInput[] }
   | { type: 'create-collection-with-link'; parentId: string; beforeId?: string; source: { kind: 'link'; id: string } | { kind: 'new'; link: LinkInput } }
   | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; collapsed?: boolean } }
   | { type: 'todo'; id: string; value: boolean }
@@ -142,6 +143,12 @@ export function apply(doc: Document, action: Action): Document {
       break
     }
     case 'add-collection': insertCollection(action.parentId, action.title); break
+    case 'collect-tabs': {
+      if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
+      const first = children(next, action.parentId).find(e => e.kind === 'collection')
+      const collection = insertCollection(action.parentId, action.title, first?.id)
+      return apply(next, { type: 'add-links', parentId: collection.id, links: action.links })
+    }
     case 'create-collection-with-link': {
       if (!children(next, action.parentId).some(e => e.kind === 'collection')) throw new Error('请先创建一个收藏块')
       if (action.source.kind === 'link') {

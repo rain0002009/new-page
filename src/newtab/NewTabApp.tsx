@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Edit3, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
@@ -17,6 +17,7 @@ import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal, ModalPresence } from './ui'
 import { feedbackStyles } from './form-styles'
 import QuickCollectionGap from './QuickCollectionGap'
+import { closeCollectedTab, collectionTitle, moveOpenTab, tabLink } from './open-tabs'
 
 const workbench = tv({
   slots: {
@@ -81,13 +82,16 @@ export default function NewTabApp() {
 function Workbench() {
   const client = useQueryClient()
   const { data, error } = useQuery({ queryKey: stateKey, queryFn: async () => (await rpc({ type: 'snapshot' })).snapshot!, refetchInterval: 5000 })
-  const { tabs, error: tabError } = useWindowTabs()
+  const { tabs, error: tabError, refresh: refreshTabs } = useWindowTabs()
   const [inboxOpen, setInboxOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [selected, setSelected] = useState('')
   const [page, setPage] = useState('space')
   const [searchOpen, setSearchOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const [collecting, setCollecting] = useState(false)
+  const collectingRef = useRef(false)
+  const [collectionReveal, setCollectionReveal] = useState(0)
   useEffect(() => {
     const listener = (event: { type: string }) => { if (event.type === 'changed') void client.invalidateQueries({ queryKey: stateKey }) }
     chrome.runtime.onMessage.addListener(listener)
@@ -116,6 +120,20 @@ function Workbench() {
   const collections = space ? children(doc, space.id).filter((e): e is Collection => e.kind === 'collection') : []
   const links = all.filter((e): e is Link => e.kind === 'link')
   const status = syncStatusLabels[data.status]
+  async function collectTabs() {
+    if (collectingRef.current || !space || !tabs.length || tabError) return
+    collectingRef.current = true; setCollecting(true)
+    const snapshot = tabs.map(tab => ({ ...tab }))
+    const targetSpace = space.id
+    try {
+      if (!await act({ type: 'collect-tabs', parentId: targetSpace, title: collectionTitle(), links: snapshot.map(tabLink) })) return
+      setSelected(targetSpace); setPage('space'); setInboxOpen(false)
+      setCollectionReveal(value => value + 1)
+      const notices = new Set<string>()
+      for (const tab of snapshot) await closeCollectedTab(tab, message => notices.add(message))
+      if (notices.size) setMessage([...notices].join('；'))
+    } finally { collectingRef.current = false; setCollecting(false) }
+  }
   function locate(link: Link) {
     setSearchOpen(false)
     const collection = doc.entities[link.parentId!]
@@ -123,7 +141,7 @@ function Workbench() {
     if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
     setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
   }
-  return <DragBoard doc={doc} act={act} notify={setMessage}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
+  return <DragBoard doc={doc} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     <aside className={styles.sidebar()}><Brand sidebar /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
@@ -133,7 +151,7 @@ function Workbench() {
       </nav>
       <div className="mt-auto"><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
-    <ContentPanel scrollKey={`${page}:${space?.id ?? ''}`} header={<>
+    <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
       {notification && <div role="alert" className={feedbackStyles.alert()}><span>{notification}</span><Button size="icon" aria-label="关闭提示" onClick={() => setMessage('')}><X size={16} /></Button></div>}
       <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
@@ -141,7 +159,7 @@ function Workbench() {
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
-    <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} />
+    <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />
     <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}</ModalPresence>
     <ModalPresence>{editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}</ModalPresence>
   </div></DragBoard>
