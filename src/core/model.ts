@@ -109,16 +109,28 @@ function requireEntity(doc: Document, id: string, kind?: Entity['kind']) {
   return entity
 }
 function appendPosition(doc: Document, parentId: string | null, kind: Entity['kind']) { return Math.max(0, ...children(doc, parentId).filter(e => e.kind === kind).map(e => e.position)) + 1024 }
+function insertionPosition(siblings: Entity[], beforeId: string | undefined, now: number) {
+  const index = beforeId ? siblings.findIndex(e => e.id === beforeId) : siblings.length
+  if (index < 0) throw new Error('拖拽目标已改变')
+  const between = () => index === siblings.length ? Math.max(0, siblings.at(-1)?.position ?? 0) + 1024 :
+    ((siblings[index - 1]?.position ?? siblings[index].position - 2048) + siblings[index].position) / 2
+  let position = between()
+  // Concurrent edits and imports can share ranks; preserve the visible order
+  // before inserting when no numeric gap remains.
+  if (!Number.isFinite(position) || (index > 0 && position <= siblings[index - 1].position) ||
+      (index < siblings.length && position >= siblings[index].position)) {
+    siblings.forEach((entity, order) => { entity.position = (order + 1) * 1024; entity.updatedAt = now })
+    position = between()
+  }
+  return position
+}
 export function apply(doc: Document, action: Action): Document {
   const next = readDocument(doc)
   const now = Date.now()
   const insertCollection = (parentId: string, title: string, beforeId?: string) => {
     requireEntity(next, parentId, 'space')
-    const before = beforeId ? requireEntity(next, beforeId, 'collection') : undefined
-    if (before && before.parentId !== parentId) throw new Error('拖拽目标已改变')
     const siblings = children(next, parentId).filter(e => e.kind === 'collection')
-    const index = before ? siblings.findIndex(e => e.id === before.id) : siblings.length
-    const position = before ? ((siblings[index - 1]?.position ?? before.position - 2048) + before.position) / 2 : appendPosition(next, parentId, 'collection')
+    const position = insertionPosition(siblings, beforeId, now)
     const collection: Collection = { ...common('collection', title, parentId, position), kind: 'collection', collapsed: false }
     next.entities[collection.id] = collection
     return collection
@@ -143,13 +155,10 @@ export function apply(doc: Document, action: Action): Document {
     case 'add-links': {
       if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
       const collection = requireEntity(next, action.parentId, 'collection') as Collection
-      const before = action.beforeId ? requireEntity(next, action.beforeId, 'link') : undefined
-      if (before && before.parentId !== collection.id) throw new Error('拖拽目标已改变')
       for (const input of action.links) {
         const url = webUrl(input.url)
         const siblings = children(next, collection.id).filter(e => e.kind === 'link')
-        const index = before ? siblings.findIndex(e => e.id === before.id) : siblings.length
-        const position = before ? ((siblings[index - 1]?.position ?? before.position - 2048) + before.position) / 2 : appendPosition(next, collection.id, 'link')
+        const position = insertionPosition(siblings, action.beforeId, now)
         const link: Link = { ...common('link', input.title || new URL(url).hostname, collection.id, position), kind: 'link', url, icon: safeIcon(input.icon ?? ''), note: input.note ?? '', todo: false }
         next.entities[link.id] = link
       }
@@ -208,9 +217,7 @@ export function apply(doc: Document, action: Action): Document {
         target.collapsed = false
       } else if (entity.parentId !== action.parentId) throw new Error('只能在原有区域内排序')
       const siblings = children(next, action.parentId).filter(e => e.kind === entity.kind && e.id !== entity.id)
-      const index = action.beforeId ? siblings.findIndex(e => e.id === action.beforeId) : siblings.length
-      if (index < 0) throw new Error('拖拽目标已改变')
-      entity.position = index === siblings.length ? (siblings.at(-1)?.position ?? 0) + 1024 : ((siblings[index - 1]?.position ?? siblings[index].position - 2048) + siblings[index].position) / 2
+      entity.position = insertionPosition(siblings, action.beforeId, now)
       entity.parentId = action.parentId; entity.updatedAt = now
       break
     }

@@ -1,15 +1,16 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
-import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DropAnimation } from '@dnd-kit/core'
+import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DropAnimation, type KeyboardCoordinateGetter } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { children, todos, type Document, type Entity } from '../core/model'
 import type { Act } from './Editor'
 import DragPreview, { animateDrop, snapshotElement } from './DragPreview'
 import { closeCollectedTab, tabLink, type OpenTab } from './open-tabs'
-import { collectionKeyboardCoordinates, type QuickCollectionTarget } from './QuickCollectionGap'
+import type { QuickCollectionTarget } from './QuickCollectionGap'
 
 type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string }
 type DragTarget = DragItem | { kind: 'content' } | QuickCollectionTarget
+type DropDestination = { kind: 'existing' } | { kind: 'new-link'; collectionId?: string }
 
 export function useDragItem(id: string, item: DragItem, className: string, disabled = false) {
   const node = useRef<HTMLElement | null>(null)
@@ -41,6 +42,35 @@ export function useCollectionPlaceholder(doc: Document, collectionId: string) {
 export function CollectionPlaceholder({ collectionId, target, height }: { collectionId: string; target: DragItem; height?: number }) {
   const { setNodeRef } = useDroppable({ id: `drop-slot:${collectionId}`, data: target })
   return <div ref={setNodeRef} className="card-placeholder min-h-[124px] rounded-[15px] bg-[#d5e1c680] border-[1.5px] border-dashed border-[#9caf88] animate-placeholder-in" role="img" aria-label="收藏放置位置" style={{ height }} />
+}
+
+const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) return
+  event.preventDefault()
+  const { active, collisionRect, droppableContainers, droppableRects } = args.context
+  if (!collisionRect) return
+  const sourceKind = active?.data.current?.kind
+  const linkSource = sourceKind === 'link' || sourceKind === 'tab'
+  const center = { x: collisionRect.left + collisionRect.width / 2, y: collisionRect.top + collisionRect.height / 2 }
+  let distance = Infinity
+  let result: { x: number; y: number } | undefined
+  for (const container of droppableContainers.getEnabled()) {
+    const kind = container.data.current?.kind
+    if (container.id === active?.id || !(linkSource ? ['link', 'collection', 'new-collection'].includes(kind) : kind === sourceKind)) continue
+    if (linkSource && kind === 'collection' && container.node.current?.querySelector('.link-card')) continue
+    if (kind === 'new-collection' && ['ArrowLeft', 'ArrowRight'].includes(event.code)) continue
+    const rect = droppableRects.get(container.id)
+    if (!rect) continue
+    const dx = (kind === 'new-collection' ? Math.max(rect.left + 1, Math.min(center.x, rect.right - 1)) : rect.left + rect.width / 2) - center.x
+    const dy = rect.top + rect.height / 2 - center.y
+    const forward = event.code === 'ArrowUp' ? dy < -1 : event.code === 'ArrowDown' ? dy > 1 : event.code === 'ArrowLeft' ? dx < -1 : dx > 1
+    const nextDistance = Math.hypot(dx, dy)
+    if (forward && nextDistance < distance) {
+      distance = nextDistance
+      result = { x: args.currentCoordinates.x + dx, y: args.currentCoordinates.y + dy }
+    }
+  }
+  return result
 }
 
 const collision: CollisionDetection = args => {
@@ -76,23 +106,23 @@ export function DragBoard({ doc, act, notify, children: content }: { doc: Docume
     await animateDrop(args, destination ? await destination : null)
     dropTargets.current.delete(String(args.active.id))
   }
-  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: collectionKeyboardCoordinates }))
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: boardKeyboardCoordinates }))
   async function finish({ active, over }: DragEndEvent) {
     setDragging(null)
     const source = dragSource.current
     const target = over?.data.current as DragTarget | undefined
     const original = active.data.current?.node.current as HTMLElement | null
     const resolve = resolveDrop.current
-    const settle = async (success: boolean, collectionId?: string | true) => {
+    const settle = async (success: boolean, target: DropDestination = { kind: 'existing' }) => {
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-      const destination = collectionId ? Array.from(document.querySelectorAll<HTMLElement>(collectionId === true ? '.card-grid > .link-card' : `[data-drag-id="${window.CSS.escape(collectionId)}"] .card-grid > .link-card`)).find(node => !doc.entities[node.dataset.dragId!]) : document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(String(active.id))}"]`)
+      const destination = target.kind === 'new-link' ? Array.from(document.querySelectorAll<HTMLElement>(target.collectionId ? `[data-drag-id="${window.CSS.escape(target.collectionId)}"] .card-grid > .link-card` : '.card-grid > .link-card')).find(node => !doc.entities[node.dataset.dragId!]) : document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(String(active.id))}"]`)
       resolve(success ? destination ?? original : original)
     }
     if (!source || !target || active.id === over?.id || target.kind === 'tab' || target.kind === 'content') { resolve(original); return }
     if (target.kind === 'new-collection') {
       if (!target.ready || (source.kind !== 'link' && source.kind !== 'tab')) { resolve(original); return }
       const success = await act({ type: 'create-collection-with-link', parentId: target.spaceId, beforeId: target.beforeId, source: source.kind === 'tab' ? { kind: 'new', link: tabLink(source.tab) } : { kind: 'link', id: source.entityId } })
-      await settle(success, source.kind === 'tab' ? true : undefined)
+      await settle(success, source.kind === 'tab' ? { kind: 'new-link' } : { kind: 'existing' })
       if (success && source.kind === 'tab') await closeCollectedTab(source.tab, notify)
       return
     }
@@ -107,7 +137,7 @@ export function DragBoard({ doc, act, notify, children: content }: { doc: Docume
       const parentId = target.kind === 'collection' ? entity.id : target.kind === 'link' ? entity.parentId : null
       if (parentId) {
         const success = await act({ type: 'add-links', parentId, links: [tabLink(source.tab)], beforeId: target.kind === 'link' ? target.entityId : undefined })
-        await settle(success, parentId)
+        await settle(success, { kind: 'new-link', collectionId: parentId })
         if (success) await closeCollectedTab(source.tab, notify)
       }
       else resolve(original)
