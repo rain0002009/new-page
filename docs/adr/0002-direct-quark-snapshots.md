@@ -1,6 +1,6 @@
 # 扩展直接访问夸克，使用独立版本文件保存收藏
 
-历史无限保留方式已被 [ADR 0005](0005-quark-readable-files-and-bounded-history.md) 替代。
+历史无限保留方式先被 ADR 0005 替代，现已由 [ADR 0006](0006-quark-current-files-only.md) 移除云端同步历史。
 
 用户在 2026-11-10 明确选择直接使用夸克接口，取代 ADR 0001 中以 WebDAV 作为主要存储的决定；本地优先、离线编辑和账号隔离继续适用。复用用户自建服务中的 QuarkClient，在扩展后台适配扫码、Cookie 轮换、上传签名与下载，不依赖该 Worker 部署或 WebDAV 的 ETag。WebDAV 保留为已有数据的连接与迁移入口。
 

@@ -1,4 +1,4 @@
-import { active, apply, createDocument, equal, parents, prune, readDocument, type Conflict, type Document } from './model'
+import { active, apply, createDocument, equal, isActive, parents, prune, readDocument, type Conflict, type Document } from './model'
 import { emptyDocument, merge, refreshConflicts, resolveConflict } from './merge'
 import type { ConnectRequest, Request, Result } from './protocol'
 import { RevisionChanged } from './webdav'
@@ -6,7 +6,7 @@ import { normalizeRemote, remoteKey, remoteStore, isQuark, type Connection, type
 import { startQr, pollQr } from './quark/auth'
 import { quarkOrigins } from './quark/transport'
 import type { LoginProgress } from './quark/progress'
-import { storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root } from './local-workspace'
+import { storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root, type WorkspaceSource } from './local-workspace'
 import { configureMarkdownNavigation, openOriginalMarkdown } from './markdown-navigation'
 
 let chain: Promise<unknown> = Promise.resolve()
@@ -34,6 +34,24 @@ function includeCloudConflicts(local: Conflict[], cloud: Conflict[] = []) {
   return [...local, ...cloud.filter(candidate => !local.some(value => value.entityId === candidate.entityId &&
     [candidate.local, candidate.remote].every(version => equal(version, value.local) || equal(version, value.remote))))]
 }
+function acknowledgeNotes(source: WorkspaceSource, attempted: string[], synced: Document) {
+  const completed = new Set(attempted)
+  source.pendingNoteIds = source.pendingNoteIds?.filter(id => !completed.has(id) ||
+    !equal(source.doc.entities[id], synced.entities[id]) ||
+    (source.doc.entities[id] && isActive(source.doc, source.doc.entities[id])) !== (synced.entities[id] && isActive(synced, synced.entities[id])))
+}
+function queueNoteChanges(source: WorkspaceSource, before: Document) {
+  if (!isQuark(source.config)) return
+  const pending = new Set(source.pendingNoteIds)
+  for (const id of new Set([...Object.keys(before.entities), ...Object.keys(source.doc.entities)])) {
+    const previous = before.entities[id], note = source.doc.entities[id]
+    if (previous?.kind !== 'note' && note?.kind !== 'note') continue
+    const wasActive = !!(previous && isActive(before, previous)), nowActive = !!(note && isActive(source.doc, note))
+    if (wasActive !== nowActive || (nowActive && note?.kind === 'note' &&
+      (previous?.kind !== 'note' || previous.title !== note.title || previous.body !== note.body))) pending.add(id)
+  }
+  source.pendingNoteIds = [...pending]
+}
 export function schedule(id: string, delay = 600) {
   const pending = scheduled.get(id)
   if (pending) clearTimeout(pending)
@@ -60,7 +78,7 @@ async function synchronizeSource(id: string) {
     })
     if (!initial) return
     broadcast()
-    const client = remoteStore(initial.config, initial.etag)
+    const client = remoteStore(initial.config, initial.etag, initial.pendingNoteIds)
     const remote: RemoteRead = await client.read()
     let unchanged: Document | null = null
     const upload = await atomic(root => {
@@ -73,17 +91,19 @@ async function synchronizeSource(id: string) {
       source.base = remote.doc ?? emptyDocument(); source.etag = remote.etag
       if (source.conflicts.length) { source.status = 'conflict'; return null }
       readDocument(source.doc)
-      if (remote.doc && equal(source.doc, remote.doc) && !(isQuark(source.config) && remote.etag && JSON.parse(remote.etag).length > 1)) { unchanged = structuredClone(source.doc); return null }
+      if (remote.doc && equal(source.doc, remote.doc)) { unchanged = structuredClone(source.doc); return null }
       return structuredClone(source.doc)
     })
     broadcast()
     if (!upload) {
       if (unchanged) {
-        if ('settle' in client && remote.etag) await client.settle(unchanged, remote.etag)
+        const etag = 'settle' in client && remote.etag ? await client.settle(unchanged, remote.etag) : remote.etag
         await atomic(root => {
           const source = root.sources[id]
           if (source) {
-            retry = !equal(source.doc, unchanged)
+            acknowledgeNotes(source, initial.pendingNoteIds ?? [], unchanged!)
+            source.etag = etag
+            retry = !equal(source.doc, unchanged) || !!source.pendingNoteIds?.length
             source.status = retry ? 'pending' : 'synced'; source.lastSync = Date.now()
           }
         })
@@ -95,7 +115,8 @@ async function synchronizeSource(id: string) {
       const source = root.sources[id]
       if (!source) return
       source.base = upload; source.etag = etag; source.lastSync = Date.now()
-      retry = !equal(source.doc, upload)
+      acknowledgeNotes(source, initial.pendingNoteIds ?? [], upload)
+      retry = !equal(source.doc, upload) || !!source.pendingNoteIds?.length
       source.status = retry ? 'pending' : 'synced'; source.error = ''
     })
   } catch (error) {
@@ -140,6 +161,7 @@ async function connect(request: ConnectRequest): Promise<Result> {
       doc = combined.doc
       conflicts = includeCloudConflicts(refreshConflicts(cached.conflicts, combined.conflicts, doc, remote.doc ?? emptyDocument()), cached.resolvedRevision === remote.etag ? [] : remote.conflicts)
     }
+    const beforeMigration = doc
     if (request.mode === 'migrate' && previous) {
       if (conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
       if (remote.doc && !request.confirmed) return { ok: true, confirmation: '目标已有收藏。确认合并当前数据？已有内容会保留，冲突需要单独选择。' } as const
@@ -149,7 +171,8 @@ async function connect(request: ConnectRequest): Promise<Result> {
         doc = combined.doc; conflicts = combined.conflicts
       }
     }
-    root.sources[id] = { config, doc: prune(doc), base: remote.doc ?? emptyDocument(), etag: remote.etag, resolvedRevision: cached?.resolvedRevision, conflicts, status: conflicts.length ? 'conflict' : 'pending', error: '', lastSync: cached?.lastSync ?? null }
+    root.sources[id] = { config, doc: prune(doc), base: remote.doc ?? emptyDocument(), etag: remote.etag, resolvedRevision: cached?.resolvedRevision, pendingNoteIds: cached?.pendingNoteIds, conflicts, status: conflicts.length ? 'conflict' : 'pending', error: '', lastSync: cached?.lastSync ?? null }
+    if (request.mode === 'migrate') queueNoteChanges(root.sources[id], beforeMigration)
     root.active = id
     return { ok: true, snapshot: snapshot(root) } as const
   })
@@ -230,12 +253,12 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     }
     const source = current(root, request.sourceId)
     if (request.type === 'export') return { ok: true, backup: source.doc } as const
+    const before = source.doc
     if (request.type === 'action' || request.type === 'save-note') {
       if (request.type === 'save-note') {
         const owner = root.editors?.[`${request.sourceId}:${request.id}`]
         if (!owner || owner.tabId !== tabId || owner.token !== request.token) throw new Error('编辑权已交接，当前草稿已保留，可导出后在新编辑页继续')
       } else if (request.action.type === 'edit' && source.doc.entities[request.action.id]?.kind === 'note') throw new Error('请在拥有编辑权的文档页修改笔记')
-      const before = source.doc
       source.doc = apply(source.doc, request.type === 'save-note' ? { type: 'edit', id: request.id, patch: { title: request.title, body: request.body } } : request.action)
       source.conflicts = source.conflicts.map(conflict => {
         const entity = source.doc.entities[conflict.entityId]
@@ -255,6 +278,7 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
       const combined = merge(emptyDocument(), source.doc, imported)
       source.doc = combined.doc; source.conflicts = combined.conflicts
     }
+    queueNoteChanges(source, before)
     source.status = source.conflicts.length ? 'conflict' : 'pending'
     source.error = ''
     schedule(request.sourceId)

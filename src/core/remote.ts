@@ -13,4 +13,4 @@ export function normalizeRemote(config: Connection): Connection {
 export async function remoteKey(config: Connection) {
   return isQuark(config) ? `quark:${config.accountId}` : sourceKey(config)
 }
-export function remoteStore(config: Connection, knownRevision: string | null = null) { return isQuark(config) ? new QuarkStore(config, knownRevision) : new WebDAV(config) }
+export function remoteStore(config: Connection, knownRevision: string | null = null, noteIds: string[] = []) { return isQuark(config) ? new QuarkStore(config, knownRevision, noteIds) : new WebDAV(config) }

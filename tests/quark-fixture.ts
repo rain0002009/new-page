@@ -20,14 +20,15 @@ export class QuarkFixture {
   downloadsCorrupt = false
   requests = 0
   deleted = 0
+  noteDirectoryLists = 0
+  noteDownloadUrls = 0
+  noteDownloads = 0
+  noteUploads = 0
   hiddenVersions = new Set<string>()
-  parallelUploads = 0
-  waitingUploads: (() => void)[] = []
   reset() {
     this.files.clear(); this.uploads.clear(); this.tokens.clear(); this.sessions.clear()
     this.hiddenVersions.clear()
-    for (const release of this.waitingUploads) release()
-    this.parallelUploads = 0; this.waitingUploads = []
+    this.noteDirectoryLists = 0; this.noteDownloadUrls = 0; this.noteDownloads = 0; this.noteUploads = 0
     this.nextAccount = 'rain'; this.unavailable = false; this.failUpload = false; this.failRename = false; this.failDelete = false; this.expired = false; this.qrExpired = false; this.qrPending = false; this.loginRedirect = false; this.downloadsCorrupt = false; this.requests = 0; this.deleted = 0
   }
   snapshots(account = 'rain') { return [...this.files.values()].filter(file => file.account === account && !file.directory && /^pg[12]-/.test(file.name)) }
@@ -105,12 +106,14 @@ export class QuarkFixture {
     if (path.startsWith('/quark-content/')) {
       const file = this.files.get(path.slice('/quark-content/'.length))
       if (!file || file.account !== account) return send({}, 404)
+      if (this.files.get(file.parent)?.name === '笔记') this.noteDownloads++
       res.writeHead(200, { 'content-type': 'application/json' }).end(this.downloadsCorrupt ? '{broken' : file.body)
       return true
     }
     let body: Record<string, any> = {}
     if (req.method === 'POST') { let text = ''; for await (const chunk of req) text += chunk; body = text ? JSON.parse(text) : {} }
     if (path.endsWith('/file/sort')) {
+      if (this.files.get(url.searchParams.get('pdir_fid') ?? '')?.name === '笔记') this.noteDirectoryLists++
       const list = [...this.files.values()].filter(file => file.account === account && file.parent === url.searchParams.get('pdir_fid') && !this.hiddenVersions.has(file.fid)).map(file => ({ fid: file.fid, file_name: file.name, pdir_fid: file.parent, dir: file.directory, size: Buffer.byteLength(file.body) }))
       const page = Number(url.searchParams.get('_page') ?? 1), size = Number(url.searchParams.get('_size') ?? 200)
       return ok({ list: list.slice((page - 1) * size, page * size) })
@@ -121,13 +124,7 @@ export class QuarkFixture {
       return ok({ fid, finish: true })
     }
     if (path.endsWith('/upload/pre')) {
-      if (this.parallelUploads) await new Promise<void>(done => {
-        this.waitingUploads.push(done)
-        if (this.waitingUploads.length >= this.parallelUploads) {
-          this.parallelUploads = 0
-          for (const release of this.waitingUploads.splice(0)) release()
-        }
-      })
+      if (this.files.get(body.pdir_fid)?.name === '笔记') this.noteUploads++
       const task = randomUUID(), fid = randomUUID()
       this.uploads.set(task, { fid, name: body.file_name, parent: body.pdir_fid, account })
       return send({ status: 200, data: { task_id: task, fid, bucket: 'fixture', auth_info: 'fixture-auth', upload_url: `localhost:${new URL(origin).port}`, upload_id: task, obj_key: `objects/${task}` }, metadata: { part_size: 10_000_000 } })
@@ -146,6 +143,8 @@ export class QuarkFixture {
     }
     if (path.endsWith('/file/download')) {
       const fid = body.fids?.[0]
+      const file = this.files.get(fid)
+      if (file && this.files.get(file.parent)?.name === '笔记') this.noteDownloadUrls++
       return ok([{ download_url: `${origin}/quark-content/${fid}` }])
     }
     if (path.endsWith('/file/rename')) {
@@ -159,7 +158,13 @@ export class QuarkFixture {
       if (this.failDelete) return send({ message: 'fixture delete failed' }, 503)
       for (const fid of body.filelist ?? []) {
         const file = this.files.get(fid)
-        if (file && file.account === account) { this.files.delete(fid); this.deleted++ }
+        if (file && file.account === account) {
+          const remove = (id: string) => {
+            for (const child of [...this.files.values()]) if (child.account === account && child.parent === id) remove(child.fid)
+            this.files.delete(id); this.deleted++
+          }
+          remove(fid)
+        }
       }
       return ok()
     }
