@@ -48,14 +48,21 @@ export function canonical(value: unknown): string {
   return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`
 }
 export const equal = (a: unknown, b: unknown) => canonical(a) === canonical(b)
-export function webUrl(value: string) {
+export function savedUrl(value: string) {
   const url = new URL(value)
-  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('只支持 HTTP 或 HTTPS 网页')
+  if (!['https:', 'http:', 'chrome:', 'edge:', 'about:', 'chrome-extension:', 'moz-extension:', 'file:'].includes(url.protocol)) throw new Error('请输入网页、浏览器页面、扩展页面或本地文件的网址')
   return url.href
+}
+export function pageLabel(value: string) {
+  const url = new URL(value)
+  return ['http:', 'https:'].includes(url.protocol) ? url.hostname : url.href
 }
 export function safeIcon(value: string) {
   if (value.startsWith('data:image/') && value.length < 250_000) return value
-  try { return webUrl(value) } catch { return '' }
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : ''
+  } catch { return '' }
 }
 export function readDocument(value: unknown): Document {
   const result = documentSchema.safeParse(value)
@@ -65,7 +72,7 @@ export function readDocument(value: unknown): Document {
   for (const [id, entity] of Object.entries(doc.entities)) {
     if (id !== entity.id || id === '__proto__' || id === 'constructor') throw new Error('数据条目标识无效')
     if (entity.kind === 'link' && !entity.purged) {
-      webUrl(entity.url)
+      savedUrl(entity.url)
       entity.icon = safeIcon(entity.icon)
       entity.todoPosition ??= entity.position
     }
@@ -163,10 +170,10 @@ export function apply(doc: Document, action: Action): Document {
       if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
       const collection = requireEntity(next, action.parentId, 'collection') as Collection
       for (const input of action.links) {
-        const url = webUrl(input.url)
+        const url = savedUrl(input.url)
         const siblings = children(next, collection.id).filter(e => e.kind === 'link')
         const position = insertionPosition(siblings, action.beforeId, now)
-        const link: Link = { ...common('link', input.title || new URL(url).hostname, collection.id, position), kind: 'link', url, icon: safeIcon(input.icon ?? ''), note: input.note ?? '', todo: false }
+        const link: Link = { ...common('link', input.title || pageLabel(url), collection.id, position), kind: 'link', url, icon: safeIcon(input.icon ?? ''), note: input.note ?? '', todo: false }
         next.entities[link.id] = link
       }
       collection.collapsed = false
@@ -177,7 +184,7 @@ export function apply(doc: Document, action: Action): Document {
       const entity = requireEntity(next, action.id)
       if (action.patch.title !== undefined) entity.title = action.patch.title.trim() || entity.title
       if (entity.kind === 'link') {
-        if (action.patch.url !== undefined) entity.url = webUrl(action.patch.url)
+        if (action.patch.url !== undefined) entity.url = savedUrl(action.patch.url)
         if (action.patch.note !== undefined) entity.note = action.patch.note
       }
       if (entity.kind === 'collection' && action.patch.collapsed !== undefined) entity.collapsed = action.patch.collapsed

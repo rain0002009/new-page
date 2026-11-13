@@ -6,6 +6,7 @@ import type { Act } from './Editor'
 import { useDragItem } from './drag'
 import { Empty } from './Library'
 import { Button, SiteIcon } from './ui'
+import SavedPageLink from './SavedPageLink'
 
 const todo = tv({
   slots: {
@@ -29,6 +30,6 @@ function TodoRow({ link, act }: { link: Link; act: Act }) {
   return <li {...drag}>
     <Button tone="custom" size="custom" className={styles.complete()} aria-label="完成待办" onClick={() => void act({ type: 'todo', id: link.id, value: false })}><Check size={15} /></Button>
     <SiteIcon size="compact" className="opacity-85 [@media(max-width:650px)]:hidden" url={link.icon} title={link.title} />
-    <a className={styles.title()} href={link.url} target="_blank" rel="noreferrer" draggable={false}>{link.title}</a>
+    <SavedPageLink className={styles.title()} href={link.url}>{link.title}</SavedPageLink>
   </li>
 }

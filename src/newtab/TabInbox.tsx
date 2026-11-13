@@ -3,7 +3,7 @@ import { BookmarkPlus, Layers3, LoaderCircle, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { useDndContext } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { safeIcon } from '../core/model'
+import { pageLabel, safeIcon, savedUrl } from '../core/model'
 import { canSortTabs, type OpenTab } from './open-tabs'
 import { useDragItem } from './drag'
 import { Button, SiteIcon } from './ui'
@@ -45,7 +45,17 @@ export function useWindowTabs() {
         if (owner?.windowId === undefined) return
         const list = await chrome.tabs.query({ windowId: owner.windowId })
         if (disposed || request !== revision) return
-        setTabs(list.filter(tab => tab.id !== undefined && /^https?:\/\//i.test(tab.url ?? '')).sort((a, b) => a.index - b.index).map(tab => ({ tabId: tab.id!, windowId: tab.windowId, pinned: tab.pinned, index: tab.index, title: tab.title || new URL(tab.url!).hostname, url: tab.url!, icon: safeIcon(tab.favIconUrl || '') })))
+        setTabs(list.sort((a, b) => a.index - b.index).flatMap(tab => {
+          if (tab.id === undefined || tab.id === owner.id) return []
+          const url = tab.pendingUrl || tab.url || ''
+          try {
+            const address = new URL(savedUrl(url))
+            if (address.href.startsWith(chrome.runtime.getURL('')) ||
+                (['chrome:', 'edge:'].includes(address.protocol) && address.hostname === 'newtab') ||
+                (address.protocol === 'about:' && address.pathname === 'newtab')) return []
+            return [{ tabId: tab.id, windowId: tab.windowId, pinned: tab.pinned, index: tab.index, title: tab.title || pageLabel(url), url, icon: safeIcon(tab.favIconUrl || '') }]
+          } catch { return [] }
+        }))
         setError('')
       } catch { if (!disposed) setError('无法读取窗口标签页，请检查扩展权限后重开页面') }
     }
@@ -66,7 +76,7 @@ export default function TabInbox({ tabs, error, open, close, collect, collecting
   // does not unregister the active item or discard its collected snapshot.
   const visibleTabs = dragged && !tabs.some(tab => tab.tabId === dragged.tabId) ? [...tabs, dragged] : tabs
   return <aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><div className="flex items-center gap-[2px]"><Button size="icon" aria-label="一键收藏" title="一键收藏全部待选网页" disabled={!tabs.length || !!error || collecting} aria-busy={collecting} onClick={collect}>{collecting ? <LoaderCircle size={17} className="animate-spin" /> : <BookmarkPlus size={17} />}</Button><Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></div></header>
-    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <SortableContext items={visibleTabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}><div ref={list} className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} notify={notify} />)}</div></SortableContext> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的普通网页</p></div>}
+    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <SortableContext items={visibleTabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}><div ref={list} className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} notify={notify} />)}</div></SortableContext> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的页面</p></div>}
   </aside>
 }
 function InboxTab({ tab, notify }: { tab: OpenTab; notify: (message: string) => void }) {

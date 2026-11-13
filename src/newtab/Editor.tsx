@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Info } from 'lucide-react'
-import { active, parents, webUrl, type Action, type Document, type Entity } from '../core/model'
+import { active, parents, savedUrl, type Action, type Document, type Entity } from '../core/model'
 import { Button, Modal } from './ui'
 import { feedbackStyles, formStyles } from './form-styles'
 
@@ -23,7 +23,7 @@ export default function Editor({ state, doc, act, close }: { state: EditorState;
   const titleMap: Record<EditorState['kind'], string> = { space: '新建空间', collection: '新建收藏块', edit: '编辑链接', rename: '重命名', delete: '移到回收站' }
   async function autoSave(patch: { title?: string; url?: string; note?: string }) {
     if (!entity || !editing) return
-    if (patch.url !== undefined) { try { webUrl(patch.url); setError('') } catch { setError('请输入 HTTP 或 HTTPS 网址；已保存的有效网址保持不变'); return } }
+    if (patch.url !== undefined) { try { savedUrl(patch.url); setError('') } catch { setError('请输入网页、浏览器页面、扩展页面或本地文件的网址；已保存的有效网址保持不变'); return } }
     if (patch.title !== undefined && !patch.title.trim()) { setError('名称不能为空'); return }
     if (await act({ type: 'edit', id: entity.id, patch })) setError('')
     else setError('未能保存这次修改，请关闭弹窗查看提示后重试')

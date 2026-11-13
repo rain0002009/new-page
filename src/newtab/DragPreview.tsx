@@ -5,6 +5,7 @@ import type { OpenTab } from './open-tabs'
 import { linkCard } from './link-card-styles'
 import { SiteIcon } from './ui'
 import { motionEase, reducedMotion } from './motion'
+import { pageLabel } from '../core/model'
 
 const hiddenTargets = new WeakMap<HTMLElement, { visibility: string; count: number }>()
 
@@ -74,7 +75,7 @@ export default function DragPreview({ element, tab, card, collectionId }: { elem
   return <div className="drag-preview relative max-w-none p-0 border-0 bg-none overflow-visible whitespace-normal rounded-[15px] shadow-[0_18px_38px_#3443282b] text-[13px] text-ui-ink cursor-grabbing" ref={ref} aria-hidden="true">
     <div className="drag-preview-content absolute inset-0">
       <div ref={snapshot} data-preview-layer className="absolute inset-0" />
-      {tab && <div ref={cardRef} data-preview-layer className="absolute top-0 left-0 opacity-0"><article className={styles.base()}><div className={styles.top()}><SiteIcon url={tab.icon || ''} title={tab.title} /></div><span className={styles.title()}>{tab.title}</span><span className={styles.domain()}>{new URL(tab.url).hostname}</span></article></div>}
+      {tab && <div ref={cardRef} data-preview-layer className="absolute top-0 left-0 opacity-0"><article className={styles.base()}><div className={styles.top()}><SiteIcon url={tab.icon || ''} title={tab.title} /></div><span className={styles.title()}>{tab.title}</span><span className={styles.domain()}>{pageLabel(tab.url)}</span></article></div>}
     </div>
   </div>
 }

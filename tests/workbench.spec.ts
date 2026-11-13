@@ -1,8 +1,9 @@
 import { test, expect, chromium, type BrowserContext, type Page, type Locator } from '@playwright/test'
 import { createServer, type Server } from 'node:https'
-import { mkdtemp, rm, cp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, cp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { generate } from 'selfsigned'
 import { QuarkFixture } from './quark-fixture'
 import type { StoredWorkspace } from '../src/core/local-workspace'
@@ -107,8 +108,10 @@ async function openClient(existingProfile?: string, quarkMode = false) {
   clients.push({ context, profile })
   const session = await context.browser()!.newBrowserCDPSession()
   const { id } = await session.send('Extensions.loadUnpacked', { path: extension })
+  const startupPages = context.pages()
   const page = await context.newPage()
   await page.goto(`chrome-extension://${id}/chrome_url_overrides/newtab.html`)
+  for (const startup of startupPages) await startup.close()
   if (!quarkMode && !existingProfile) await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
   return { context, page, profile, url: page.url() }
 }
@@ -1706,8 +1709,8 @@ test('桌面与窄窗口布局保持主要入口，编辑无效网址保留原�
   await card.hover()
   await card.getByRole('button', { name: '编辑链接', exact: true }).click()
   await page.getByRole('dialog').getByLabel('备注', { exact: true }).fill('从组件开始，把灵感做成可以使用的东西。')
-  await page.getByRole('dialog').getByLabel('网址', { exact: true }).fill('chrome://settings')
-  await expect(page.getByRole('dialog')).toContainText('HTTP 或 HTTPS')
+  await page.getByRole('dialog').getByLabel('网址', { exact: true }).fill('javascript:alert(1)')
+  await expect(page.getByRole('dialog')).toContainText('请输入网页、浏览器页面、扩展页面或本地文件的网址')
   await page.screenshot({ path: 'test-results/shared-ui-editor.png', fullPage: true })
   await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
   await expect(page.getByRole('link', { name: 'React · 构建交互界面', exact: true })).toHaveAttribute('href', 'https://react.dev/')
@@ -2138,21 +2141,159 @@ test('一键收藏按点击时间在空间顶部保存全部待选网页后关�
   }, pinned.url())
   const special = await context.newPage()
   await special.goto('chrome://version/')
+  const specialTitle = await special.title()
   await page.bringToFront()
   const inbox = page.getByRole('complementary', { name: '待选网页' })
-  await expect(inbox.getByRole('article')).toHaveCount(3)
+  await expect(inbox.getByRole('article')).toHaveCount(4)
   await page.clock.setFixedTime(await page.evaluate(() => new Date(2026, 10, 12, 15, 4, 9).getTime()))
   await inbox.getByRole('button', { name: '一键收藏', exact: true }).click()
   const block = page.getByRole('region', { name: '收藏块 收藏 2026-11-12 15:04:09', exact: true })
-  await expect(block.getByRole('link')).toHaveText(['UnoCSS 指南', 'React 文档', 'React 文档'])
+  await expect(block.getByRole('link')).toHaveText(['UnoCSS 指南', 'React 文档', 'React 文档', specialTitle])
   await expect(page.getByRole('region', { name: /^收藏块/ }).first()).toHaveAttribute('aria-label', '收藏块 收藏 2026-11-12 15:04:09')
-  await expect(block.getByRole('button', { name: '加入 Todo', exact: true })).toHaveCount(3)
-  await expect.poll(() => [first, duplicate, pinned].every(tab => tab.isClosed())).toBe(true)
-  expect(special.isClosed()).toBe(false)
+  await expect(block.getByRole('button', { name: '加入 Todo', exact: true })).toHaveCount(4)
+  await expect.poll(() => [first, duplicate, pinned, special].every(tab => tab.isClosed())).toBe(true)
   await expect(inbox.getByRole('button', { name: '一键收藏', exact: true })).toBeDisabled()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await page.reload()
-  await expect(block.getByRole('link')).toHaveText(['UnoCSS 指南', 'React 文档', 'React 文档'])
+  await expect(block.getByRole('link')).toHaveText(['UnoCSS 指南', 'React 文档', 'React 文档', specialTitle])
+})
+
+test('特殊页面和本地文件一键收藏、重载并通过浏览器接口重新打开', async () => {
+  const { page, context, profile, url } = await openClient()
+  await connect(page)
+  const extension = join(profile, 'other-extension')
+  await mkdir(extension)
+  await writeFile(join(extension, 'manifest.json'), JSON.stringify({ manifest_version: 3, name: 'Other extension fixture', version: '1.0', web_accessible_resources: [{ resources: ['page.html'], matches: ['<all_urls>'], extension_ids: ['*'] }] }))
+  await writeFile(join(extension, 'page.html'), '<title>Other extension</title><h1>Other extension</h1>')
+  const session = await context.browser()!.newBrowserCDPSession()
+  const other = await session.send('Extensions.loadUnpacked', { path: extension })
+  const localPath = join(profile, '本地页面.html')
+  await writeFile(localPath, '<title>本地文件示例</title><h1>Local file</h1>')
+  const urls = ['chrome://settings/', 'chrome://extensions/', 'about:blank', 'chrome-extension://' + other.id + '/page.html', pathToFileURL(localPath).href]
+  const ids = await page.evaluate(async urls => {
+    const ids: number[] = []
+    for (const url of urls) ids.push((await chrome.tabs.create({ url, active: false })).id!)
+    return ids
+  }, urls)
+  const inbox = page.getByRole('complementary', { name: '待选网页' })
+  await expect(inbox.getByRole('article')).toHaveCount(urls.length)
+  const savedUrls = await page.evaluate(async ids => Promise.all(ids.map(async id => (await chrome.tabs.get(id)).url!)), ids)
+  expect(savedUrls).not.toContain(url)
+  await inbox.getByRole('button', { name: '一键收藏', exact: true }).click()
+  const block = page.getByRole('region', { name: /^收藏块 收藏 / })
+  await expect(block.getByRole('link')).toHaveCount(urls.length)
+  await expect.poll(() => page.evaluate(async ids => {
+    const tabs = await chrome.tabs.query({ currentWindow: true })
+    return tabs.some(tab => ids.includes(tab.id!))
+  }, ids)).toBe(false)
+  await page.reload()
+  await expect(block.getByRole('link')).toHaveCount(urls.length)
+  await page.screenshot({ path: test.info().outputPath('special-pages-desktop.png'), fullPage: true })
+  await page.setViewportSize({ width: 480, height: 900 })
+  await page.screenshot({ path: test.info().outputPath('special-pages-narrow.png'), fullPage: true })
+  await page.setViewportSize({ width: 1500, height: 960 })
+  for (const saved of savedUrls) {
+    const link = block.locator('a[href=' + JSON.stringify(saved) + ']')
+    await expect(link).toHaveCount(1)
+    const openedPromise = context.waitForEvent('page')
+    await link.click()
+    const opened = await openedPromise
+    await expect(opened).toHaveURL(saved)
+    if (saved.startsWith('file:')) await expect(opened.getByRole('heading', { name: 'Local file', exact: true })).toBeVisible()
+    await opened.close()
+  }
+  await expect(inbox.getByRole('article')).toHaveCount(0)
+  await sync(page)
+  const second = await openClient()
+  await connect(second.page)
+  await expect(second.page.getByRole('region', { name: /^收藏块 收藏 / }).getByRole('link')).toHaveCount(urls.length)
+})
+
+test('本扩展页面打开多个时全部排除，一键收藏只处理其他页面', async () => {
+  const { page, context, url } = await openClient()
+  await connect(page)
+  const ownIds = await page.evaluate(async url => {
+    const ids: number[] = []
+    for (const address of [url, url + '?copy=1', url + '#copy', 'chrome://newtab/']) {
+      ids.push((await chrome.tabs.create({ url: address, active: false })).id!)
+    }
+    return ids
+  }, url)
+  await expect.poll(() => page.evaluate(async ids => Promise.all(ids.map(async id => (await chrome.tabs.get(id)).status)), ownIds)).toEqual(ownIds.map(() => 'complete'))
+  const inbox = page.getByRole('complementary', { name: '待选网页' })
+  await expect(inbox.getByRole('article')).toHaveCount(0)
+  await expect(inbox.getByRole('heading', { level: 2 })).toHaveText('待选网页 0')
+  await expect(inbox.getByRole('button', { name: '一键收藏', exact: true })).toBeDisabled()
+  const changing = await context.newPage()
+  await changing.goto(origin + '/web/react')
+  await expect(inbox.getByRole('article')).toHaveCount(1)
+  await changing.goto(url + '?copy=dynamic')
+  await expect(inbox.getByRole('article')).toHaveCount(0)
+  await changing.goto(origin + '/web/react')
+  const special = await context.newPage()
+  await special.goto('chrome://version/')
+  await page.bringToFront()
+  await expect(inbox.getByRole('article')).toHaveCount(2)
+  await inbox.getByRole('button', { name: '一键收藏', exact: true }).click()
+  await expect(page.getByRole('region', { name: /^收藏块 收藏 / }).getByRole('link')).toHaveCount(2)
+  await expect.poll(() => changing.isClosed() && special.isClosed()).toBe(true)
+  await expect.poll(() => page.evaluate(async ids => {
+    const tabs = await chrome.tabs.query({ currentWindow: true })
+    return tabs.filter(tab => ids.includes(tab.id!)).length
+  }, ownIds)).toBe(ownIds.length)
+  await page.reload()
+  await expect(inbox.getByRole('article')).toHaveCount(0)
+})
+
+test('特殊页面拖入后支持编辑、Todo 和搜索打开，失败可重试', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+  const special = await context.newPage()
+  await special.goto('chrome://version/')
+  const title = await special.title()
+  await page.bringToFront()
+  await drag(page, page.getByRole('article', { name: '待选 ' + title, exact: true }), page.getByRole('region', { name: /^收藏块/ }).first())
+  await expect.poll(() => special.isClosed()).toBe(true)
+  const card = page.getByRole('article', { name: '链接 ' + title, exact: true })
+  await card.hover()
+  await card.getByRole('button', { name: '编辑链接', exact: true }).click()
+  const input = page.getByRole('dialog').getByLabel('网址', { exact: true })
+  await input.fill('chrome://extensions/')
+  await expect(card.getByRole('link')).toHaveAttribute('href', 'chrome://extensions/')
+  for (const unsupported of ['javascript:alert(1)', 'data:text/html,test', 'blob:https://example.com/test']) {
+    await input.fill(unsupported)
+    await expect(page.getByRole('dialog').getByRole('status')).toContainText('请输入网页')
+    await expect(card.getByRole('link')).toHaveAttribute('href', 'chrome://extensions/')
+  }
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await card.hover()
+  await card.getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await page.getByRole('button', { name: /^Todo/ }).click()
+  let openedPromise = context.waitForEvent('page')
+  await page.getByRole('list', { name: '待办清单' }).getByRole('link').click({ button: 'middle' })
+  let opened = await openedPromise
+  await expect(opened).toHaveURL('chrome://extensions/')
+  await opened.close()
+  await page.getByRole('button', { name: '搜索收藏', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('搜索全部收藏').fill(title)
+  const result = page.getByRole('dialog').getByRole('link', { name: title, exact: true })
+  await page.evaluate(() => {
+    const create = chrome.tabs.create.bind(chrome.tabs)
+    let fail = true
+    chrome.tabs.create = (async options => {
+      if (fail) { fail = false; throw new Error('受控打开失败') }
+      return create(options)
+    }) as typeof chrome.tabs.create
+  })
+  await result.click()
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('无法打开此页面')
+  openedPromise = context.waitForEvent('page')
+  await result.focus()
+  await page.keyboard.press('Enter')
+  opened = await openedPromise
+  await expect(opened).toHaveURL('chrome://extensions/')
+  await opened.close()
+  await expect(page.getByRole('dialog').getByRole('alert')).toHaveCount(0)
 })
 
 test('单条关闭准确移除对应浏览器标签，失败保留条目且不触发收藏', async () => {
@@ -2179,13 +2320,14 @@ test('单条关闭准确移除对应浏览器标签，失败保留条目且不�
   expect(duplicate.isClosed()).toBe(false)
 })
 
-test('待选上下排序同步浏览器顺序并遵循隐藏页正常移动规则', async () => {
+test('待选上下排序同步浏览器顺序并包含特殊页面', async () => {
   const { page, context } = await openClient()
   await connect(page)
   const first = await context.newPage()
   await first.goto(`${origin}/web/react`)
   const hidden = await context.newPage()
   await hidden.goto('chrome://version/')
+  const specialTitle = await hidden.title()
   const last = await context.newPage()
   await last.goto(`${origin}/web/guide`)
   await page.bringToFront()
@@ -2193,7 +2335,7 @@ test('待选上下排序同步浏览器顺序并遵循隐藏页正常移动规�
   const source = inbox.getByRole('article', { name: '待选 UnoCSS 指南', exact: true })
   const target = inbox.getByRole('article', { name: '待选 React 文档', exact: true })
   await drag(page, source, target)
-  await expect.poll(() => inbox.getByRole('article').evaluateAll(rows => rows.map(row => row.getAttribute('aria-label')))).toEqual(['待选 UnoCSS 指南', '待选 React 文档'])
+  await expect.poll(() => inbox.getByRole('article').evaluateAll(rows => rows.map(row => row.getAttribute('aria-label')))).toEqual(['待选 UnoCSS 指南', '待选 React 文档', '待选 ' + specialTitle])
   const browserOrder = () => page.evaluate(async () => {
     const owner = await chrome.tabs.getCurrent()
     return (await chrome.tabs.query({ windowId: owner!.windowId })).map(tab => tab.url).filter(url => url?.includes('/web/') || url === 'chrome://version/')
@@ -2286,7 +2428,8 @@ for (const input of ['键盘', '触摸'] as const) test(`${input}在窄屏待选
     await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: to.x + 55, y: to.y + 25 }] })
   } else {
     await source.focus()
-    await page.keyboard.press('Space')
+    await page.keyboard.press('Space', { delay: 100 })
+    await expect(page.locator('.drag-preview')).toBeVisible()
     await page.keyboard.press('ArrowUp')
   }
   await expect(page.getByRole('img', { name: '标签页放置位置', exact: true })).toBeVisible()

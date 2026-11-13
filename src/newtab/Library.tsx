@@ -2,12 +2,13 @@
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
 import { Bookmark, ChevronDown, ChevronRight, Edit3, Folder, LocateFixed, Plus, Search, Trash2 } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, type Collection, type Document, type Entity, type Link } from '../core/model'
+import { active, children, pageLabel, type Collection, type Document, type Entity, type Link } from '../core/model'
 import { Button, SiteIcon } from './ui'
 import type { Act, EditorState } from './Editor'
 import { CollectionPlaceholder, useCollectionPlaceholder, useDragItem } from './drag'
 import { linkCard } from './link-card-styles'
 import { MotionRegion } from './motion'
+import SavedPageLink from './SavedPageLink'
 
 const cardAction = tv({
   base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] hover:text-action-ghost-hover group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
@@ -57,8 +58,8 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
       <Button tone="custom" size="custom" className={cardAction()} aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
       <Button tone="custom" size="custom" className={cardAction({ todo: link.todo })} aria-label={link.todo ? '移出 Todo' : '加入 Todo'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
     </div></div>
-    <a href={link.url} target="_blank" rel="noreferrer" draggable={false} className={styles.title()}>{link.title}</a>
-    <span className={styles.domain()}>{new URL(link.url).hostname}</span><p className={styles.note()}>{link.note}</p>
+    <SavedPageLink href={link.url} className={styles.title()}>{link.title}</SavedPageLink>
+    <span className={styles.domain()}>{pageLabel(link.url)}</span><p className={styles.note()}>{link.note}</p>
     {(location || locate) && <div className={styles.bottom()}>{location && <span className={styles.location()} title={location}><Folder size={10} />{location}</span>}<div className={styles.secondary()}>
       {locate && <Button size="custom" className="h-[21px] w-[23px] shrink-0 p-0" aria-label="定位收藏" onClick={locate}><LocateFixed size={13} /></Button>}
     </div></div>}
