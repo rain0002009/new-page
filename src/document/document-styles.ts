@@ -9,7 +9,7 @@ const documentLayout = tv({
     sidebar: 'min-w-0',
     surface: 'flex min-w-0 flex-col gap-[12px] rounded-[22px] bg-ui-surface border border-solid border-white p-[28px] [@media(max-width:650px)]:p-[16px]',
     title: 'block w-full text-[32px] leading-[1.3] font-semibold border-0 bg-transparent px-[8px] py-[4px] m-0 focus:outline-none',
-    error: 'rounded-[12px] bg-action-danger-surface p-[16px] mb-[16px] text-action-danger [overflow-wrap:anywhere]',
+    conflict: 'rounded-[12px] bg-action-danger-surface p-[16px] text-action-danger [overflow-wrap:anywhere]',
   },
   variants: { source: { note: { main: 'max-w-[1600px]' }, file: { main: 'max-w-[1600px]' } } },
   defaultVariants: { source: 'file' },

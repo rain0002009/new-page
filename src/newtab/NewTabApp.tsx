@@ -15,7 +15,7 @@ import ContentPanel from './ContentPanel'
 import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal, ModalPresence } from './ui'
-import { feedbackStyles } from './form-styles'
+import { Toast } from '../shared/Toast'
 import QuickCollectionGap from './QuickCollectionGap'
 import { closeCollectedTab, collectionTitle, moveOpenTab, tabLink } from './open-tabs'
 import { documentUrl } from '../core/document-address'
@@ -133,9 +133,9 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     try { const response = await rpc({ type: 'action', sourceId: data!.sourceId!, action }); if (response.snapshot) receive(response.snapshot); return true }
     catch (error) { setMessage(error instanceof Error ? error.message : '操作失败'); return false }
   }
-  const notification = message || (error instanceof Error ? error.message : '')
-  if (!data) return <main className={styles.loading()}><Leaf size={32} /><p>{notification || '正在加载…'}</p>{notification && <Button onClick={() => void client.invalidateQueries({ queryKey: stateKey })}>重试</Button>}</main>
-  if (!data.document) return <main className={styles.onboarding()}><section className={styles.panel()}><Brand /><h1 className={styles.connectTitle()}>连接收藏库</h1>{notification && <div role="alert" className={feedbackStyles.alert()}>{notification}</div>}<ConnectionForm connected={false} done={receive} onError={setMessage} /></section></main>
+  const notices = <><Toast message={message} onClose={() => setMessage('')} /><Toast message={error?.message ?? ''}><Button onClick={() => void client.invalidateQueries({ queryKey: stateKey })}>重试</Button></Toast><Toast message={data?.error ?? ''} /></>
+  if (!data) return <>{notices}<main className={styles.loading()}><Leaf size={32} /><p>{error ? '加载失败' : '正在加载…'}</p></main></>
+  if (!data.document) return <>{notices}<main className={styles.onboarding()}><section className={styles.panel()}><Brand /><h1 className={styles.connectTitle()}>连接收藏库</h1><ConnectionForm connected={false} done={receive} onError={setMessage} /></section></main></>
   const doc = data.document
   const all = active(doc)
   const spaces = all.filter(e => e.kind === 'space')
@@ -166,6 +166,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
   }
   return <DragBoard doc={doc} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
+    {notices}
     <aside className={styles.sidebar()}><Brand sidebar /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
@@ -176,7 +177,6 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       <div className="mt-auto"><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
-      {notification && <div role="alert" className={feedbackStyles.alert()}><span>{notification}</span><Button size="icon" aria-label="关闭提示" onClick={() => setMessage('')}><X size={16} /></Button></div>}
       <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
       {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}

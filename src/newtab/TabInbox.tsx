@@ -7,7 +7,7 @@ import { pageLabel, safeIcon, savedUrl } from '../core/model'
 import { canSortTabs, type OpenTab } from './open-tabs'
 import { useDragItem } from './drag'
 import { Button, SiteIcon } from './ui'
-import { feedbackStyles } from './form-styles'
+import { Toast } from '../shared/Toast'
 import { useLayoutMotion } from './motion'
 
 const inbox = tv({
@@ -76,7 +76,7 @@ export default function TabInbox({ tabs, error, open, close, collect, collecting
   // does not unregister the active item or discard its collected snapshot.
   const visibleTabs = dragged && !tabs.some(tab => tab.tabId === dragged.tabId) ? [...tabs, dragged] : tabs
   return <aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><div className="flex items-center gap-[2px]"><Button size="icon" aria-label="一键收藏" title="一键收藏全部待选网页" disabled={!tabs.length || !!error || collecting} aria-busy={collecting} onClick={collect}>{collecting ? <LoaderCircle size={17} className="animate-spin" /> : <BookmarkPlus size={17} />}</Button><Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></div></header>
-    {error ? <p role="status" className={feedbackStyles.error()}>{error}</p> : visibleTabs.length ? <SortableContext items={visibleTabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}><div ref={list} className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} notify={notify} />)}</div></SortableContext> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的页面</p></div>}
+    <Toast message={error} />{!error && (visibleTabs.length ? <SortableContext items={visibleTabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}><div ref={list} className={styles.list()}>{visibleTabs.map(tab => <InboxTab key={tab.tabId} tab={tab} notify={notify} />)}</div></SortableContext> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的页面</p></div>)}
   </aside>
 }
 function InboxTab({ tab, notify }: { tab: OpenTab; notify: (message: string) => void }) {

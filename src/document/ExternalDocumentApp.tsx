@@ -6,6 +6,7 @@ import { Button } from '../newtab/ui'
 import MarkdownEditor from './MarkdownEditor'
 import DocumentOutline from './DocumentOutline'
 import LocalDocumentApp from './LocalDocumentApp'
+import { Toast } from '../shared/Toast'
 
 export default function ExternalDocumentApp() {
   const address = location.search.startsWith('?address=') ? location.href.split('?address=')[1] : new URLSearchParams(location.search).get('url') ?? ''
@@ -30,7 +31,7 @@ function RemoteDocument({ address }: { address: string }) {
   return <main className={documentStyles.main()}>
     <header className={documentStyles.header()}><Button onClick={() => void load()} disabled={loading}>重新加载</Button></header>
     {loading && <p role="status" className={documentStyles.status()}>正在读取…</p>}
-    {error && <div role="alert" className={documentStyles.error()}>{error}<Button disabled={loading} onClick={() => void load()}>重试</Button><Button onClick={() => { void rpc({ type: 'open-original', url: address }).catch(cause => setError(cause.message)) }}>打开原网页</Button></div>}
+    <Toast message={error} onClose={() => setError('')}><Button disabled={loading} onClick={() => void load()}>重试</Button><Button onClick={() => { void rpc({ type: 'open-original', url: address }).catch(cause => setError(cause.message)) }}>打开原网页</Button></Toast>
     {file && <div className={documentStyles.columns()}><aside className={documentStyles.sidebar()}><DocumentOutline body={file.body} /></aside><section className={documentStyles.surface()} onClickCapture={event => {
       const anchor = (event.target as Element).closest('a')
       if (anchor && isMarkdownUrl(anchor.href)) { event.preventDefault(); event.stopPropagation(); location.href = documentUrl({ url: anchor.href }) }

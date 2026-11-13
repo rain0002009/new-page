@@ -74,8 +74,19 @@ function readDocumentOrEmpty(doc: Document) {
 // pruning never depends on keeping an unbounded chain of ancestor files.
 export class QuarkStore {
   private base = emptyDocument()
+  private snapshots = new Map<string, { metadata: string; snapshot: Snapshot }>()
   constructor(private config: QuarkConnection, private knownRevision: string | null = null) {}
   async verify() { await (await accountClient(this.config)).getAccountInfo() }
+  private async snapshot(client: QuarkClient, file: QuarkEntry) {
+    const metadata = canonical({ name: file.name, size: file.size, updatedAt: file.updatedAt ?? null })
+    const cached = this.snapshots.get(file.fid)
+    if (cached?.metadata === metadata) return cached.snapshot
+    const snapshot = await load(client, file)
+    // A store lives for one synchronization. Reuse verified immutable history
+    // bytes during its repeated directory checks, while still listing new heads.
+    this.snapshots.set(file.fid, { metadata, snapshot })
+    return snapshot
+  }
   private async metadata(client: QuarkClient) {
     const root = await listAll(client, this.config.folderId)
     const folders = root.filter(file => file.isDirectory && file.name === historyName).sort((a, b) => a.fid.localeCompare(b.fid))
@@ -88,7 +99,7 @@ export class QuarkStore {
       }
       const previous = nodes.get(match[1])
       if (previous) { previous.files.push(file); continue }
-      nodes.set(match[1], { snapshot: await load(client, file), files: [file] })
+      nodes.set(match[1], { snapshot: await this.snapshot(client, file), files: [file] })
     }
     const values = [...nodes.values()]
     if (values.some((node, index) => values.slice(index + 1).some(other => canonical(node.snapshot.clock) === canonical(other.snapshot.clock)))) throw new Error('夸克设备版本标识冲突，请导出备份并重新连接')

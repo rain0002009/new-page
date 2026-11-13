@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import NewtabApp, { stateKey } from './NewTabApp'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { readLocalSnapshot } from '../core/local-workspace'
+import { ToastProvider } from '../shared/Toast'
 import './styles.css'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 1000 } } })
@@ -16,7 +17,7 @@ async function start() {
   if (local) queryClient.setQueryData(stateKey, local, { updatedAt: 0 })
   root.render(
     <React.StrictMode>
-      <QueryClientProvider client={queryClient}><NewtabApp /></QueryClientProvider>
+      <QueryClientProvider client={queryClient}><ToastProvider><NewtabApp /></ToastProvider></QueryClientProvider>
     </React.StrictMode>
   )
 }

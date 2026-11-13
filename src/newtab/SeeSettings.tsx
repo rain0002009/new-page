@@ -1,7 +1,8 @@
 import { useId, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { Button } from './ui'
-import { feedbackStyles, formStyles } from './form-styles'
+import { formStyles } from './form-styles'
+import { Toast } from '../shared/Toast'
 
 const fields = formStyles()
 
@@ -16,7 +17,7 @@ export default function SeeSettings({ value, onSave }: { value: string; onSave: 
   async function save(value: string) {
     setBusy(true); setError(''); setMessage('')
     try {
-      if (!await onSave(value.trim())) throw new Error('保存失败')
+      if (!await onSave(value.trim())) return
       setDraft(null); setVisible(false)
       setMessage(value.trim() ? 's.ee API Key 已保存' : 's.ee API Key 已清除')
     } catch { setError('保存 s.ee 配置失败，请重试') }
@@ -32,8 +33,8 @@ export default function SeeSettings({ value, onSave }: { value: string; onSave: 
     <div className="flex flex-wrap items-center gap-[8px]">
       <Button tone="primary" disabled={busy} aria-label="保存 s.ee API Key" onClick={() => void save(key)}>保存</Button>
       <Button disabled={busy} aria-label="清除 s.ee API Key" onClick={() => void save('')}>清除</Button>
-      {message && <span role="status" className="text-[11px] text-ui-muted">{message}</span>}
+      <Toast message={message} tone="success" onClose={() => setMessage('')} />
     </div>
-    {error && <p role="alert" className={feedbackStyles.error()}>{error}</p>}
+    <Toast message={error} onClose={() => setError('')} />
   </>
 }

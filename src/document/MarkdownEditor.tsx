@@ -1,20 +1,38 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Crepe } from '@milkdown/crepe'
 import { editorViewCtx, serializerCtx } from '@milkdown/kit/core'
 import { replaceAll, $prose } from '@milkdown/kit/utils'
 import { Plugin } from '@milkdown/kit/prose/state'
 import { uploadConfig } from '@milkdown/kit/plugin/upload'
-import { uploadImage } from '../core/see'
+import { readSeeApiKey, uploadImage } from '../core/see'
+import { storageKey } from '../core/local-workspace'
 import { preserveStandardImages } from './image-markdown'
 
 export default function MarkdownEditor({ value, readonly, onChange, onError, resource }: { value: string; readonly: boolean; onChange: (value: string) => void; onError: (message: string) => void; resource?: (url: string, image: boolean) => Promise<string> }) {
   const host = useRef<HTMLDivElement>(null)
   const instance = useRef<Crepe>()
   const replacing = useRef(false)
+  const [uploadEnabled, setUploadEnabled] = useState<boolean | null>(null)
   const latest = useRef({ value, readonly, onChange, onError, resource })
   latest.current = { value, readonly, onChange, onError, resource }
   useEffect(() => {
+    let disposed = false, revision = 0
+    const refresh = async () => {
+      const request = ++revision
+      const enabled = await readSeeApiKey().then(key => Boolean(key)).catch(() => false)
+      if (!disposed && request === revision) setUploadEnabled(enabled)
+    }
+    const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === 'local' && changes[storageKey]) void refresh()
+    }
+    chrome.storage.onChanged.addListener(changed)
+    void refresh()
+    return () => { disposed = true; chrome.storage.onChanged.removeListener(changed) }
+  }, [])
+  useEffect(() => {
+    if (uploadEnabled === null) return
     let cancelled = false
+    const imageBlockEnabled = !readonly && uploadEnabled
     const uploads = new Set<AbortController>()
     const resolve = async (url: string, image: boolean) => {
       const result = latest.current.resource ? await latest.current.resource(url, image) : url
@@ -22,10 +40,10 @@ export default function MarkdownEditor({ value, readonly, onChange, onError, res
     }
     const editor = new Crepe({
       root: host.current!, defaultValue: latest.current.value,
-      features: { [Crepe.Feature.Latex]: false, [Crepe.Feature.AI]: false, [Crepe.Feature.TopBar]: false, [Crepe.Feature.ImageBlock]: !readonly },
+      features: { [Crepe.Feature.Latex]: false, [Crepe.Feature.AI]: false, [Crepe.Feature.TopBar]: false, [Crepe.Feature.ImageBlock]: imageBlockEnabled },
       featureConfigs: { [Crepe.Feature.ImageBlock]: {
         onUpload: async file => {
-          if (cancelled || latest.current.readonly) return ''
+          if (cancelled || latest.current.readonly || !uploadEnabled) return ''
           const controller = new AbortController()
           uploads.add(controller)
           try {
@@ -48,14 +66,14 @@ export default function MarkdownEditor({ value, readonly, onChange, onError, res
     editor.editor.use(preserveStandardImages)
     // Milkdown leaves its paste/drop placeholder behind when the uploader rejects.
     editor.editor.config(ctx => ctx.update(uploadConfig.key, config => ({ ...config, uploader: async (...args) => {
-      if (cancelled || latest.current.readonly) return []
+      if (cancelled || latest.current.readonly || !uploadEnabled) return []
       try {
         const nodes = await config.uploader(...args)
         return cancelled || latest.current.readonly ? [] : nodes
       } catch { return [] }
     } })))
     editor.editor.use($prose(ctx => new Plugin({ props: {
-      nodeViews: readonly ? { image(node) {
+      nodeViews: !imageBlockEnabled ? { image(node) {
         const dom = document.createElement('img'); dom.alt = String(node.attrs.alt ?? ''); dom.title = String(node.attrs.title ?? '')
         void resolve(String(node.attrs.src ?? ''), true).then(url => { if (!cancelled) dom.src = url }).catch(cause => latest.current.onError(cause.message))
         return { dom, ignoreMutation: () => true }
@@ -79,7 +97,7 @@ export default function MarkdownEditor({ value, readonly, onChange, onError, res
       }
     }).catch(error => latest.current.onError(`编辑器加载失败：${error instanceof Error ? error.message : String(error)}`))
     return () => { cancelled = true; uploads.forEach(controller => controller.abort()); instance.current = undefined; void editor.destroy().catch(() => {}) }
-  }, [readonly])
+  }, [readonly, uploadEnabled])
   useEffect(() => {
     const editor = instance.current
     if (!editor || editor.editor.status !== 'Created') return

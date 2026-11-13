@@ -4,6 +4,7 @@ import { tv } from 'tailwind-variants/lite'
 import { Button } from '../newtab/ui'
 import DocumentOutline from './DocumentOutline'
 import { readLocalDirectory, fileAccessMessage, type LocalDirectoryEntry } from './local-directory'
+import { Toast } from '../shared/Toast'
 
 const navigationButton = tv({
   base: 'border-0 rounded-[6px] hover:bg-ui-surface',
@@ -32,8 +33,8 @@ export function FileAccessSettingsButton() {
   return <Button onClick={() => void chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` })}>打开扩展设置</Button>
 }
 
-function DirectoryError({ error }: { error: string }) {
-  return <div role="alert" className="text-[12px] text-action-danger [overflow-wrap:anywhere]">{error}{error === fileAccessMessage && <FileAccessSettingsButton />}</div>
+function DirectoryError({ error, retry }: { error: string; retry?: () => void }) {
+  return <Toast message={error}>{error === fileAccessMessage && <FileAccessSettingsButton />}{retry && <Button onClick={retry}>重试</Button>}</Toast>
 }
 
 function DirectoryEntries({ directory, active, open }: { directory: string; active?: string; open: (url: string) => Promise<void> }) {
@@ -48,7 +49,7 @@ function DirectoryEntries({ directory, active, open }: { directory: string; acti
       .catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '无法读取文件夹，请重试') })
     return () => controller.abort()
   }, [directory, retry])
-  if (error) return <><DirectoryError error={error} /><Button onClick={() => setRetry(value => value + 1)}>重试</Button></>
+  if (error) return <DirectoryError error={error} retry={() => setRetry(value => value + 1)} />
   if (!entries) return <p role="status" className="text-[11px] text-ui-muted">正在读取目录…</p>
   if (!entries.length) return <p className="text-[11px] text-ui-muted px-[5px]">此文件夹没有 Markdown 文件或子目录</p>
   return <ul className="list-none m-0 p-0">{entries.map(entry => <DirectoryEntry key={entry.url} entry={entry} active={active} open={open} />)}</ul>

@@ -11,6 +11,7 @@ import { CollectionPlaceholder, useCollectionPlaceholder, useDragItem } from './
 import { linkCard } from './link-card-styles'
 import { MotionRegion } from './motion'
 import SavedPageLink from './SavedPageLink'
+import { Toast } from '../shared/Toast'
 
 const cardAction = tv({
   base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] hover:text-action-ghost-hover group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
@@ -79,7 +80,7 @@ function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?
   return <article {...drag} aria-label={`笔记 ${note.title}`}>
     <div className={styles.top()}><span className="grid place-items-center h-[30px] w-[30px] rounded-[8px] bg-[#eee5cb] text-[#9d8551]"><FileText size={20} /></span><div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction()} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div></div>
     <a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a><span className={styles.domain()}>Markdown 笔记</span>
-    <p className={styles.note()}>{markdownDescription(note.body)}</p>{error && <span role="alert">{error}</span>}
+    <p className={styles.note()}>{markdownDescription(note.body)}</p><Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>
 }
 
@@ -113,7 +114,7 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
     </SortableContext> : <div className="min-h-[124px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[15px] bg-[#fafcf34d]">
       <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
       <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
-    </div>)}</MotionRegion>{createError && <p role="alert">{createError}</p>}
+    </div>)}</MotionRegion><Toast message={createError} onClose={() => setCreateError('')} />
   </section>
 }
 

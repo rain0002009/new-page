@@ -7,6 +7,7 @@ import LocalDocumentSidebar, { FileAccessSettingsButton } from './LocalDocumentS
 import MarkdownEditor from './MarkdownEditor'
 import { recallFile, rememberFile, markdownName, readFileHandle, relativeFile, type LocalFile, type FileHandle } from './local-files'
 import { fileDirectoryUrl, requireFileUrlAccess } from './local-directory'
+import { Toast } from '../shared/Toast'
 
 export default function LocalDocumentApp({ address = '' }: { address?: string }) {
   const [file, setFile] = useState<LocalFile>()
@@ -159,11 +160,14 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   }
   return <main className={documentStyles.main()}>
     {status && <p role="status" className={documentStyles.status()}>{status}</p>}
-    {error && <div role="alert" className={documentStyles.error()}>{error}
-      {conflict ? <><p>磁盘版本：{conflict.disk}</p><p>编辑版本：{file?.body}</p><Button onClick={() => { if (!current.current) return; const next = { ...current.current, body: conflict.disk, baseline: conflict.disk, dirty: false }; current.current = next; setFile(next); dirty.current = false; setConflict(undefined); conflictRef.current = false; setError(''); setStatus('已读取磁盘版本'); void rememberFile(next, recordId.current).catch(() => setError('草稿记录更新失败，请重试')) }}>使用磁盘版本</Button><Button onClick={() => { if (!current.current) return; current.current.baseline = conflict.disk; conflictRef.current = false; setConflict(undefined); void save() }}>保留编辑版本</Button></> : <>{!file && address ? <Button disabled={loading} onClick={() => void readAddress()}>重试读取</Button> : dirty.current && <Button onClick={() => void save()}>重试保存</Button>}{file?.handle && <Button onClick={() => void authorize()}>重新授权</Button>}</>}
+    <Toast message={error} onClose={() => setError('')}>
+      {!conflict && <>{!file && address ? <Button disabled={loading} onClick={() => void readAddress()}>重试读取</Button> : dirty.current && <Button onClick={() => void save()}>重试保存</Button>}{file?.handle && <Button onClick={() => void authorize()}>重新授权</Button>}</>}
       {address && <Button onClick={() => { void rpc({ type: 'open-original', url: current.current?.url ?? address }).catch(cause => setError(cause.message)) }}>打开原网页</Button>}
       {error.includes('允许访问文件网址') && <FileAccessSettingsButton />}
-    </div>}
+    </Toast>
+    {conflict && <section aria-label="文件版本冲突" className={documentStyles.conflict()}>
+      <p>磁盘版本：{conflict.disk}</p><p>编辑版本：{file?.body}</p><Button onClick={() => { if (!current.current) return; const next = { ...current.current, body: conflict.disk, baseline: conflict.disk, dirty: false }; current.current = next; setFile(next); dirty.current = false; setConflict(undefined); conflictRef.current = false; setError(''); setStatus('已读取磁盘版本'); void rememberFile(next, recordId.current).catch(() => setError('草稿记录更新失败，请重试')) }}>使用磁盘版本</Button><Button onClick={() => { if (!current.current) return; current.current.baseline = conflict.disk; conflictRef.current = false; setConflict(undefined); void save() }}>保留编辑版本</Button>
+    </section>}
     {file && <div className={documentStyles.columns()}><aside className={documentStyles.sidebar()}><LocalDocumentSidebar body={file.body} directory={directory} active={file.url} browsing={browsing} busy={directoryBusy} error={directoryError} browse={() => void browseDirectory()} outline={() => { navigationEpoch.current++; setBrowsing(false); setDirectoryError('') }} open={openAddress} /></aside><section className={documentStyles.surface()} onClickCapture={event => {
       const anchor = (event.target as Element).closest('a')
       if (anchor?.protocol === 'file:' && markdownName(new URL(anchor.href).pathname)) {

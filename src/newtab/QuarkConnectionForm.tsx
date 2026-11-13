@@ -7,6 +7,7 @@ import type { QrState, QuarkConnection } from '../core/quark/auth'
 import { allowQuarkAccess, loadQuarkQr } from './quark-login'
 import { Button } from './ui'
 import { feedbackStyles, formStyles } from './form-styles'
+import { Toast } from '../shared/Toast'
 
 const qrStyles = tv({
   slots: {
@@ -77,13 +78,12 @@ export default function QuarkConnectionForm({ connected, initial, done, onError 
     {initial?.kind === 'quark' && <p className={feedbackStyles.muted()}>当前夸克账号：{initial.username}</p>}
     {connected && <fieldset className={fields.fieldset({ className: 'my-[16px] mx-0' })}><legend className={fields.legend()}>登录后的数据</legend><label className={fields.radioLabel()}><input className={fields.radio()} type="radio" checked={mode === 'switch'} onChange={() => setMode('switch')} />使用该账号的收藏</label><label className={fields.radioLabel()}><input className={fields.radio()} type="radio" checked={mode === 'migrate'} onChange={() => setMode('migrate')} />把当前收藏迁移到该账号</label></fieldset>}
     {qr?.status === 'pending' && <div className={qrStyles.base()} aria-label="夸克登录二维码"><QRCodeSVG className={qrStyles.code()} value={qr.url} size={184} level="M" marginSize={3} title="使用夸克 App 扫码登录" /><p className={qrStyles.status()} role="status"><ScanLine size={15} />使用夸克 App 扫码并确认登录</p><small className={qrStyles.hint()}>二维码有效期约 5 分钟</small></div>}
-    {qr?.status === 'expired' && <p role="status" className={feedbackStyles.muted()}>二维码已过期，请刷新后重新扫描。</p>}
+    <Toast message={qr?.status === 'expired' ? '二维码已过期，请刷新后重新扫描。' : ''} tone="info" />
     {qr?.status === 'confirmed' && !pending && !error && <p role="status" className={feedbackStyles.muted()}>扫码已完成，正在读取收藏。</p>}
-    {error && <div role="alert" className={feedbackStyles.alert()}>{error}</div>}
-    {error && authenticated && <Button className="w-full mt-[16px]" disabled={busy} onClick={() => {
+    <Toast message={error} onClose={() => setError('')}>{authenticated && <Button disabled={busy} onClick={() => {
       setBusy(true)
       void connect(authenticated).catch(error => setError(error instanceof Error ? error.message : '读取收藏失败')).finally(() => setBusy(false))
-    }}>重新读取收藏</Button>}
+    }}>重新读取收藏</Button>}</Toast>
     {pending ? <div className={feedbackStyles.confirmation()}><p className={feedbackStyles.confirmationText()}>{pending.message}</p><Button tone="primary" disabled={busy} onClick={() => {
       setBusy(true)
       void connect(pending.config, true).catch(error => setError(error instanceof Error ? error.message : '连接失败')).finally(() => setBusy(false))

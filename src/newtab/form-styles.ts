@@ -23,8 +23,6 @@ export const formStyles = tv({
 
 const feedback = tv({
   slots: {
-    alert: 'py-[13px] px-[16px] bg-[#fff1e4] text-[#9d724f] border border-solid border-[#eedec6] rounded-[9px] flex items-center justify-between gap-[12px] text-[12px] my-[16px] [overflow-wrap:anywhere]',
-    error: 'text-[11px] text-[#b27b5e] my-[8px]',
     muted: 'text-ui-muted text-[13px]',
     confirmation: 'p-[14px] bg-[#f1f4e9] rounded-[10px]',
     confirmationText: 'text-[12px] mb-[12px]',

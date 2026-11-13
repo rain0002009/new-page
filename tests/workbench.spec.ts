@@ -196,6 +196,49 @@ async function transferImage(page: Page, kind: 'paste' | 'drop' = 'paste', mime 
   }, { kind, mime })
 }
 
+test('Toast 统一呈现提示，暂停自动关闭，并在弹窗内保持可操作和输入焦点', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('s.ee API Key', { exact: true }).fill('see-toast-test')
+  await page.getByRole('button', { name: '保存 s.ee API Key', exact: true }).click()
+  const success = page.getByRole('status').filter({ hasText: 's.ee API Key 已保存' })
+  await expect(success).toBeVisible()
+  await success.hover()
+  await page.clock.install()
+  await page.clock.fastForward(6000)
+  await expect(success).toBeVisible()
+  await page.mouse.move(0, 0)
+  await page.clock.fastForward(6000)
+  await expect(success).toHaveCount(0)
+  await page.clock.resume()
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await addLink(page, 'Toast 测试')
+  const card = page.getByRole('article', { name: '链接 Toast 测试', exact: true })
+  await card.hover()
+  await card.getByRole('button', { name: '编辑链接', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  const input = dialog.getByLabel('网址', { exact: true })
+  await input.fill('javascript:alert(1)')
+  const error = page.getByRole('alert').filter({ hasText: '请输入网页' })
+  await expect(error).toBeVisible()
+  await expect(input).toBeFocused()
+  await expect(error).toHaveCount(1)
+  await page.setViewportSize({ width: 480, height: 900 })
+  const bounds = (await error.boundingBox())!
+  expect(bounds.x).toBeGreaterThanOrEqual(0)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(480)
+  await page.screenshot({ path: 'test-results/toast-modal-narrow.png', fullPage: true })
+  await error.getByRole('button', { name: '关闭提示', exact: true }).click()
+  await expect(error).toHaveCount(0)
+  await expect(dialog).toBeVisible()
+  await input.fill('javascript:alert(2)')
+  await expect(error).toBeVisible()
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await expect(error).toHaveCount(0)
+  await expect(card.getByRole('link')).toHaveAttribute('href', 'https://react.dev/')
+})
+
 test('s.ee 图片粘贴使用最新全局密钥，失败可重试，直链随 Markdown 导出并重开', async () => {
   const { page, context } = await openClient(undefined, true)
   await connectQuark(page)
@@ -206,13 +249,21 @@ test('s.ee 图片粘贴使用最新全局密钥，失败可重试，直链随 Ma
     uploads.push({ authorization: request.headers().authorization, contentType: request.headers()['content-type'], body: request.postData() ?? '' })
     await route.fulfill({ status: failure ? 401 : 200, contentType: 'application/json', body: JSON.stringify(failure
       ? { code: -1, message: 'Unauthorized see-test-key' }
-      : { code: 200, data: { url: 'https://images.example.test/upload.png', upload_status: 1 } }) })
+      : { code: 200, message: 'success', success: true, data: { url: 'https://images.example.test/upload.png', upload_status: 2 } }) })
   })
   await context.route('https://images.example.test/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="240"><rect width="480" height="240" fill="#a2bc8b"/><text x="40" y="130" font-size="30">s.ee image</text></svg>' }))
   const note = await newNote(page, context, '图床手记', '上传前的正文')
+  const editor = note.getByRole('textbox', { name: 'Markdown 正文', exact: true })
+  await editor.press('Control+End')
+  await editor.press('Enter')
+  await editor.pressSequentially('/image')
+  await expect(note.getByText('Image', { exact: true })).toHaveCount(0)
+  for (let i = 0; i < 6; i++) await editor.press('Backspace')
   await transferImage(note)
-  await expect(note.getByRole('alert')).toContainText('请先在设置页保存 s.ee API Key')
+  await transferImage(note, 'drop')
+  await expect(note.getByRole('alert')).toHaveCount(0)
   await expect(note.getByText('Upload in progress...', { exact: true })).toHaveCount(0)
+  await expect(note.locator('img')).toHaveCount(0)
   expect(uploads).toHaveLength(0)
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByLabel('s.ee API Key', { exact: true }).fill('see-test-key')
@@ -242,6 +293,17 @@ test('s.ee 图片粘贴使用最新全局密钥，失败可重试，直链随 Ma
   await note.reload()
   await expect(note.locator('img[src="https://images.example.test/upload.png"]')).toBeVisible()
   await note.screenshot({ path: 'test-results/see-note-desktop.png', fullPage: true })
+  await page.getByRole('button', { name: '清除 s.ee API Key', exact: true }).click()
+  await expect(page.getByText('s.ee API Key 已清除', { exact: true })).toBeVisible()
+  await expect(note.locator('.milkdown-image-block')).toHaveCount(0)
+  await expect(note.locator('img[src="https://images.example.test/upload.png"]')).toBeVisible()
+  await expect(note.getByText('上传图片', { exact: true })).toHaveCount(0)
+  await transferImage(note)
+  await transferImage(note, 'drop')
+  await expect(note.getByRole('alert')).toHaveCount(0)
+  expect(uploads).toHaveLength(2)
+  await note.reload()
+  await expect(note.locator('img[src="https://images.example.test/upload.png"]')).toBeVisible()
 })
 
 test('s.ee 本地可写 Markdown 支持拖放及原生上传按钮，并拒绝非图片', async () => {
@@ -301,7 +363,7 @@ test('s.ee 拒绝业务失败、非 JSON 及危险图片地址，失败后不插
   for (const response of [
     { code: -1, message: '上传额度不足' },
     { code: 200, data: { url: 'javascript:alert(1)' } },
-    { code: 200, data: { url: 'https://images.example.test/failed.png', upload_status: 0 } },
+    { code: 200, success: false, data: { url: 'https://images.example.test/failed.png', upload_status: 0 } },
     '<html>Bad gateway</html>',
   ]) {
     body = typeof response === 'string' ? response : JSON.stringify(response)
@@ -1081,7 +1143,7 @@ test('夸克二维码过期可刷新，登录失效时保留本地并支持重�
   await sync(page)
   quark.expired = true
   await page.getByRole('button', { name: '立即同步', exact: true }).click()
-  await expect(page.getByRole('status').first()).toContainText('请重新扫码')
+  await expect(page.getByRole('alert')).toContainText('请重新扫码')
   await page.reload()
   await expect(page.getByRole('link', { name: '登录失效仍保留', exact: true })).toBeVisible()
   quark.expired = false
@@ -1169,10 +1231,17 @@ test('夸克并行编辑同一收藏保留两个云端版本，选择后停止�
   await expect(first.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toBeVisible()
   await expect(first.page.getByText('设备一的标题', { exact: true }).first()).toBeVisible()
   await expect(first.page.getByText('设备二的标题', { exact: true }).first()).toBeVisible()
-  await first.page.getByRole('button', { name: '保留本地版本', exact: true }).first().click()
+  // One entity can have both a local merge conflict and a cloud branch conflict.
+  // Resolve every presented choice before asserting that synchronization settles.
+  const choices = first.page.getByRole('button', { name: '保留本地版本', exact: true })
+  for (let remaining = await choices.count(); remaining > 0; remaining--) {
+    await choices.first().click()
+    await expect(choices).toHaveCount(remaining - 1)
+  }
   await expect(first.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toHaveCount(0)
   await sync(first.page)
   await sync(first.page)
+  await expect(first.page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toHaveCount(0)
   expect(quark.snapshots().some(file => file.body.includes('设备一的标题'))).toBe(true)
   expect(quark.snapshots().some(file => file.body.includes('设备二的标题'))).toBe(true)
   expect(quark.published()).toHaveLength(1)
@@ -1186,7 +1255,7 @@ test('夸克远端损坏时不上传空数据，修正后恢复保存', async ()
   const count = quark.snapshots().length
   quark.downloadsCorrupt = true
   await page.getByRole('button', { name: '立即同步', exact: true }).click()
-  await expect(page.getByRole('status').first()).toContainText('已损坏')
+  await expect(page.getByRole('alert')).toContainText('已损坏')
   expect(quark.snapshots()).toHaveLength(count)
   await page.reload()
   await expect(page.getByRole('link', { name: '原始收藏', exact: true })).toBeVisible()
@@ -1203,7 +1272,7 @@ test('夸克目录延迟列出已上传版本时不回退本地收藏，列表�
   await sync(page)
   for (const file of quark.snapshots()) if (file.body.includes('目录延迟也不能丢的收藏')) quark.hiddenVersions.add(file.fid)
   await page.getByRole('button', { name: '立即同步', exact: true }).click()
-  await expect(page.getByRole('status').first()).toContainText('尚未')
+  await expect(page.getByRole('alert')).toContainText('尚未')
   await page.reload()
   await expect(page.getByRole('link', { name: '目录延迟也不能丢的收藏', exact: true })).toBeVisible()
   quark.hiddenVersions.clear()
@@ -3153,7 +3222,7 @@ test('特殊页面拖入后支持编辑、Todo 和搜索打开，失败可重试
   await expect(card.getByRole('link')).toHaveAttribute('href', 'chrome://extensions/')
   for (const unsupported of ['javascript:alert(1)', 'data:text/html,test', 'blob:https://example.com/test']) {
     await input.fill(unsupported)
-    await expect(page.getByRole('dialog').getByRole('status')).toContainText('请输入网页')
+    await expect(page.getByRole('dialog').getByRole('alert')).toContainText('请输入网页')
     await expect(card.getByRole('link')).toHaveAttribute('href', 'chrome://extensions/')
   }
   await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
