@@ -29,7 +29,6 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   const pending = useRef(Promise.resolve())
   const drafts = useRef(Promise.resolve())
   const recordId = useRef(new URLSearchParams(location.search).get('local') ?? crypto.randomUUID())
-  const input = useRef<HTMLInputElement>(null)
   async function show(next: LocalFile, editing: boolean) {
     selectionEpoch.current++; setLoading(false)
     current.current = next; setFile(next); dirty.current = !!next.dirty; setReading(!editing); setError(''); setConflict(undefined); conflictRef.current = false
@@ -105,7 +104,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
     selectionEpoch.current++
     const next = { ...current.current, body, dirty: true }; current.current = next; setFile(next); dirty.current = true
     drafts.current = drafts.current.catch(() => {}).then(async () => { await rememberFile(next, recordId.current) }).catch(() => setError('编辑草稿暂时无法保存，请保持页面打开并导出正文'))
-    setStatus(next.handle ? '正在保存…' : '编辑内容待下载另存')
+    setStatus(next.handle ? '正在保存…' : '尚未保存 · 可导出保留')
     clearTimeout(timer.current); timer.current = setTimeout(save, 200)
   }
   useEffect(() => {
@@ -115,7 +114,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   })
   async function choose(expectedName?: string) {
     if (dirty.current) { await save(); if (unprotectedChanges()) { setError('当前内容尚未保存，请先保存或导出后再打开其他文件'); return } }
-    if (!pickers.showOpenFilePicker) { input.current?.click(); return }
+    if (!pickers.showOpenFilePicker) { setError('无法使用本地文件选择，请更新 Chrome 后重试；当前内容可导出保留'); return }
     try {
       const selection = selectionEpoch.current
       const selected = await selectFile()
@@ -127,7 +126,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   async function toggleEditing() {
     if (!file) return
     if (!reading) { setReading(true); return }
-    if (!file.handle && pickers.showOpenFilePicker) { await choose(file.title); return }
+    if (!file.handle) { await choose(file.title); return }
     try {
       const selection = selectionEpoch.current
       if (file.handle?.requestPermission && await file.handle.requestPermission({ mode: 'readwrite' }) !== 'granted') throw new Error('未获得写入权限，内容已保留，请重新授权')
@@ -137,7 +136,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
     } catch (cause) { setError(cause instanceof Error ? cause.message : '无法获得文件写入权限') }
   }
   async function folder() {
-    if (!pickers.showDirectoryPicker) return
+    if (!pickers.showDirectoryPicker) { setError('无法使用文件夹选择，请更新 Chrome 后重试；当前内容可导出保留'); return }
     try {
       const selected = await pickers.showDirectoryPicker({ mode: 'readwrite' })
       if (dirty.current) { await save(); if (unprotectedChanges()) throw new Error('当前内容尚未保存，请先保存或导出') }
@@ -168,23 +167,14 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
       recordId.current = crypto.randomUUID(); await show(next, true)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '文件打开失败，请重新授权文件夹') }
   }
-  async function openInput(selected: File) {
-    const selection = selectionEpoch.current
-    if (!markdownName(selected.name)) throw new Error('请选择 Markdown 文件')
-    const body = await selected.text()
-    ensureSelection(selection)
-    await show({ title: selected.name, body, baseline: body }, true)
-  }
   return <><FluidBackground /><main className={documentStyles.main()}>
     <header className={documentStyles.header()}><span>本地 Markdown</span><div className={documentStyles.actions()}>
       <Button onClick={() => void choose()}>打开本地文件</Button>
-      <Button disabled={!pickers.showDirectoryPicker} onClick={() => void folder()}>打开文件夹</Button>
-      {file && <Button onClick={() => void toggleEditing()}>{reading ? pickers.showOpenFilePicker ? '编辑原文件' : '编辑后下载另存' : '阅读模式'}</Button>}
+      <Button onClick={() => void folder()}>打开文件夹</Button>
+      {file && <Button onClick={() => void toggleEditing()}>{reading ? '编辑原文件' : '阅读模式'}</Button>}
       <Button disabled={!file} aria-label="导出 Markdown" onClick={exportFile}>导出</Button>
     </div></header>
-    <input ref={input} type="file" accept=".md,.markdown,text/markdown" className="hidden" aria-label="本地 Markdown 文件" onChange={event => { const selected = event.target.files?.[0]; event.target.value = ''; if (selected) void openInput(selected).catch(cause => setError(cause.message)) }} />
     <p role="status" className={documentStyles.status()}>{status}</p>
-    {!pickers.showOpenFilePicker && <p className="text-[12px] text-ui-muted">此浏览器支持编辑后下载另存，不支持原文件自动写回或文件目录。</p>}
     {error && <div role="alert" className={documentStyles.error()}>{error}
       {conflict ? <><p>磁盘版本：{conflict.disk}</p><p>编辑版本：{file?.body}</p><Button onClick={() => { if (!current.current) return; const next = { ...current.current, body: conflict.disk, baseline: conflict.disk, dirty: false }; current.current = next; setFile(next); dirty.current = false; setConflict(undefined); conflictRef.current = false; setError(''); setStatus('已读取磁盘版本'); void rememberFile(next, recordId.current).catch(() => setError('草稿记录更新失败，请重试')) }}>使用磁盘版本</Button><Button onClick={() => { if (!current.current) return; current.current.baseline = conflict.disk; conflictRef.current = false; setConflict(undefined); void save() }}>保留编辑版本</Button></> : <>{!file && address ? <Button disabled={loading} onClick={() => void readAddress()}>重试读取</Button> : <Button onClick={() => void save()}>重试保存</Button>}{file?.handle && <Button onClick={() => { void file.handle?.requestPermission?.({ mode: 'readwrite' }).then(permission => { if (permission !== 'granted') throw new Error('未获得写入权限'); return save() }).catch(cause => setError(cause.message)) }}>重新授权</Button>}</>}
       {address && <Button onClick={() => { void rpc({ type: 'open-original', url: address }).catch(cause => setError(cause.message)) }}>打开原网页</Button>}

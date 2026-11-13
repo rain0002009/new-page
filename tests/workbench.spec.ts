@@ -87,7 +87,7 @@ test.afterAll(async () => { await new Promise<void>(done => server.close(() => d
 async function openClient(existingProfile?: string, quarkMode = false) {
   const profile = existingProfile ?? await mkdtemp(join(tmpdir(), 'new-page-e2e-'))
   const extension = join(profile, 'extension')
-  await cp(resolve(process.env.EXTENSION_DIR || 'dist/chrome'), extension, { recursive: true })
+  await cp(resolve('dist/chrome'), extension, { recursive: true })
   const manifestPath = join(extension, 'manifest.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   // Replace the built-in Quark hosts with the isolated server. Keep the shipped
@@ -516,25 +516,29 @@ test('本地地址读取失败后可重试读取已恢复的文件', async () =>
   await expect(doc.getByRole('alert')).toHaveCount(0)
 })
 
-test('缺少本地写回 API 时可编辑下载另存并禁用目录', async () => {
-  const { page, context } = await openClient(undefined, true)
+test('Chrome 文件选择能力不可用时保持预览并提示恢复路径', async () => {
+  const { page, context, profile } = await openClient(undefined, true)
+  const path = join(profile, '本地手记.md')
+  await writeFile(path, '# 本地阅读\n\n保留预览正文')
   const doc = await context.newPage()
   await doc.addInitScript(() => { Object.assign(window, { showOpenFilePicker: undefined, showDirectoryPicker: undefined }) })
-  await doc.goto(new URL('/document/index.html', page.url()).href)
-  await doc.getByLabel('本地 Markdown 文件', { exact: true }).setInputFiles({ name: '降级手记.md', mimeType: 'text/markdown', buffer: Buffer.from('# 本地阅读\n\n可编辑') })
+  const address = new URL('/document/index.html', page.url())
+  address.searchParams.set('url', pathToFileURL(path).href)
+  await doc.goto(address.href)
+  const body = doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })
+  await expect(body).toContainText('保留预览正文')
+  await doc.getByRole('button', { name: '编辑原文件', exact: true }).click()
+  await expect(doc.getByRole('alert')).toContainText('请更新 Chrome 后重试')
+  await expect(body).toHaveAttribute('contenteditable', 'false')
+  await doc.getByRole('button', { name: '打开文件夹', exact: true }).click()
+  await expect(doc.getByRole('alert')).toContainText('无法使用文件夹选择')
   await expect(doc.getByRole('button', { name: '文件目录', exact: true })).toBeDisabled()
-  await doc.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('降级编辑正文')
   const downloading = doc.waitForEvent('download')
   await doc.getByRole('button', { name: '导出 Markdown', exact: true }).click()
   const file = await downloading
-  expect(file.suggestedFilename()).toBe('降级手记.md')
-  expect(await readFile((await file.path())!, 'utf8')).toContain('降级编辑正文')
-  await expect(doc.getByText('此浏览器支持编辑后下载另存，不支持原文件自动写回或文件目录。', { exact: true })).toBeVisible()
-  const choosing = doc.waitForEvent('filechooser', { timeout: 4000 })
-  await doc.getByRole('button', { name: '打开本地文件', exact: true }).click()
-  await (await choosing).setFiles({ name: '下一篇.md', mimeType: 'text/markdown', buffer: Buffer.from('# 下一篇正文') })
-  await expect(doc.getByRole('heading', { name: '下一篇正文', exact: true })).toBeVisible()
-  await expect(doc.getByRole('textbox', { name: '文件名称', exact: true })).toHaveValue('下一篇.md')
+  expect(file.suggestedFilename()).toBe('本地手记.md')
+  expect(await readFile((await file.path())!, 'utf8')).toContain('保留预览正文')
+  expect(await readFile(path, 'utf8')).toBe('# 本地阅读\n\n保留预览正文')
 })
 
 test('夸克首次安装直接显示二维码，不依赖运行时新增权限或重新加载', async () => {

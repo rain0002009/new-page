@@ -40,17 +40,15 @@
     "unocss": "^66.12.0"
   },
   "scripts": {
-    "dev": "extension dev",
+    "dev": "extension dev --browser chrome",
     "dev:chrome": "extension dev --browser chrome",
-    "start": "extension start",
-    "build": "extension build",
+    "start": "extension start --browser chrome",
+    "build": "extension build --browser chrome",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build:chrome && playwright test",
     "test:e2e": "playwright test",
-    "preview": "extension preview",
-    "build:chrome": "extension build --browser chrome",
-    "build:firefox": "extension build --browser firefox",
-    "build:edge": "extension build --browser edge"
+    "preview": "extension preview --browser chrome",
+    "build:chrome": "extension build --browser chrome"
   },
   "packageManager": "pnpm@12.16.1",
   "pnpm": {

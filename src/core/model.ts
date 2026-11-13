@@ -54,6 +54,8 @@ export function canonical(value: unknown): string {
 export const equal = (a: unknown, b: unknown) => canonical(a) === canonical(b)
 export function savedUrl(value: string) {
   const url = new URL(value)
+  // Keep historical URL schemes readable in existing snapshots and backups.
+  // The extension itself targets Chrome; these addresses do not imply browser support.
   if (!['https:', 'http:', 'chrome:', 'edge:', 'about:', 'chrome-extension:', 'moz-extension:', 'file:'].includes(url.protocol)) throw new Error('请输入网页、浏览器页面、扩展页面或本地文件的网址')
   return url.href
 }

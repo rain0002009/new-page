@@ -34,4 +34,4 @@ pnpm test:e2e
 
 加载 `dist/chrome` 为已解压扩展，打开新标签页。测试使用隔离 Chrome 配置和本地 HTTPS WebDAV；不提供或使用真实账号。功能与兼容性范围见 README.md。
 
-正式上架前由所有者提供隐私政策、联系方式、商店截图与实际服务商的验证信息。Firefox、Edge 和 Safari 尚未专项验证。
+正式上架前由所有者提供隐私政策、联系方式、商店截图与实际服务商的验证信息。当前支持范围为 Google Chrome，遵循 [浏览器支持规则](docs/agents/platform.md)。

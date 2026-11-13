@@ -2,11 +2,15 @@
 
 日期：2026-11-13。正式规格：[Issue #9](https://github.com/rain0002009/new-page/issues/9)，子任务 #10–#20。评审基点：`08b620b6c4fc714e1f7192a8e5d4017862da10b9`。首个实现提交：`2657bb9`；后续修复与本记录一起提交。
 
+范围更新：用户随后明确当前仅支持 Chrome，见 [浏览器支持规则](agents/platform.md)。下方 Edge/Firefox 构建、测试及启动失败是调整前的历史记录，已退出当前支持与验收范围；当前保留的验收缺口只有 Chrome 原生文件与目录授权。跨浏览器下载另存流程已移除，缺少 Chrome 文件选择能力时提示更新并保留只读预览与导出。
+
+本次范围调整验证：`pnpm typecheck`、Chrome MV3 生产构建和 `git diff --check` 通过。两批真实 Chrome 测试共 11 项全部通过，覆盖排版、在线阅读与地址接管、本地实际写回及外部修改冲突、文件地址预览、迟到读取保护、失败重试、文件选择 API 不可用时保持只读并可导出、特殊页面回归、惰性目录与相对资源、权限失效草稿恢复。未重复完整套件。历史 Edge/Firefox 生成目录已清理；当前构建入口均明确指定 Chrome。
+
 ## 实现范围
 
 收藏块可创建托管笔记，先本地保存，再打开独立 Milkdown 页面。支持标题、排版正文、阅读模式、大纲、实时保存、导出、全文搜索、与链接混排和跨块移动。正文随既有收藏快照同步和备份；同浏览器只保留一个编辑页，并协调编辑权交接。单篇笔记永久删除，父级删除保留整组恢复能力。
 
-同一文档入口支持在线只读文件、本地文件预览与授权写回；相对资源按来源解析。目录只显示 Markdown 与子目录，展开才枚举子目录。支持地址自动接管、关闭开关、失败重试与原网页回退。缺少文件写回 API 时提供编辑后下载另存和目录禁用说明。
+同一文档入口支持在线只读文件、本地文件预览与授权写回；相对资源按来源解析。目录只显示 Markdown 与子目录，展开才枚举子目录。支持地址自动接管、关闭开关、失败重试与原网页回退。
 
 ## 测试边界与结果
 
@@ -36,11 +40,11 @@
 
 视觉检查另修复 Milkdown 主题缺失，确保实际排版和工具浮层可用。没有确认的功能范围扩张。限定修复复核后无剩余代码问题；以下浏览器验收缺口仍保留。
 
-## 浏览器验收缺口
+## 历史浏览器限制与当前验收缺口
 
-Firefox 生产构建成功，但下载的 Playwright Firefox 在本机启动时报 Windows“应用程序的并行配置不正确”，实际 Firefox 浏览器流程未完成。缺少文件 API 的降级路径已在 Chrome 和 Edge 中验证，不能代替 Firefox 实机验收。Firefox 构建还提示本机未安装 addons-linter，未执行 AMO lint。
+范围调整前，Firefox 生产构建成功，但下载的 Playwright Firefox 在本机启动时报 Windows“应用程序的并行配置不正确”，实际流程未完成；构建未执行 AMO lint。这些历史限制不再阻塞当前 Chrome 验收。
 
-Chrome／Edge 的系统文件选择和原生权限确认尚需人工补验。使用的 [computer-use 技能](C:/Users/rain0/.codex/plugins/cache/openai-bundled/computer-use/26.1106.51428/skills/computer-use/SKILL.md) 要求遵循 [guidance.md](C:/Users/rain0/.codex/plugins/cache/openai-bundled/computer-use/26.1106.51428/docs/guidance.md)，其中明确规定：“Do not act on security or privacy permission requests.” 因此没有自动确认系统文件访问权限。自动化已验证原生文件句柄写回、文件地址预览、权限失效保留草稿、重新授权恢复和目录惰性枚举；真实授权点击由用户完成后才能补齐系统对话框验收。
+Chrome 的系统文件选择和原生权限确认尚需人工补验。使用的 [computer-use 技能](C:/Users/rain0/.codex/plugins/cache/openai-bundled/computer-use/26.1106.51428/skills/computer-use/SKILL.md) 要求遵循 [guidance.md](C:/Users/rain0/.codex/plugins/cache/openai-bundled/computer-use/26.1106.51428/docs/guidance.md)，其中明确规定：“Do not act on security or privacy permission requests.” 因此没有自动确认系统文件访问权限。自动化已验证原生文件句柄写回、文件地址预览、权限失效保留草稿、重新授权恢复和目录惰性枚举；真实授权点击由用户完成后才能补齐系统对话框验收。
 
 三个构建均有文档页脚本约 1.28 MiB、超过构建器 1 MiB 建议预算的警告；构建成功，该脚本仅在独立文档页加载。未对用户真实夸克账号进行登录或上传验收。
 

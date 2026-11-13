@@ -13,5 +13,8 @@ Resolve the repository from git remote -v. The current repository is
 
 PRs as a request surface: no.
 
+Before accepting browser work, apply the current support scope in `docs/agents/platform.md`.
+At implementation completion, publish the result and validation evidence to the relevant issues, close completed child issues, and close the parent when all in-scope requirements are complete. Record concrete remaining work on issues kept open. Local commits alone do not update GitHub issue state; do not wait for the user to remind you.
+
 When a skill says "publish to the issue tracker", create a GitHub issue.
 When it says "fetch the relevant ticket", read the issue and its comments.
