@@ -17,7 +17,11 @@ function RemoteDocument({ address }: { address: string }) {
   const [loading, setLoading] = useState(false)
   async function load() {
     setLoading(true); setError('')
-    try { const result = await rpc({ type: 'read-markdown', url: address }); setFile(result.file) }
+    try {
+      const result = await rpc({ type: 'read-markdown', url: address })
+      if (result.originalUrl) { await rpc({ type: 'open-original', url: result.originalUrl }); return }
+      setFile(result.file)
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : '读取失败，请重试') }
     finally { setLoading(false) }
   }

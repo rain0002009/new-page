@@ -25,7 +25,7 @@ export type Request =
   | { type: 'resolve'; sourceId: string; conflictId: string; side: 'local' | 'remote' }
   | { type: 'export'; sourceId: string }
   | { type: 'import'; sourceId: string; data: unknown; confirmed: boolean }
-export type Result = { ok: true; file?: { body: string; url: string }; editor?: boolean; snapshot?: Snapshot; confirmation?: string; backup?: Document; qr?: QrState; config?: QuarkConnection } | { ok: false; error: string }
+export type Result = { ok: true; file?: { body: string; url: string }; originalUrl?: string; editor?: boolean; snapshot?: Snapshot; confirmation?: string; backup?: Document; qr?: QrState; config?: QuarkConnection } | { ok: false; error: string }
 export async function rpc(request: Request): Promise<Extract<Result, { ok: true }>> {
   const response = await chrome.runtime.sendMessage(request) as Result
   if (!response?.ok) throw new Error(response?.error || '扩展后台暂时不可用，请重试')

@@ -31,9 +31,11 @@ test.beforeAll(async () => {
     if (await quark.handle(req, res, origin)) return
     const path = new URL(req.url!, 'https://localhost').pathname
     if (path.startsWith('/markdown/')) {
+      if (path.endsWith('redirect.md')) { res.writeHead(302, { Location: '/markdown/html.md' }).end(); return }
+      if (path.endsWith('sniffed.md')) { res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.end('<!DOCTYPE html><html><title>实际网页</title><h1>原始网页</h1></html>'); return }
       if (path.endsWith('html.md')) { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end('<title>实际网页</title><h1>原始网页</h1>'); return }
       if (path.endsWith('error.md')) { res.writeHead(503).end(); return }
-      res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+      res.setHeader('Content-Type', path.endsWith('plain.md') ? 'text/plain; charset=utf-8' : path.endsWith('legacy.md') ? 'Text/X-Markdown; charset=utf-8' : 'text/markdown; charset=utf-8')
       res.end(path.endsWith('next.md') ? '# 下一篇\n\n关联文件正文' : '# 阅读指南\n\n## 安装步骤\n\n在线正文\n\n[下一篇](./next.md)\n\n![示意图](./figure.svg)\n\n| 列名 | 值 |\n| --- | --- |\n| 内容 | 通过 |\n\n- [x] 已检查\n\n```js\nconst ready = true\n```')
       return
     }
@@ -383,16 +385,16 @@ test('收藏在线 Markdown 使用独立阅读页并解析相对资源', async (
   await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('关联文件正文')
 })
 
-test('Markdown 主页面默认接管，HTML 可回退且设置关闭后保留原导航', async () => {
+test('Markdown 主页面默认接管，md 后缀的 HTML 保留原网页且不接管子框架', async () => {
   const { page, context } = await openClient(undefined, true)
   await connectQuark(page)
   const doc = await context.newPage()
   await doc.goto(`${origin}/markdown/guide.MD?version=1#安装`).catch(() => {})
   await expect(doc.getByRole('heading', { name: '阅读指南', exact: true })).toBeVisible()
+  expect(new URL(doc.url()).searchParams.get('url')).toBe(new URL(`${origin}/markdown/guide.MD?version=1#安装`).href)
   await doc.goto(`${origin}/markdown/html.md`).catch(() => {})
-  await expect(doc.getByRole('alert')).toContainText('此地址不是 Markdown')
-  await doc.getByRole('button', { name: '打开原网页', exact: true }).click()
   await expect(doc.getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
+  await expect(doc).toHaveURL(`${origin}/markdown/html.md`)
   await doc.goto(`${origin}/web/guide`)
   await doc.evaluate(url => { const iframe = document.createElement('iframe'); iframe.src = url; document.body.append(iframe) }, `${origin}/markdown/html.md`)
   await expect(doc.frameLocator('iframe').getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
@@ -402,6 +404,38 @@ test('Markdown 主页面默认接管，HTML 可回退且设置关闭后保留原
   await expect(page.getByRole('checkbox', { name: '自动接管 Markdown 地址', exact: true })).toBeEnabled()
   await doc.goto(`${origin}/markdown/html.md`)
   await expect(doc.getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
+})
+
+test('收藏中 md 后缀的 HTML 自动打开原网页', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  await page.evaluate(() => chrome.storage.local.set({ markdownTakeover: false }))
+  await addLink(page, 'GitHub 文件页面', `${origin}/markdown/html.md`)
+  for (const enabled of [true, false]) {
+    await page.evaluate(markdownTakeover => chrome.storage.local.set({ markdownTakeover }), enabled)
+    const opened = context.waitForEvent('page')
+    await page.getByRole('link', { name: 'GitHub 文件页面', exact: true }).click()
+    const doc = await opened
+    await expect(doc.getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
+    await expect(doc).toHaveURL(`${origin}/markdown/html.md`)
+    await doc.close()
+  }
+})
+
+test('Markdown 接管识别纯文本 MIME，跳转与伪装纯文本的 HTML 保留原网页', async () => {
+  const { context } = await openClient(undefined, true)
+  const doc = await context.newPage()
+  for (const name of ['plain.md', 'legacy.md']) {
+    await doc.goto(`${origin}/markdown/${name}`).catch(() => {})
+    await expect(doc.getByRole('heading', { name: '阅读指南', exact: true })).toBeVisible()
+    expect(new URL(doc.url()).searchParams.get('url')).toBe(`${origin}/markdown/${name}`)
+  }
+  for (const name of ['redirect.md', 'sniffed.md']) {
+    await doc.goto(`${origin}/markdown/${name}`).catch(() => {})
+    await expect(doc).toHaveURL(`${origin}/markdown/${name === 'redirect.md' ? 'html.md' : name}`)
+    if (name === 'redirect.md') await expect(doc.getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
+    else await expect(doc.locator('body > pre')).toContainText('<h1>原始网页</h1>')
+  }
 })
 
 async function dropLocalFile(page: Page, context: BrowserContext, title: string, body: string) {

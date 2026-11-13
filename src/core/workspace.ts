@@ -166,7 +166,10 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
       const response = await fetch(url.href, { credentials: 'omit', signal: AbortSignal.timeout(30_000) })
       if (!response.ok) throw new Error(`读取失败（${response.status}），请重试或打开原网页`)
       const body = await response.text()
-      if (/text\/html|application\/xhtml/i.test(response.headers.get('content-type') ?? '') || /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(body)) throw new Error('此地址不是 Markdown，请打开原网页')
+      if (/text\/html|application\/xhtml/i.test(response.headers.get('content-type') ?? '') || /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(body)) {
+        if (url.protocol === 'file:') throw new Error('此地址不是 Markdown，请打开原网页')
+        return { ok: true, originalUrl: url.href }
+      }
       return { ok: true, file: { body, url: response.url || url.href } }
     } catch (cause) {
       if (url.protocol === 'file:') throw new Error('无法读取本地地址，请在扩展详情启用「允许访问文件网址」，或将文件拖入新标签页')
