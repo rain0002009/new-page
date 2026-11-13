@@ -11,6 +11,8 @@ export class QuarkFixture {
   nextAccount = 'rain'
   unavailable = false
   failUpload = false
+  failRename = false
+  failDelete = false
   expired = false
   qrExpired = false
   qrPending = false
@@ -26,9 +28,11 @@ export class QuarkFixture {
     this.hiddenVersions.clear()
     for (const release of this.waitingUploads) release()
     this.parallelUploads = 0; this.waitingUploads = []
-    this.nextAccount = 'rain'; this.unavailable = false; this.failUpload = false; this.expired = false; this.qrExpired = false; this.qrPending = false; this.loginRedirect = false; this.downloadsCorrupt = false; this.requests = 0; this.deleted = 0
+    this.nextAccount = 'rain'; this.unavailable = false; this.failUpload = false; this.failRename = false; this.failDelete = false; this.expired = false; this.qrExpired = false; this.qrPending = false; this.loginRedirect = false; this.downloadsCorrupt = false; this.requests = 0; this.deleted = 0
   }
-  snapshots(account = 'rain') { return [...this.files.values()].filter(file => file.account === account && !file.directory) }
+  snapshots(account = 'rain') { return [...this.files.values()].filter(file => file.account === account && !file.directory && /^pg[12]-/.test(file.name)) }
+  published(account = 'rain') { return [...this.files.values()].filter(file => file.account === account && !file.directory && file.name === '收藏.json') }
+  notes(account = 'rain') { return [...this.files.values()].filter(file => file.account === account && !file.directory && file.name.endsWith('.md')) }
   async handle(req: IncomingMessage, res: ServerResponse, origin: string) {
     const url = new URL(`https://${req.headers.host}${req.url}`)
     const path = url.pathname
@@ -112,7 +116,7 @@ export class QuarkFixture {
       return ok({ list: list.slice((page - 1) * size, page * size) })
     }
     if (path === '/1/clouddrive/file') {
-      const fid = `folder-${account}`
+      const fid = body.pdir_fid === '0' ? `folder-${account}` : randomUUID()
       this.files.set(fid, { fid, name: body.file_name, parent: body.pdir_fid, directory: true, body: '', account })
       return ok({ fid, finish: true })
     }
@@ -136,7 +140,7 @@ export class QuarkFixture {
     if (path.endsWith('/upload/auth')) return ok({ auth_key: 'fixture-oss' })
     if (path.endsWith('/upload/finish')) {
       const upload = this.uploads.get(body.task_id)!
-      if (!upload.committed || !upload.body) return send({ message: 'Upload not committed' }, 400)
+      if (!upload.committed || upload.body === undefined) return send({ message: 'Upload not committed' }, 400)
       this.files.set(upload.fid, { fid: upload.fid, parent: upload.parent, name: upload.name, directory: false, body: upload.body, account })
       return ok()
     }
@@ -144,7 +148,21 @@ export class QuarkFixture {
       const fid = body.fids?.[0]
       return ok([{ download_url: `${origin}/quark-content/${fid}` }])
     }
-    if (path.endsWith('/file/delete')) { this.deleted++; return send({ message: 'Snapshot deletion must not be used' }, 405) }
+    if (path.endsWith('/file/rename')) {
+      if (this.failRename) return send({ message: 'fixture rename failed' }, 503)
+      const file = this.files.get(body.fid)
+      if (!file || file.account !== account) return send({}, 404)
+      if ([...this.files.values()].some(other => other.fid !== file.fid && other.parent === file.parent && other.name === body.file_name && other.account === account)) return send({ message: 'filename already exists' }, 409)
+      file.name = body.file_name; return ok()
+    }
+    if (path.endsWith('/file/delete')) {
+      if (this.failDelete) return send({ message: 'fixture delete failed' }, 503)
+      for (const fid of body.filelist ?? []) {
+        const file = this.files.get(fid)
+        if (file && file.account === account) { this.files.delete(fid); this.deleted++ }
+      }
+      return ok()
+    }
     return send({ message: `Unexpected fixture route: ${path}` }, 400)
   }
 }

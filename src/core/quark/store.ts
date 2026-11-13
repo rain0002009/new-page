@@ -1,131 +1,168 @@
+import { z } from 'zod'
 import { canonical, readDocument, type Document, type Conflict } from '../model'
 import { emptyDocument, merge } from '../merge'
+import { RevisionChanged } from '../webdav'
 import { accountClient, listAll, type QuarkConnection } from './auth'
 import type { QuarkClient } from './client'
+import type { QuarkEntry } from './types'
+import { QuarkApiError } from './types'
+import { publishFiles } from './published-files'
 
-type Meta = { id: string; parents: string[]; fid: string }
-type Snapshot = { format: 'page-garden-snapshot'; version: 1; id: string; parents: string[]; document: Document }
-const prefix = /^pg1-([a-f0-9]{32})-(root|[a-f0-9]{32}(?:\.[a-f0-9]{32}){0,5})\.json$/
-async function contentId(doc: Document, parents: string[]) {
-  const bytes = new TextEncoder().encode(canonical({ document: doc, parents }))
-  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
-  return [...hash].slice(0, 16).map(value => value.toString(16).padStart(2, '0')).join('')
+const clockSchema = z.record(z.string().uuid(), z.number().int().positive().max(Number.MAX_SAFE_INTEGER))
+type Clock = z.infer<typeof clockSchema>
+type Revision = { id: string; clock: Clock }
+type Snapshot = Revision & { format: 'page-garden-snapshot'; version: 2; base: { clock: Clock; document: Document }; document: Document }
+type Stored = { snapshot: Snapshot; files: QuarkEntry[] }
+const historyName = '同步历史'
+const filePattern = /^pg2-([a-f0-9]{32})\.json$/
+const retainedHistory = 10
+const dominates = (a: Clock, b: Clock) => Object.entries(b).every(([writer, count]) => (a[writer] ?? 0) >= count)
+const weight = (clock: Clock) => Object.values(clock).reduce((sum, count) => sum + count, 0)
+function combined(clocks: Clock[]): Clock {
+  const result: Clock = {}
+  for (const clock of clocks) for (const [writer, count] of Object.entries(clock)) result[writer] = Math.max(result[writer] ?? 0, count)
+  return result
 }
-function revision(ids: string[]) { return JSON.stringify([...ids].sort()) }
+function revision(heads: Stored[]) { return JSON.stringify(heads.map(({ snapshot: { id, clock } }) => ({ id, clock })).sort((a, b) => a.id.localeCompare(b.id))) }
+function revisions(value: string | null): Revision[] {
+  if (!value) return []
+  const parsed: unknown = JSON.parse(value)
+  const result = z.array(z.object({ id: z.string().regex(/^[a-f0-9]{32}$/), clock: clockSchema })).max(6).safeParse(parsed)
+  if (!result.success) throw new Error('夸克同步状态格式不兼容，请清除扩展测试数据后重新连接')
+  return result.data
+}
+let writerPromise: Promise<string> | undefined
+function writerId() {
+  return writerPromise ??= (async () => {
+    const key = 'new-page.quark.writer.v2'
+    const stored = await chrome.storage.local.get(key)
+    if (typeof stored[key] === 'string' && z.string().uuid().safeParse(stored[key]).success) return stored[key] as string
+    const id = crypto.randomUUID()
+    await chrome.storage.local.set({ [key]: id })
+    return id
+  })().catch(error => { writerPromise = undefined; throw error })
+}
+async function contentId(value: Pick<Snapshot, 'clock' | 'base' | 'document'>) {
+  const bytes = new TextEncoder().encode(canonical({ clock: value.clock, base: value.base, document: value.document }))
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].slice(0, 16).map(n => n.toString(16).padStart(2, '0')).join('')
+}
+async function mergeWriter(parents: Revision[], document: Document) {
+  const bytes = new TextEncoder().encode(canonical({ parents: [...parents].sort((a, b) => a.id.localeCompare(b.id)), document }))
+  const hex = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].slice(0, 16).map(n => n.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20)}`
+}
+async function load(client: QuarkClient, file: QuarkEntry): Promise<Snapshot> {
+  const text = await client.downloadFileText(file.fid)
+  if (new TextEncoder().encode(text).byteLength > 10_000_000) throw new Error('夸克收藏文件过大，请先导出并整理')
+  let value: Snapshot
+  try { value = JSON.parse(text) } catch { throw new Error('夸克收藏文件已损坏，原文件未被覆盖') }
+  if (value?.format !== 'page-garden-snapshot' || value.version !== 2 || file.name !== `pg2-${value.id}.json` ||
+      !clockSchema.safeParse(value.clock).success || !clockSchema.safeParse(value.base?.clock).success ||
+      !dominates(value.clock, value.base.clock) || weight(value.clock) !== weight(value.base.clock) + 1) throw new Error('夸克收藏版本格式不兼容，原文件未被覆盖')
+  if (await contentId(value) !== value.id) throw new Error('夸克收藏内容校验失败，原文件未被覆盖')
+  // Validate the original bytes before filling in newer optional fields.
+  readDocument(value.document)
+  readDocumentOrEmpty(value.base.document)
+  return value
+}
+function readDocumentOrEmpty(doc: Document) {
+  if (canonical(doc) === canonical(emptyDocument())) return emptyDocument()
+  return readDocument(doc)
+}
 
-// New versions are independent immutable files. Concurrent saves create branches,
-// so a provider without conditional PUT can never overwrite the other save.
+// Each commit contains a baseline. Vector clocks identify dominated versions so
+// pruning never depends on keeping an unbounded chain of ancestor files.
 export class QuarkStore {
+  private base = emptyDocument()
   constructor(private config: QuarkConnection, private knownRevision: string | null = null) {}
   async verify() { await (await accountClient(this.config)).getAccountInfo() }
   private async metadata(client: QuarkClient) {
-    const roots = (await listAll(client, '0')).filter(entry => entry.isDirectory && entry.name === '拾页收藏')
-    const folderIds = new Set([this.config.folderId, ...roots.map(entry => entry.fid)])
-    const nodes = new Map<string, Meta>()
-    for (const folder of folderIds) for (const entry of await listAll(client, folder)) {
-      const match = !entry.isDirectory && entry.name.match(prefix)
-      if (!match && !entry.isDirectory && /^pg\d+-/.test(entry.name)) throw new Error('夸克收藏版本格式不兼容，请保留文件并检查备份')
-      if (!match) continue
-      const parents = match[2] === 'root' ? [] : match[2].split('.')
-      if (new Set(parents).size !== parents.length || parents.includes(match[1])) throw new Error('夸克收藏版本关系无效，请保留文件并检查备份')
-      const existing = nodes.get(match[1])
-      if (existing && canonical(existing.parents) !== canonical(parents)) throw new Error('夸克收藏版本标识冲突，未覆盖任何文件')
-      nodes.set(match[1], { id: match[1], parents, fid: existing?.fid ?? entry.fid })
-    }
-    const referenced = new Set([...nodes.values()].flatMap(node => node.parents))
-    const heads = [...nodes.values()].filter(node => !referenced.has(node.id)).sort((a, b) => a.id.localeCompare(b.id))
-    const remaining = new Map<string, number>(), children = new Map<string, string[]>(), depth = new Map<string, number>()
-    for (const node of nodes.values()) {
-      remaining.set(node.id, node.parents.length)
-      for (const parent of node.parents) {
-        if (!nodes.has(parent)) throw new Error('夸克收藏的历史版本尚未可见或已被移除，请稍后重试')
-        children.set(parent, [...children.get(parent) ?? [], node.id])
+    const root = await listAll(client, this.config.folderId)
+    const folders = root.filter(file => file.isDirectory && file.name === historyName).sort((a, b) => a.fid.localeCompare(b.fid))
+    const nodes = new Map<string, Stored>()
+    for (const folder of folders) for (const file of await listAll(client, folder.fid)) {
+      const match = !file.isDirectory && file.name.match(filePattern)
+      if (!match) {
+        if (!file.isDirectory && /^pg\d+-/.test(file.name)) throw new Error('夸克收藏版本格式不兼容，请保留文件并检查备份')
+        continue
       }
+      const previous = nodes.get(match[1])
+      if (previous) { previous.files.push(file); continue }
+      nodes.set(match[1], { snapshot: await load(client, file), files: [file] })
     }
-    const ready = [...nodes.values()].filter(node => !node.parents.length).map(node => node.id)
-    for (let index = 0; index < ready.length; index++) {
-      const id = ready[index]
-      depth.set(id, Math.max(0, ...nodes.get(id)!.parents.map(parent => (depth.get(parent) ?? 0) + 1)))
-      for (const child of children.get(id) ?? []) {
-        remaining.set(child, remaining.get(child)! - 1)
-        if (!remaining.get(child)) ready.push(child)
-      }
-    }
-    if (depth.size !== nodes.size) throw new Error('夸克收藏版本关系出现循环，未覆盖任何文件')
-    return { nodes, heads, depth }
-  }
-  private async load(client: QuarkClient, meta: Meta): Promise<Document> {
-    const text = await client.downloadFileText(meta.fid)
-    if (new TextEncoder().encode(text).byteLength > 10_000_000) throw new Error('夸克收藏文件过大，请先导出并整理')
-    let value: Snapshot
-    try { value = JSON.parse(text) } catch { throw new Error('夸克收藏文件已损坏，原文件未被覆盖') }
-    if (value?.format !== 'page-garden-snapshot' || value.version !== 1 || value.id !== meta.id || canonical(value.parents) !== canonical(meta.parents)) throw new Error('夸克收藏版本格式不兼容，原文件未被覆盖')
-    // Check immutable bytes before readDocument fills in newer optional fields.
-    if (await contentId(value.document, value.parents) !== value.id) throw new Error('夸克收藏内容校验失败，原文件未被覆盖')
-    return readDocument(value.document)
+    const values = [...nodes.values()]
+    if (values.some((node, index) => values.slice(index + 1).some(other => canonical(node.snapshot.clock) === canonical(other.snapshot.clock)))) throw new Error('夸克设备版本标识冲突，请导出备份并重新连接')
+    const heads = values.filter(node => !values.some(other => other !== node && dominates(other.snapshot.clock, node.snapshot.clock)))
+      .sort((a, b) => a.snapshot.id.localeCompare(b.snapshot.id))
+    if (heads.length > 6) throw new Error('并行版本较多，请先完成现有版本的合并')
+    if (revisions(this.knownRevision).some(known => !heads.some(head => dominates(head.snapshot.clock, known.clock)))) throw new Error('夸克的新版本尚未出现在目录列表中，请稍后重试；本地修改已保留')
+    return { root, folders, nodes, heads }
   }
   async read(): Promise<{ doc: Document | null; etag: string | null; conflicts: Conflict[] }> {
     const client = await accountClient(this.config)
-    const { nodes, heads, depth } = await this.metadata(client)
-    const known: string[] = this.knownRevision ? JSON.parse(this.knownRevision) : []
-    if (known.some(id => !nodes.has(id))) throw new Error('夸克的新版本尚未出现在目录列表中，请稍后重试；本地修改已保留')
-    if (!heads.length) return { doc: null, etag: null, conflicts: [] }
-    const cache = new Map<string, Promise<Document>>()
-    const load = (id: string) => {
-      if (!cache.has(id)) {
-        const meta = nodes.get(id)
-        if (!meta) throw new Error('夸克收藏的历史版本尚未可见或已被移除，请稍后重试')
-        cache.set(id, this.load(client, meta))
-      }
-      return cache.get(id)!
+    const { root, nodes, heads } = await this.metadata(client)
+    if (!heads.length) {
+      if (root.some(file => /^pg1-/.test(file.name))) throw new Error('检测到旧版测试文件，请清空旧测试数据后重新连接')
+      if (root.some(file => file.name === '收藏.json') || revisions(this.knownRevision).length) throw new Error('夸克同步历史已被移除，请检查备份；本地数据已保留')
+      return { doc: null, etag: null, conflicts: [] }
     }
-    const ancestors = (id: string): Set<string> => {
-      const result = new Set<string>(), pending = [id]
-      while (pending.length) {
-        const value = pending.pop()!
-        if (result.has(value)) continue
-        result.add(value)
-        pending.push(...nodes.get(value)!.parents)
-      }
-      return result
-    }
-    // Validate lineage even with one head; an incomplete listing is never empty data.
-    let common = ancestors(heads[0].id)
-    let doc = await load(heads[0].id)
+    // Prefer the most recent baseline common to all heads. For branches older
+    // than retained history, merging from empty retains differences as conflicts.
+    const candidates = [...nodes.values()].flatMap(({ snapshot }) => [
+      { clock: snapshot.clock, document: snapshot.document }, snapshot.base,
+    ]).filter(candidate => heads.every(head => dominates(head.snapshot.clock, candidate.clock)))
+      .sort((a, b) => weight(b.clock) - weight(a.clock) || canonical(a.clock).localeCompare(canonical(b.clock)))
+    const base = candidates[0]?.document ?? emptyDocument()
+    let doc = readDocument(heads[0].snapshot.document)
     const conflicts: Conflict[] = []
     for (const head of heads.slice(1)) {
-      const other = ancestors(head.id)
-      common = new Set([...common].filter(id => other.has(id)))
-      const baseId = [...common].sort((a, b) => depth.get(b)! - depth.get(a)! || a.localeCompare(b))[0]
-      const result = merge(baseId ? await load(baseId) : emptyDocument(), doc, await load(head.id))
+      const result = merge(readDocumentOrEmpty(base), doc, readDocument(head.snapshot.document))
       doc = result.doc
-      conflicts.push(...result.conflicts.map(conflict => ({ ...conflict, id: `${head.id}:${conflict.id}` })))
+      conflicts.push(...result.conflicts.map(conflict => ({ ...conflict, id: `${head.snapshot.id}:${conflict.id}` })))
     }
-    return { doc: readDocument(doc), etag: revision(heads.map(head => head.id)), conflicts }
+    this.base = readDocument(doc)
+    return { doc: this.base, etag: revision(heads), conflicts }
   }
   async write(doc: Document, previous: string | null): Promise<string> {
     readDocument(doc)
-    const parents: string[] = previous ? JSON.parse(previous) : []
-    if (!Array.isArray(parents) || parents.length > 6 || parents.some(id => !/^[a-f0-9]{32}$/.test(id))) throw new Error('并行版本较多，请先完成现有版本的合并')
-    const id = await contentId(doc, parents)
-    const value: Snapshot = { format: 'page-garden-snapshot', version: 1, id, parents, document: doc }
-    const bytes = new TextEncoder().encode(JSON.stringify(value))
+    const parents = revisions(previous), baseClock = combined(parents.map(parent => parent.clock))
+    // Devices consolidating the same branches and document produce one commit,
+    // rather than repeatedly creating competing merge commits on every retry.
+    const writer = parents.length > 1 ? await mergeWriter(parents, doc) : await writerId()
+    const clock = { ...baseClock, [writer]: (baseClock[writer] ?? 0) + 1 }
+    const value = { clock, base: { clock: baseClock, document: this.base }, document: doc }
+    const snapshot: Snapshot = { format: 'page-garden-snapshot', version: 2, id: await contentId(value), ...value }
+    const bytes = new TextEncoder().encode(JSON.stringify(snapshot))
     if (bytes.byteLength > 10_000_000) throw new Error('收藏数据超过单次上传限制，请先导出备份并整理')
     const client = await accountClient(this.config)
-    const { nodes } = await this.metadata(client)
-    let meta = nodes.get(id)
-    if (!meta) {
-      const uploaded = await client.uploadSmallFile({ parentFid: this.config.folderId, fileName: `pg1-${id}-${parents.join('.') || 'root'}.json`, bytes, mimeType: 'application/json' })
-      meta = { id, parents, fid: uploaded.fid }
+    const meta = await this.metadata(client)
+    if (!meta.nodes.has(snapshot.id)) {
+      const folder = meta.folders[0]?.fid ?? await client.createDirectory(this.config.folderId, historyName)
+      if (!folder) throw new Error('夸克同步历史目录尚未可见，请稍后重试')
+      const uploaded = await client.uploadSmallFile({ parentFid: folder, fileName: `pg2-${snapshot.id}.json`, bytes, mimeType: 'application/json' })
+      await load(client, { fid: uploaded.fid, name: `pg2-${snapshot.id}.json`, parentFid: folder, isDirectory: false, size: bytes.byteLength })
     }
-    // Verify by fid, not a possibly stale directory listing. Never delete the old version.
-    let lastError: unknown
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try { await this.load(client, meta); return revision([id]) } catch (error) {
-        lastError = error
-        if (attempt < 2) await new Promise(done => setTimeout(done, 400 * (attempt + 1)))
-      }
+    // A simultaneous commit is a separate branch; request another merge before
+    // changing the readable files or deleting any old versions.
+    const next = JSON.stringify([{ id: snapshot.id, clock }])
+    await this.settle(doc, next)
+    return next
+  }
+  async settle(doc: Document, expected: string) {
+    const client = await accountClient(this.config)
+    const meta = await this.metadata(client)
+    if (revision(meta.heads) !== expected) throw new RevisionChanged()
+    try { await publishFiles(client, this.config.folderId, doc) } catch (cause) {
+      if (cause instanceof QuarkApiError && (cause.status === 409 || cause.status === 404)) throw new RevisionChanged()
+      if (revision((await this.metadata(client)).heads) !== expected) throw new RevisionChanged()
+      throw cause
     }
-    throw lastError
+    if (revision((await this.metadata(client)).heads) !== expected) throw new RevisionChanged()
+    // Only prune versions observed before publishing. Unseen concurrent uploads
+    // are never eligible; failed cleanup is retried by the next synchronization.
+    const history = [...meta.nodes.values()].filter(node => !meta.heads.includes(node))
+      .sort((a, b) => weight(b.snapshot.clock) - weight(a.snapshot.clock) || a.snapshot.id.localeCompare(b.snapshot.id))
+    for (const old of history.slice(retainedHistory)) for (const file of old.files) await client.deleteFile(file.fid)
+    for (const node of [...meta.heads, ...history.slice(0, retainedHistory)]) for (const duplicate of node.files.slice(1)) await client.deleteFile(duplicate.fid)
   }
 }

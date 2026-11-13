@@ -1,4 +1,4 @@
-import { active, apply, createDocument, equal, parents, prune, readDocument, type Conflict } from './model'
+import { active, apply, createDocument, equal, parents, prune, readDocument, type Conflict, type Document } from './model'
 import { emptyDocument, merge, refreshConflicts, resolveConflict } from './merge'
 import type { ConnectRequest, Request, Result } from './protocol'
 import { RevisionChanged } from './webdav'
@@ -62,6 +62,7 @@ async function synchronizeSource(id: string) {
     broadcast()
     const client = remoteStore(initial.config, initial.etag)
     const remote: RemoteRead = await client.read()
+    let unchanged: Document | null = null
     const upload = await atomic(root => {
       const source = root.sources[id]
       if (!source || source.conflicts.length) return null
@@ -72,11 +73,23 @@ async function synchronizeSource(id: string) {
       source.base = remote.doc ?? emptyDocument(); source.etag = remote.etag
       if (source.conflicts.length) { source.status = 'conflict'; return null }
       readDocument(source.doc)
-      if (remote.doc && equal(source.doc, remote.doc) && !(isQuark(source.config) && remote.etag && JSON.parse(remote.etag).length > 1)) { source.status = 'synced'; source.lastSync = Date.now(); return null }
+      if (remote.doc && equal(source.doc, remote.doc) && !(isQuark(source.config) && remote.etag && JSON.parse(remote.etag).length > 1)) { unchanged = structuredClone(source.doc); return null }
       return structuredClone(source.doc)
     })
     broadcast()
-    if (!upload) return
+    if (!upload) {
+      if (unchanged) {
+        if ('settle' in client && remote.etag) await client.settle(unchanged, remote.etag)
+        await atomic(root => {
+          const source = root.sources[id]
+          if (source) {
+            retry = !equal(source.doc, unchanged)
+            source.status = retry ? 'pending' : 'synced'; source.lastSync = Date.now()
+          }
+        })
+      }
+      return
+    }
     const etag = await client.write(upload, remote.etag)
     await atomic(root => {
       const source = root.sources[id]

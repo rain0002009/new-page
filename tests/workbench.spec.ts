@@ -236,6 +236,7 @@ test('同一笔记后开只读，接管后旧页停止写入', async () => {
 })
 
 test('笔记正文夸克同步、冲突选择和完整备份往返', async () => {
+  test.setTimeout(90_000)
   const first = await openClient(undefined, true)
   await connectQuark(first.page)
   const one = await newNote(first.page, first.context, '同步笔记', '初始正文')
@@ -609,7 +610,7 @@ test('夸克扫码后签名上传并轮换 Cookie，重开和另一设备读取�
   expect(snapshots.length).toBeGreaterThan(0)
   expect(snapshots.some(file => file.body.includes('夸克里的 React'))).toBe(true)
   expect(snapshots.every(file => !file.body.includes('__puus') && !file.body.includes('qr_seed'))).toBe(true)
-  expect(quark.deleted).toBe(0)
+  expect(quark.published()).toHaveLength(1)
   await first.page.reload()
   await expect(first.page.getByRole('link', { name: '夸克里的 React', exact: true })).toBeVisible()
   const second = await openClient(undefined, true)
@@ -623,13 +624,14 @@ test('夸克上传失败不删除旧版本，离线新增重开保留并能重�
   await addLink(page, '已经保存的收藏')
   await sync(page)
   const previous = quark.snapshots().map(file => file.fid)
+  const deletedBefore = quark.deleted
   quark.failUpload = true
   await page.getByRole('button', { name: '我的空间', exact: true }).click()
   await addLink(page, '稍后上传的收藏')
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await expect(page.getByRole('status').first()).toContainText('同步未完成')
   for (const fid of previous) expect(quark.files.has(fid)).toBe(true)
-  expect(quark.deleted).toBe(0)
+  expect(quark.deleted).toBe(deletedBefore)
   await page.reload()
   await expect(page.getByRole('link', { name: '稍后上传的收藏', exact: true })).toBeVisible()
   quark.failUpload = false
@@ -677,7 +679,7 @@ test('夸克两设备同时保存形成分支，不同收藏自动合并且旧�
   await sync(second.page)
   await second.page.getByRole('button', { name: '我的空间', exact: true }).click()
   await expect(second.page.getByRole('link', { name: '设备一收藏', exact: true })).toBeVisible()
-  expect(quark.deleted).toBe(0)
+  expect(quark.published()).toHaveLength(1)
 })
 
 test('夸克账号切换隔离本地与云端，切回读取自己的收藏', async () => {
@@ -729,7 +731,7 @@ test('夸克并行编辑同一收藏保留两个云端版本，选择后停止�
   await sync(first.page)
   expect(quark.snapshots().some(file => file.body.includes('设备一的标题'))).toBe(true)
   expect(quark.snapshots().some(file => file.body.includes('设备二的标题'))).toBe(true)
-  expect(quark.deleted).toBe(0)
+  expect(quark.published()).toHaveLength(1)
 })
 
 test('夸克远端损坏时不上传空数据，修正后恢复保存', async () => {
@@ -2305,15 +2307,11 @@ test('流体初始化不可用时仍能收藏、编辑和处理 Todo', async () 
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
-for (const provider of ['夸克', 'WebDAV'] as const) test(`${provider} 旧版待办可读取，排序与备份恢复保留，拖入 Todo 不产生操作`, async () => {
+test('WebDAV 旧版待办可读取，排序与备份恢复保留，拖入 Todo 不产生操作', async () => {
   const legacy = JSON.parse(await readFile(resolve('tests/fixtures/legacy-snapshot.json'), 'utf8'))
-  if (provider === '夸克') {
-    quark.files.set('folder-rain', { fid: 'folder-rain', parent: '0', name: '拾页收藏', directory: true, body: '', account: 'rain' })
-    quark.files.set('legacy', { fid: 'legacy', parent: 'folder-rain', name: `pg1-${legacy.id}-root.json`, directory: false, body: JSON.stringify(legacy), account: 'rain' })
-  } else files.set('/dav/new-page/data-v1.json', { body: JSON.stringify(legacy.document), revision: 1 })
-  const { page, context } = await openClient(undefined, provider === '夸克')
-  if (provider === '夸克') await connectQuark(page, '历史空间')
-  else await connect(page, '/dav/', '历史空间')
+  files.set('/dav/new-page/data-v1.json', { body: JSON.stringify(legacy.document), revision: 1 })
+  const { page, context } = await openClient()
+  await connect(page, '/dav/', '历史空间')
   await page.getByRole('button', { name: /^Todo/ }).click()
   const list = page.getByRole('list', { name: '待办清单' })
   await expect(list.getByRole('link')).toHaveText(['历史待办 A', '历史待办 B', '历史待办 C'])
@@ -3046,4 +3044,94 @@ test('键盘在置顶排序边界按上下键不会误入收藏区或关闭原�
     await expect(page.getByRole('region', { name: /^收藏块/ }).getByRole('link')).toHaveCount(0)
   }
   expect(regular.isClosed()).toBe(false)
+})
+
+test('夸克文件统一位于拾页收藏，Markdown 独立更新重命名删除且同名不冲突', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  const first = await newNote(page, context, '同名手记', '第一篇完整正文')
+  await newNote(page, context, '同名手记', '第二篇完整正文')
+  await sync(page)
+  expect(quark.notes()).toHaveLength(2)
+  expect(new Set(quark.notes().map(file => file.name)).size).toBe(2)
+  expect(quark.notes().map(file => file.body.trim()).sort()).toEqual(['第一篇完整正文', '第二篇完整正文'].sort())
+  expect([...quark.files.values()].filter(file => file.parent === '0').map(file => file.name)).toEqual(['拾页收藏'])
+  expect(quark.published()).toHaveLength(1)
+  expect([...quark.files.values()].filter(file => file.parent === 'folder-rain').map(file => file.name).sort()).toEqual(['同步历史', '收藏.json', '笔记'].sort())
+  const index = JSON.parse(quark.published()[0].body)
+  expect(index.format).toBe('new-page')
+  expect(Object.values(index.noteFiles).sort()).toEqual(quark.notes().map(file => `笔记/${file.name}`).sort())
+  await first.getByRole('textbox', { name: '笔记标题', exact: true }).fill('更名后的笔记')
+  await first.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('更新后的正文')
+  await expect(first.getByRole('status')).toContainText('已保存到本机')
+  await sync(page)
+  expect(quark.notes()).toHaveLength(2)
+  expect(quark.notes().find(file => file.name.startsWith('更名后的笔记--'))?.body.trim()).toBe('更新后的正文')
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await page.getByRole('article', { name: '笔记 更名后的笔记', exact: true }).getByRole('button', { name: '删除笔记', exact: true }).click({ force: true })
+  await sync(page)
+  expect(quark.notes()).toHaveLength(1)
+  expect(quark.notes()[0].body.trim()).toBe('第二篇完整正文')
+})
+
+test('夸克发布重命名失败保留旧文件，重试不新增历史且能修复发布', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  const note = await newNote(page, context, '失败恢复', '旧正文')
+  await sync(page)
+  const old = quark.notes()[0]
+  quark.failRename = true
+  await note.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('新正文')
+  await expect(note.getByRole('status')).toContainText('已保存到本机')
+  await page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(page.getByRole('status').first()).toContainText('同步未完成')
+  expect(quark.files.get(old.fid)?.body.trim()).toBe('旧正文')
+  const count = quark.snapshots().length
+  quark.failRename = false
+  await sync(page)
+  expect(quark.snapshots()).toHaveLength(count)
+  expect(quark.notes()).toHaveLength(1)
+  expect(quark.notes()[0].body.trim()).toBe('新正文')
+  expect(quark.published()).toHaveLength(1)
+  expect([...quark.files.values()].some(file => /^\.拾页/.test(file.name))).toBe(false)
+  quark.failDelete = true
+  await note.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('清理失败也保留的正文')
+  await expect(note.getByRole('status')).toContainText('已保存到本机')
+  await page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(page.getByRole('status').first()).toContainText('同步未完成')
+  const afterFailedCleanup = quark.snapshots().length
+  quark.failDelete = false
+  await sync(page)
+  expect(quark.snapshots()).toHaveLength(afterFailedCleanup)
+  expect(quark.notes()).toHaveLength(1)
+  expect(quark.notes()[0].body.trim()).toBe('清理失败也保留的正文')
+  expect([...quark.files.values()].some(file => /^\.拾页/.test(file.name))).toBe(false)
+})
+
+test('夸克清理历史后离线设备仍可合并，重复同步不产生新版本', async () => {
+  test.setTimeout(120_000)
+  const first = await openClient(undefined, true)
+  await connectQuark(first.page)
+  await sync(first.page)
+  const second = await openClient(undefined, true)
+  await connectQuark(second.page)
+  // Keep this client offline while the first advances past retained history.
+  await second.context.setOffline(true)
+  for (let index = 0; index < 13; index++) {
+    await first.page.getByRole('textbox', { name: '显示昵称', exact: true }).fill(`更新${index}`)
+    await sync(first.page)
+  }
+  expect(quark.snapshots()).toHaveLength(11)
+  const ids = quark.snapshots().map(file => file.fid).sort()
+  await sync(first.page)
+  expect(quark.snapshots().map(file => file.fid).sort()).toEqual(ids)
+  await second.page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await addLink(second.page, '长期离线仍保留的链接')
+  await second.context.setOffline(false)
+  await sync(second.page)
+  await sync(first.page)
+  await first.page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(first.page.getByRole('link', { name: '长期离线仍保留的链接', exact: true })).toBeVisible()
+  expect(quark.snapshots()).toHaveLength(11)
+  expect(quark.published()).toHaveLength(1)
 })
