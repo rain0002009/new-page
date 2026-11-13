@@ -79,11 +79,13 @@ const statusDot = tv({
 
 export const stateKey = ['workspace']
 export default function NewTabApp() {
-  return <><FluidBackground /><Workbench /></>
-}
-function Workbench() {
-  const client = useQueryClient()
   const { data, error } = useQuery({ queryKey: stateKey, queryFn: async () => (await rpc({ type: 'snapshot' })).snapshot!, refetchInterval: 5000 })
+  const profile = data?.document?.entities.profile
+  const fluidAnimation = profile?.kind !== 'profile' || profile.fluidAnimation !== false
+  return <>{fluidAnimation && <FluidBackground />}<Workbench data={data} error={error} /></>
+}
+function Workbench({ data, error }: { data: Snapshot | undefined; error: Error | null }) {
+  const client = useQueryClient()
   const { tabs, error: tabError, refresh: refreshTabs } = useWindowTabs()
   const [inboxOpen, setInboxOpen] = useState(false)
   const [message, setMessage] = useState('')

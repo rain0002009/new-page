@@ -36,6 +36,10 @@ _Avoid_: 笔记、链接备注
 通过在线地址读取、在扩展中仅供阅读的 Markdown 文档。
 _Avoid_: 笔记、本地 Markdown 文件
 
+**图床图片（Hosted Image）**：
+从可编辑文档上传到外部图片托管服务、以公开图片地址被 Markdown 正文引用的图片。图片独立于引用它的文档保存。
+_Avoid_: 笔记附件、本地图片
+
 **文档大纲（Document Outline）**：
 由 Markdown 正文各级标题构成、用于跳转正文位置的层级列表。
 _Avoid_: 文件目录

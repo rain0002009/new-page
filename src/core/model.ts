@@ -7,7 +7,7 @@ const base = {
   deletedBy: z.string().nullable(), purged: z.boolean(),
 }
 const entitySchema = z.discriminatedUnion('kind', [
-  z.object({ ...base, kind: z.literal('profile') }),
+  z.object({ ...base, kind: z.literal('profile'), seeApiKey: z.string().optional(), fluidAnimation: z.boolean().optional() }),
   z.object({ ...base, kind: z.literal('space') }),
   z.object({ ...base, kind: z.literal('collection'), collapsed: z.boolean() }),
   z.object({ ...base, kind: z.literal('note'), body: z.string() }),
@@ -37,7 +37,7 @@ export type Action =
   | { type: 'add-links'; parentId: string; links: LinkInput[]; beforeId?: string }
   | { type: 'collect-tabs'; parentId: string; title: string; links: LinkInput[] }
   | { type: 'create-collection-with-link'; parentId: string; beforeId?: string; source: { kind: 'link'; id: string } | { kind: 'new'; link: LinkInput } }
-  | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; body?: string; collapsed?: boolean } }
+  | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; body?: string; collapsed?: boolean; seeApiKey?: string; fluidAnimation?: boolean } }
   | { type: 'todo'; id: string; value: boolean }
   | { type: 'sort-todo'; id: string; beforeId?: string }
   | { type: 'move'; id: string; parentId: string | null; beforeId?: string }
@@ -202,6 +202,10 @@ export function apply(doc: Document, action: Action): Document {
       }
       if (entity.kind === 'collection' && action.patch.collapsed !== undefined) entity.collapsed = action.patch.collapsed
       if (entity.kind === 'note' && action.patch.body !== undefined) entity.body = action.patch.body
+      if (entity.kind === 'profile') {
+        if (action.patch.seeApiKey !== undefined) entity.seeApiKey = action.patch.seeApiKey.trim()
+        if (action.patch.fluidAnimation !== undefined) entity.fluidAnimation = action.patch.fluidAnimation
+      }
       entity.updatedAt = now
       break
     }

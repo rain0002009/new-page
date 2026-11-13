@@ -4,6 +4,8 @@ import { tv } from 'tailwind-variants/lite'
 import { type Entity, type Conflict, type Document } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
+import SeeSettings from './SeeSettings'
+import Switch from './Switch'
 import type { Act } from './Editor'
 import { Button, Modal, ModalPresence } from './ui'
 import { feedbackStyles, formStyles } from './form-styles'
@@ -57,9 +59,17 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
     else if (result.snapshot) { receive(result.snapshot); setPending(null) }
   }
   const deleted = Object.values(data.document.entities).filter(e => !e.purged && e.deletedAt !== null && e.deletedBy === e.id).sort((a, b) => b.deletedAt! - a.deletedAt!)
+  const profile = data.document.entities.profile
 
   return <>
-    <section className={styles.card()}><h2 className={styles.title()}>个人偏好</h2><label className={styles.description()}><input type="checkbox" aria-label="自动接管 Markdown 地址" checked={takeover} disabled={busy} onChange={event => { const enabled = event.target.checked; void execute(async () => { await rpc({ type: 'markdown-takeover', enabled }); setTakeover(enabled) }) }} />自动接管 Markdown 地址</label><label className={fields.label({ className: 'mt-[22px]' })}>显示昵称<input className={fields.control()} aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label></section>
+    <section className={styles.card()}><h2 className={styles.title()}>s.ee 服务配置</h2><p className={styles.description()}>配置 s.ee 服务的访问凭据，供图片上传等功能使用。API Key 随收藏库同步，并包含在导出备份中。</p><SeeSettings key={data.sourceId} value={profile.kind === 'profile' ? profile.seeApiKey ?? '' : ''} onSave={value => act({ type: 'edit', id: 'profile', patch: { seeApiKey: value } })} /></section>
+    <section className={styles.card()}><h2 className={styles.title()}>个人偏好</h2>
+      <div className="flex flex-col gap-[16px] mt-[16px]">
+        <Switch label="自动接管 Markdown 地址" checked={takeover} disabled={busy} onChange={enabled => { void execute(async () => { await rpc({ type: 'markdown-takeover', enabled }); setTakeover(enabled) }) }} />
+        <Switch label="流体背景动画" checked={profile.kind !== 'profile' || profile.fluidAnimation !== false} disabled={busy} onChange={enabled => { void execute(async () => { await act({ type: 'edit', id: 'profile', patch: { fluidAnimation: enabled } }) }) }} />
+      </div>
+      <label className={fields.label({ className: 'mt-[22px]' })}>显示昵称<input className={fields.control()} aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label>
+    </section>
     {data.conflicts.length > 0 && <section className={styles.card()}><h2 className={styles.title()}><AlertTriangle size={16} />选择要保留的版本</h2><p className={styles.description()}>两个版本均已保留在本机。处理完后继续同步，你也可以继续整理其他收藏。</p>{data.conflicts.map(conflict => <ConflictChoice key={conflict.id} conflict={conflict} busy={busy} choose={side => void execute(async () => { const result = await rpc({ type: 'resolve', sourceId: data.sourceId!, conflictId: conflict.id, side }); if (result.snapshot) receive(result.snapshot) })} />)}</section>}
     <section className={styles.card()}><h2 className={styles.title()}>连接与同步</h2><p className={styles.description()} role="status">{syncStatusLabels[data.status]}{data.error ? ` · ${data.error}` : ''}</p><div className={styles.sync()}><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><Button disabled={busy} onClick={() => void execute(async () => { const result = await rpc({ type: 'sync', sourceId: data.sourceId! }); if (result.snapshot) receive(result.snapshot) })}><Cloud size={16} />立即同步</Button></div><ConnectionForm key={data.sourceId} initial={data.connection} connected done={receive} onError={onError} /></section>
     <section className={styles.card()}><h2 className={styles.title()}>备份与迁移</h2><p className={styles.description()}>备份包含收藏、完整笔记正文、顺序、待办与回收站；不包含网盘登录信息或 WebDAV 密码。</p>{data.connection?.kind === 'quark' && <p className={styles.description()}>夸克文件统一保存在「拾页收藏」：收藏.json、笔记目录中的 Markdown，以及同步历史目录。已合并历史保留最近 10 份，未合并版本继续保留。Markdown 由扩展自动更新，网盘中的手工修改不会回写。历史和导出备份仍可能含已删除内容。</p>}<div className={styles.backup()}><Button disabled={busy} onClick={() => void execute(async () => {
@@ -90,10 +100,10 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
   </>
 }
 function ConflictChoice({ conflict, busy, choose }: { conflict: Conflict; busy: boolean; choose: (side: 'local' | 'remote') => void }) {
-  const labels: Record<string, string> = { title: '标题', body: '正文', url: '网址', note: '备注', todo: '待办', todoPosition: '待办顺序', position: '顺序', parentId: '位置', collapsed: '折叠状态' }
+  const labels: Record<string, string> = { title: '标题', body: '正文', url: '网址', note: '备注', todo: '待办', todoPosition: '待办顺序', position: '顺序', parentId: '位置', collapsed: '折叠状态', seeApiKey: 's.ee API Key', fluidAnimation: '流体背景动画' }
   return <article className={conflictStyles.item()} aria-label={`冲突 ${conflict.local?.title || conflict.remote?.title || '已删除内容'}`}><h3 className={conflictStyles.title()}>{conflict.local?.title || conflict.remote?.title || '已删除内容'}</h3><p className={feedbackStyles.muted()}>冲突内容：{conflict.fields.map(field => labels[field] || field).join('、')}</p><div className={conflictStyles.versions()}>{(['local', 'remote'] as const).map(side => <div key={side} className={conflictStyles.version()}><span className={conflictStyles.eyebrow()}>{side === 'local' ? '本地版本' : '远端版本'}</span><Version entity={conflict[side]} /><Button disabled={busy} tone="primary" onClick={() => choose(side)}>{side === 'local' ? '保留本地版本' : '保留远端版本'}</Button></div>)}</div></article>
 }
 function Version({ entity }: { entity: Entity | null }) {
   if (!entity || entity.deletedAt !== null || entity.purged) return <p className={conflictStyles.deleted()}>已删除</p>
-  return <div className={conflictStyles.content()}><strong>{entity.title}</strong>{entity.kind === 'note' && <p className={conflictStyles.note()}>{entity.body}</p>}{entity.kind === 'link' && <><span className={conflictStyles.metadata()}>{entity.url}</span>{entity.note && <p className={conflictStyles.note()}>{entity.note}</p>}<small className={conflictStyles.metadata()}>{entity.todo ? '已加入 Todo' : '未加入 Todo'}</small>{entity.todo && <small className={conflictStyles.metadata()}>待办顺序：{entity.todoPosition ?? entity.position}</small>}</>}<small className={conflictStyles.metadata()}>位置顺序：{entity.position}</small></div>
+  return <div className={conflictStyles.content()}><strong>{entity.title}</strong>{entity.kind === 'profile' && <><span className={conflictStyles.metadata()}>s.ee API Key：{entity.seeApiKey ? `已配置（末尾 ${entity.seeApiKey.slice(-4)}）` : '未配置'}</span><span className={conflictStyles.metadata()}>流体背景动画：{entity.fluidAnimation !== false ? '开启' : '关闭'}</span></>}{entity.kind === 'note' && <p className={conflictStyles.note()}>{entity.body}</p>}{entity.kind === 'link' && <><span className={conflictStyles.metadata()}>{entity.url}</span>{entity.note && <p className={conflictStyles.note()}>{entity.note}</p>}<small className={conflictStyles.metadata()}>{entity.todo ? '已加入 Todo' : '未加入 Todo'}</small>{entity.todo && <small className={conflictStyles.metadata()}>待办顺序：{entity.todoPosition ?? entity.position}</small>}</>}<small className={conflictStyles.metadata()}>位置顺序：{entity.position}</small></div>
 }
