@@ -1,4 +1,4 @@
-﻿import { Fragment, useState } from 'react'
+import { Fragment, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
 import { Bookmark, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Trash2 } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
@@ -53,7 +53,7 @@ const emptyStyles = empty()
 
 export function Card({ link, act, edit, location, locate }: { link: Link; act: Act; edit: (state: EditorState) => void; location?: string; locate?: () => void }) {
   const styles = linkCard({ search: !!locate })
-  const drag = useDragItem(locate ? `search:${link.id}` : link.id, { kind: 'link', entityId: link.id, title: link.title }, styles.base(), !!locate)
+  const drag = useDragItem(locate ? `search:${link.id}` : link.id, { kind: 'saved-item', itemKind: 'link', entityId: link.id, title: link.title }, styles.base(), !!locate)
   return <article {...drag} aria-label={`链接 ${link.title}`}>
     <div className={styles.top()}><SiteIcon url={link.icon} title={link.title} /><div className={styles.actions()}>
       <Button tone="custom" size="custom" className={cardAction()} aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
@@ -70,7 +70,7 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
 
 function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?: boolean }) {
   const styles = linkCard({ note: true, search })
-  const drag = useDragItem(search ? `search:${note.id}` : note.id, { kind: 'link', entityId: note.id, title: note.title, note: true }, styles.base(), search)
+  const drag = useDragItem(search ? `search:${note.id}` : note.id, { kind: 'saved-item', itemKind: 'note', entityId: note.id, title: note.title }, styles.base(), search)
   const [error, setError] = useState('')
   async function open() {
     try { const data = await readLocalSnapshot(); await chrome.tabs.create({ url: documentUrl({ note: note.id, source: data.sourceId! }) }) }
@@ -84,7 +84,7 @@ function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?
 }
 
 export function CollectionSection({ collection, doc, act, edit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void }) {
-  const links = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const savedItems = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
   async function createNote() {
@@ -102,14 +102,14 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
   return <section {...drag} aria-label={`收藏块 ${collection.title}`} id={`collection-${collection.id}`}>
     <div className={collectionStyles.header()}><div className={collectionStyles.heading()}>
       <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collection.collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={() => void act({ type: 'edit', id: collection.id, patch: { collapsed: !collection.collapsed } })}>{collection.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
-      <h2 className={collectionStyles.title()}>{collection.title}<span className={collectionStyles.count()} aria-hidden="true">{links.length}</span></h2>
+      <h2 className={collectionStyles.title()}>{collection.title}<span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span></h2>
     </div><div className={collectionStyles.tools()}>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`重命名 ${collection.title}`} onClick={() => edit({ kind: 'rename', entity: collection })}><Edit3 size={13} /></Button>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>
-    <MotionRegion>{(!collection.collapsed || placeholder) && (links.length || placeholder ? <SortableContext items={links.map(link => link.id)} strategy={rectSortingStrategy}>
-      <div className={cardGrid}>{links.map(link => <Fragment key={link.id}>{placeholder?.beforeId === link.id && marker}{link.kind === 'note' ? <NoteCard note={link} act={act} /> : <Card link={link} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
+    <MotionRegion>{(!collection.collapsed || placeholder) && (savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
+      <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} act={act} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
     </SortableContext> : <div className="min-h-[124px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[15px] bg-[#fafcf34d]">
       <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
       <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
@@ -119,11 +119,11 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
 
 export function SearchView({ doc, act, edit, locate }: { doc: Document; act: Act; edit: (state: EditorState) => void; locate: (link: Link) => void }) {
   const [term, setTerm] = useState('')
-  const links = active(doc).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
-  const result = term.trim() ? links.filter(link => `${link.title}\n${link.kind === 'note' ? link.body : link.url + '\n' + link.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
-  return <><div className={searchStyles.field()}><Search size={19} /><input className={searchStyles.input()} aria-label="搜索全部收藏" type="search" placeholder="搜索标题、网址或备注…" value={term} onChange={e => setTerm(e.target.value)} autoFocus data-autofocus /><kbd className={searchStyles.shortcut()}>全部空间</kbd></div>
-    <p className={searchStyles.count()}>{term ? `找到 ${result.length} 个收藏` : `共 ${links.length} 个收藏`}</p>
-    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(link => link.kind === 'note' ? <NoteCard key={link.id} note={link} act={act} search /> : <Card key={link.id} link={link} act={act} edit={edit} location={locationName(doc, link)} locate={() => locate(link)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
+  const savedItems = active(doc).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const result = term.trim() ? savedItems.filter(item => `${item.title}\n${item.kind === 'note' ? item.body : item.url + '\n' + item.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
+  return <><div className={searchStyles.field()}><Search size={19} /><input className={searchStyles.input()} aria-label="搜索全部收藏" type="search" placeholder="搜索标题、正文、网址或备注…" value={term} onChange={e => setTerm(e.target.value)} autoFocus data-autofocus /><kbd className={searchStyles.shortcut()}>全部空间</kbd></div>
+    <p className={searchStyles.count()}>{term ? `找到 ${result.length} 个收藏` : `共 ${savedItems.length} 个收藏`}</p>
+    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(item => item.kind === 'note' ? <NoteCard key={item.id} note={item} act={act} search /> : <Card key={item.id} link={item} act={act} edit={edit} location={locationName(doc, item)} locate={() => locate(item)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
   </>
 }
 export function locationName(doc: Document, entity: Entity) {

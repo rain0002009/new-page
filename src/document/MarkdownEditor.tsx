@@ -3,8 +3,6 @@ import { Crepe } from '@milkdown/crepe'
 import { editorViewCtx, serializerCtx } from '@milkdown/kit/core'
 import { replaceAll, $prose } from '@milkdown/kit/utils'
 import { Plugin } from '@milkdown/kit/prose/state'
-import '@milkdown/crepe/theme/common/style.css'
-import '@milkdown/crepe/theme/frame.css'
 
 export default function MarkdownEditor({ value, readonly, onChange, onError, resource }: { value: string; readonly: boolean; onChange: (value: string) => void; onError: (message: string) => void; resource?: (url: string, image: boolean) => Promise<string> }) {
   const host = useRef<HTMLDivElement>(null)
@@ -40,6 +38,10 @@ export default function MarkdownEditor({ value, readonly, onChange, onError, res
       const view = editor.editor.ctx.get(editorViewCtx)
       view.dom.setAttribute('role', 'textbox'); view.dom.setAttribute('aria-label', 'Markdown 正文'); view.dom.setAttribute('aria-multiline', 'true')
       editor.setReadonly(latest.current.readonly)
+      if (editor.getMarkdown() !== latest.current.value) {
+        replacing.current = true
+        try { editor.editor.action(replaceAll(latest.current.value)) } finally { replacing.current = false }
+      }
     }).catch(error => latest.current.onError(`编辑器加载失败：${error instanceof Error ? error.message : String(error)}`))
     return () => { cancelled = true; instance.current = undefined; void editor.destroy().catch(() => {}) }
   }, [])

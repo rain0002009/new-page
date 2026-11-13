@@ -1,3 +1,7 @@
+/* Import third-party themes through CSS: Crepe marks JS imports side-effect-free. */
+@import '@milkdown/crepe/theme/common/style.css';
+@import '@milkdown/crepe/theme/frame.css';
+
 /* Milkdown owns this DOM; adapt its third-party theme to the application surface. */
 .milkdown {
   --crepe-color-background: transparent;

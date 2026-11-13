@@ -47,6 +47,8 @@ export function quarkFetch(input: string | URL, init: RequestInit = {}, progress
     for (let hop = 0; hop < 5; hop++) {
       if (!allowedUrl(url)) throw new Error('夸克接口返回了不受信任的地址，已停止传送登录信息')
       let location = '', status = 0
+      let headersSeen = false
+      let receivedHeaders = () => {}
       const received: string[] = []
       const listener = (details: chrome.webRequest.OnHeadersReceivedDetails): undefined => {
         if (details.initiator !== chrome.runtime.getURL('').replace(/\/$/, '') || details.url !== url.href) return
@@ -55,6 +57,7 @@ export function quarkFetch(input: string | URL, init: RequestInit = {}, progress
           if (header.name.toLowerCase() === 'set-cookie' && header.value) received.push(header.value)
           if (header.name.toLowerCase() === 'location' && header.value) location = header.value
         }
+        headersSeen = true; receivedHeaders()
         return undefined
       }
       chrome.webRequest.onHeadersReceived.addListener(listener, { urls: [`${url.origin}/*`] }, ['responseHeaders', 'extraHeaders'])
@@ -72,6 +75,14 @@ export function quarkFetch(input: string | URL, init: RequestInit = {}, progress
           progress?.('fetching')
           response = await fetch(url, { ...init, method, body, headers, credentials: 'omit', cache: 'no-store', redirect: 'manual', signal })
         } catch { throw new Error('暂时无法连接夸克网盘，本地修改已保留，请检查网络后重试') }
+        // Chrome may deliver the webRequest event after fetch resolves. Keep
+        // the listener until it supplies rotated cookies and redirect headers.
+        if (!headersSeen) await new Promise<void>((resolve, reject) => {
+          const aborted = () => reject(new Error('读取夸克响应头超时，请稍后重试；本地修改已保留'))
+          receivedHeaders = () => { signal.removeEventListener('abort', aborted); resolve() }
+          signal.addEventListener('abort', aborted, { once: true })
+          if (signal.aborted) aborted()
+        })
         updates.push(...received)
         if (location && [301, 302, 303, 307, 308].includes(status)) {
           if (init.redirect === 'error') throw new Error('夸克接口发生了意外跳转，请重新登录后重试')

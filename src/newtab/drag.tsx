@@ -8,7 +8,7 @@ import DragPreview, { animateDrop, snapshotElement } from './DragPreview'
 import { canSortTabs, closeCollectedTab, tabLink, type OpenTab } from './open-tabs'
 import type { QuickCollectionTarget } from './QuickCollectionGap'
 
-type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string; note?: boolean } | { kind: 'tab'; tab: OpenTab; title: string }
+type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string }
 type DragTarget = DragItem | { kind: 'content' } | QuickCollectionTarget
 type DropDestination = { kind: 'existing' } | { kind: 'new-link'; collectionId?: string }
 
@@ -31,12 +31,12 @@ export function useCollectionPlaceholder(doc: Document, collectionId: string) {
   const { active, over } = useDndContext()
   const source = active?.data.current as DragItem | undefined
   const target = over?.data.current as DragItem | undefined
-  if (!source || !target || (source.kind !== 'tab' && source.kind !== 'link') || (target.kind !== 'link' && target.kind !== 'collection')) return null
+  if (!source || !target || (source.kind !== 'tab' && source.kind !== 'saved-item') || (target.kind !== 'saved-item' && target.kind !== 'collection')) return null
   const parentId = target.kind === 'collection' ? target.entityId : doc.entities[target.entityId]?.parentId
   if (parentId !== collectionId) return null
-  if (source.kind === 'link' && doc.entities[source.entityId]?.parentId === collectionId) return null
-  if (source.kind === 'link' && doc.entities[doc.entities[source.entityId]?.parentId ?? '']?.parentId !== doc.entities[collectionId]?.parentId) return null
-  return { beforeId: target.kind === 'link' ? target.entityId : undefined, height: source.kind === 'link' ? active!.rect.current.initial?.height : undefined, target }
+  if (source.kind === 'saved-item' && doc.entities[source.entityId]?.parentId === collectionId) return null
+  if (source.kind === 'saved-item' && doc.entities[doc.entities[source.entityId]?.parentId ?? '']?.parentId !== doc.entities[collectionId]?.parentId) return null
+  return { beforeId: target.kind === 'saved-item' ? target.entityId : undefined, height: source.kind === 'saved-item' ? active!.rect.current.initial?.height : undefined, target }
 }
 
 export function CollectionPlaceholder({ collectionId, target, height }: { collectionId: string; target: DragItem; height?: number }) {
@@ -51,7 +51,7 @@ const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
   if (!collisionRect) return
   const sourceKind = active?.data.current?.kind
   const sourceTab = sourceKind === 'tab' ? active?.data.current?.tab as OpenTab : undefined
-  const linkSource = sourceKind === 'link' || sourceKind === 'tab'
+  const savedItemSource = sourceKind === 'saved-item' || sourceKind === 'tab'
   const center = { x: collisionRect.left + collisionRect.width / 2, y: collisionRect.top + collisionRect.height / 2 }
   const inbox = sourceTab ? active?.data.current?.node.current?.closest('.tab-inbox')?.getBoundingClientRect() as DOMRect | undefined : undefined
   const inboxVertical = inbox && center.x >= inbox.left && center.x <= inbox.right && ['ArrowUp', 'ArrowDown'].includes(event.code)
@@ -61,8 +61,8 @@ const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
     const kind = container.data.current?.kind
     if (inboxVertical && kind !== 'tab') continue
     const tabTarget = sourceTab && kind === 'tab' && canSortTabs(sourceTab, container.data.current?.tab)
-    if (container.id === active?.id || !(linkSource ? tabTarget || ['link', 'collection', 'new-collection'].includes(kind) : kind === sourceKind)) continue
-    if (linkSource && kind === 'collection' && container.node.current?.querySelector('.link-card')) continue
+    if (container.id === active?.id || !(savedItemSource ? tabTarget || ['saved-item', 'collection', 'new-collection'].includes(kind) : kind === sourceKind)) continue
+    if (savedItemSource && kind === 'collection' && container.node.current?.querySelector('.link-card')) continue
     if (kind === 'new-collection' && ['ArrowLeft', 'ArrowRight'].includes(event.code)) continue
     const rect = droppableRects.get(container.id)
     if (!rect) continue
@@ -86,10 +86,10 @@ const collision: CollisionDetection = args => {
     const target = item?.kind
     if (source?.kind === 'tab' && item?.kind === 'tab') return canSortTabs(source.tab, item.tab)
     if (kind === 'todo' || kind === 'space' || kind === 'collection') return target === kind
-    return target === 'link' || target === 'collection' || target === 'content' || target === 'new-collection' || (kind === 'link' && target === 'space')
+    return target === 'saved-item' || target === 'collection' || target === 'content' || target === 'new-collection' || (kind === 'saved-item' && target === 'space')
   })
   const scoped = { ...args, droppableContainers }
-  const pointerCoordinates = args.pointerCoordinates ?? ((kind === 'link' || kind === 'tab') ? { x: args.collisionRect.left + args.collisionRect.width / 2, y: args.collisionRect.top + args.collisionRect.height / 2 } : null)
+  const pointerCoordinates = args.pointerCoordinates ?? ((kind === 'saved-item' || kind === 'tab') ? { x: args.collisionRect.left + args.collisionRect.width / 2, y: args.collisionRect.top + args.collisionRect.height / 2 } : null)
   return pointerCoordinates ? pointerWithin({ ...scoped, pointerCoordinates }).sort((a, b) => {
     const aKind = droppableContainers.find(c => c.id === a.id)?.data.current?.kind
     const bKind = droppableContainers.find(c => c.id === b.id)?.data.current?.kind
@@ -133,7 +133,7 @@ export function DragBoard({ doc, act, notify, moveTab, children: content }: { do
       return
     }
     if (target.kind === 'new-collection') {
-      if (!target.ready || (source.kind !== 'link' && source.kind !== 'tab') || (source.kind === 'link' && source.note)) { resolve(original); return }
+      if (!target.ready || (source.kind !== 'saved-item' && source.kind !== 'tab') || (source.kind === 'saved-item' && source.itemKind === 'note')) { resolve(original); return }
       const success = await act({ type: 'create-collection-with-link', parentId: target.spaceId, beforeId: target.beforeId, source: source.kind === 'tab' ? { kind: 'new', link: tabLink(source.tab) } : { kind: 'link', id: source.entityId } })
       await settle(success, source.kind === 'tab' ? { kind: 'new-link' } : { kind: 'existing' })
       if (success && source.kind === 'tab') await closeCollectedTab(source.tab, notify)
@@ -147,9 +147,9 @@ export function DragBoard({ doc, act, notify, moveTab, children: content }: { do
     const entity = doc.entities[target.entityId]
     if (!entity) { resolve(original); return }
     if (source.kind === 'tab') {
-      const parentId = target.kind === 'collection' ? entity.id : target.kind === 'link' ? entity.parentId : null
+      const parentId = target.kind === 'collection' ? entity.id : target.kind === 'saved-item' ? entity.parentId : null
       if (parentId) {
-        const success = await act({ type: 'add-links', parentId, links: [tabLink(source.tab)], beforeId: target.kind === 'link' ? target.entityId : undefined })
+        const success = await act({ type: 'add-links', parentId, links: [tabLink(source.tab)], beforeId: target.kind === 'saved-item' ? target.entityId : undefined })
         await settle(success, { kind: 'new-link', collectionId: parentId })
         if (success) await closeCollectedTab(source.tab, notify)
       }
@@ -159,8 +159,8 @@ export function DragBoard({ doc, act, notify, moveTab, children: content }: { do
     const moving = doc.entities[source.entityId]
     if (!moving) { resolve(original); return }
     if (source.kind === target.kind) {
-      await settle(await act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind || (source.kind === 'link' && ['link', 'note'].includes(e.kind))), moving.id, entity.id) }))
-    } else if (source.kind === 'link' && (target.kind === 'collection' || target.kind === 'space')) {
+      await settle(await act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind || (source.kind === 'saved-item' && ['link', 'note'].includes(e.kind))), moving.id, entity.id) }))
+    } else if (source.kind === 'saved-item' && (target.kind === 'collection' || target.kind === 'space')) {
       await settle(await act({ type: 'move', id: moving.id, parentId: entity.id }))
     } else resolve(original)
   }
@@ -182,7 +182,7 @@ function DragFeedback({ element, source, doc, dropAnimation }: { element: HTMLEl
   const { over } = useDndContext()
   const target = over?.data.current as DragTarget | undefined
   const tab = source?.kind === 'tab' ? source.tab : undefined
-  const card = !!tab && !!target && ['content', 'collection', 'link', 'new-collection'].includes(target.kind)
-  const collectionId = target?.kind === 'collection' ? target.entityId : target?.kind === 'link' ? doc.entities[target.entityId]?.parentId ?? undefined : undefined
+  const card = !!tab && !!target && ['content', 'collection', 'saved-item', 'new-collection'].includes(target.kind)
+  const collectionId = target?.kind === 'collection' ? target.entityId : target?.kind === 'saved-item' ? doc.entities[target.entityId]?.parentId ?? undefined : undefined
   return <DragOverlay dropAnimation={dropAnimation} zIndex={50}>{element && <DragPreview element={element} tab={tab} card={card} collectionId={collectionId} />}</DragOverlay>
 }
