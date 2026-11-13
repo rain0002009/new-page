@@ -10,5 +10,7 @@
   --crepe-color-primary: #5f7652;
   --crepe-font-default: "Inter", "Segoe UI", "Microsoft YaHei", sans-serif;
 }
-.milkdown .ProseMirror { padding: 12px 8px; min-height: 50vh; }
+.milkdown .ProseMirror { padding: 8px; min-height: 0; flex: 1; }
+/* Cursor widgets precede the first content block in Crepe's editor DOM. */
+.milkdown .ProseMirror > :nth-child(1 of :not([contenteditable="false"])) { margin-top: 0; }
 .milkdown img { max-width: 100%; }

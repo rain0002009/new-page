@@ -1,6 +1,6 @@
 import { test, expect, chromium, type BrowserContext, type Page, type Locator } from '@playwright/test'
 import { createServer, type Server } from 'node:https'
-import { mkdtemp, mkdir, rm, cp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, rmdir, cp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -194,6 +194,29 @@ async function newNote(page: Page, context: BrowserContext, title: string, body:
   return note
 }
 
+async function expectCompactDocumentLayout(page: Page, titleLabel: string, heading: string) {
+  const layout = await page.evaluate(({ titleLabel, heading }) => {
+    const title = document.querySelector<HTMLInputElement>(`input[aria-label="${titleLabel}"]`)!.getBoundingClientRect()
+    const surface = document.querySelector('main section')!.getBoundingClientRect()
+    const editor = document.querySelector('.milkdown .ProseMirror')!.getBoundingClientRect()
+    const firstHeading = [...document.querySelectorAll('.milkdown h1')].find(element => element.textContent === heading)!.getBoundingClientRect()
+    return {
+      width: innerWidth, height: innerHeight, surfaceWidth: surface.width,
+      outerBottom: innerHeight - surface.bottom, editorBottom: surface.bottom - editor.bottom,
+      titleGap: firstHeading.top - title.bottom,
+      scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight,
+    }
+  }, { titleLabel, heading })
+  if (layout.width >= 1000) expect(layout.surfaceWidth).toBeGreaterThan(layout.width * 0.7)
+  expect(layout.outerBottom).toBeGreaterThanOrEqual(15)
+  expect(layout.outerBottom).toBeLessThanOrEqual(25)
+  expect(layout.editorBottom).toBeLessThanOrEqual(30)
+  expect(layout.titleGap).toBeGreaterThanOrEqual(12)
+  expect(layout.titleGap).toBeLessThanOrEqual(24)
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width)
+  expect(layout.scrollHeight).toBeLessThanOrEqual(layout.height)
+}
+
 test('笔记卡片自动摘要、全文搜索并与链接混排跨块移动', async () => {
   const { page, context } = await openClient(undefined, true)
   await connectQuark(page)
@@ -315,11 +338,23 @@ test('笔记直接编辑、静态背景和标题大纲定位', async () => {
   expect(await headingSize('一级章节')).toBeGreaterThan(await headingSize('二级章节'))
   expect(await headingSize('二级章节')).toBeGreaterThan(await body.evaluate(element => parseFloat(getComputedStyle(element).fontSize)))
   await expect(note.getByPlaceholder('Paste link...')).not.toBeVisible()
+  for (const width of [1675, 1500, 960, 651, 650, 480]) {
+    await note.setViewportSize({ width, height: width === 1675 ? 1243 : 900 })
+    await expectCompactDocumentLayout(note, '笔记标题', '一级章节')
+  }
+  await note.setViewportSize({ width: 1675, height: 1243 })
   await note.screenshot({ path: 'test-results/document-desktop.png', fullPage: true })
   await note.setViewportSize({ width: 480, height: 900 })
   await expect(body).toHaveAttribute('contenteditable', 'true')
   await expect(note.getByRole('button', { name: '导出 Markdown', exact: true })).toBeVisible()
   await note.screenshot({ path: 'test-results/document-mobile.png', fullPage: true })
+  const editorBounds = (await body.boundingBox())!
+  await body.click({ position: { x: 40, y: editorBounds.height - 16 } })
+  await expect(body).toBeFocused()
+  await body.fill(Array.from({ length: 80 }, (_, index) => `第 ${index + 1} 行：长正文仍能自然向下滚动。`).join('\n'))
+  await expect(note.getByRole('status')).toContainText('已保存到本机')
+  expect(await note.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(900)
+  expect(await note.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(480)
 })
 
 test('收藏在线 Markdown 使用独立阅读页并解析相对资源', async () => {
@@ -384,6 +419,142 @@ async function dropLocalFile(page: Page, context: BrowserContext, title: string,
   return doc
 }
 
+async function openFileDirectoryFixture() {
+  const client = await openClient(undefined, true)
+  const directory = join(client.profile, '文档 目录')
+  await mkdir(join(directory, '章节', '更深一层'), { recursive: true })
+  await mkdir(join(directory, '空目录'))
+  await writeFile(join(directory, '当前文档.md'), '# 当前标题\n\n当前正文')
+  await writeFile(join(directory, '同级 #100%.MARKDOWN'), '# 同级标题\n\n[子文件](./章节/子文件.md)')
+  await writeFile(join(directory, '隐藏.txt'), '不显示')
+  await writeFile(join(directory, '章节', '子文件.md'), '# 子文件标题\n\n子目录正文')
+  await writeFile(join(directory, '章节', '隐藏图片.png'), '不显示')
+  await writeFile(join(directory, '章节', '更深一层', "深入'文件(1).md"), '# 深入标题')
+  await client.context.addInitScript(() => {
+    Object.assign(window, { showDirectoryPicker: () => { throw new Error('不应打开授权选择器') } })
+    Object.assign(FileSystemDirectoryHandle.prototype, { requestPermission: () => { throw new Error('不应申请目录授权') } })
+    const allowed = chrome.extension.isAllowedFileSchemeAccess.bind(chrome.extension)
+    chrome.extension.isAllowedFileSchemeAccess = (() => localStorage.getItem('denyFileAccess') ? Promise.resolve(false) : allowed()) as typeof allowed
+    const fetchFile = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.startsWith('file:') && url.endsWith('/')) {
+        const reads = JSON.parse(localStorage.getItem('directoryReads') ?? '[]') as string[]
+        localStorage.setItem('directoryReads', JSON.stringify([...reads, url]))
+      }
+      return fetchFile(input, init)
+    }
+  })
+  const doc = await client.context.newPage()
+  const url = new URL('/document/index.html', client.page.url())
+  const fileUrl = pathToFileURL(join(directory, '当前文档.md')).href
+  url.searchParams.set('url', fileUrl)
+  await doc.goto(url.href)
+  await expect(doc.getByRole('heading', { name: '当前标题', exact: true })).toBeVisible()
+  return { ...client, doc, directory, fileUrl }
+}
+
+test('本地目录直接读取真实文件列表，仅展开时读取子目录并切换 Markdown', async () => {
+  const { doc, directory, fileUrl } = await openFileDirectoryFixture()
+  const folder = doc.getByRole('button', { name: '本地目录', exact: true })
+  const outline = doc.getByRole('button', { name: '文档大纲', exact: true })
+  await expect(outline).toHaveAttribute('aria-pressed', 'true')
+  expect(await doc.evaluate(() => localStorage.getItem('directoryReads'))).toBeNull()
+  await folder.focus(); await folder.press('Enter')
+  await expect(doc.getByRole('button', { name: '打开 同级 #100%.MARKDOWN', exact: true })).toBeVisible()
+  await expect(doc.getByRole('button', { name: '打开 当前文档.md', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(doc.getByText('隐藏.txt', { exact: true })).toHaveCount(0)
+  await expect(doc.getByRole('button', { name: '打开 子文件.md', exact: true })).toHaveCount(0)
+  expect(await doc.evaluate(() => JSON.parse(localStorage.getItem('directoryReads')!))).toEqual([new URL('.', fileUrl).href])
+  await doc.getByRole('button', { name: '文件夹 章节', exact: true }).click()
+  await expect(doc.getByRole('button', { name: '打开 子文件.md', exact: true })).toBeVisible()
+  await expect(doc.getByText('隐藏图片.png', { exact: true })).toHaveCount(0)
+  expect(await doc.evaluate(() => JSON.parse(localStorage.getItem('directoryReads')!))).toHaveLength(2)
+  await doc.getByRole('button', { name: '文件夹 更深一层', exact: true }).click()
+  await expect(doc.getByRole('button', { name: "打开 深入'文件(1).md", exact: true })).toBeVisible()
+  expect(await doc.evaluate(() => JSON.parse(localStorage.getItem('directoryReads')!))).toHaveLength(3)
+  await doc.getByRole('button', { name: "打开 深入'文件(1).md", exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '深入标题', exact: true })).toBeVisible()
+  await doc.getByRole('button', { name: '文件夹 更深一层', exact: true }).click()
+  await doc.getByRole('button', { name: '文件夹 空目录', exact: true }).click()
+  await expect(doc.getByText('此文件夹没有 Markdown 文件或子目录', { exact: true })).toBeVisible()
+  await doc.getByRole('button', { name: '文件夹 空目录', exact: true }).click()
+  await doc.getByRole('button', { name: '打开 同级 #100%.MARKDOWN', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '同级标题', exact: true })).toBeVisible()
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toHaveAttribute('contenteditable', 'false')
+  expect(new URL(doc.url()).searchParams.get('url')).toBe(pathToFileURL(join(directory, '同级 #100%.MARKDOWN')).href)
+  await doc.screenshot({ path: 'test-results/local-directory-desktop.png', fullPage: true })
+  await doc.setViewportSize({ width: 480, height: 900 })
+  await folder.hover()
+  expect(await doc.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(480)
+  await doc.screenshot({ path: 'test-results/local-directory-narrow.png', fullPage: true })
+  await outline.click()
+  await expect(doc.getByRole('navigation', { name: '文档大纲', exact: true })).toBeVisible()
+  await doc.getByRole('link', { name: '子文件', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '子文件标题', exact: true })).toBeVisible()
+  await doc.reload()
+  await expect(outline).toHaveAttribute('aria-pressed', 'true')
+  await expect(doc.getByRole('heading', { name: '子文件标题', exact: true })).toBeVisible()
+  await folder.click()
+  await expect(doc.getByRole('button', { name: '打开 子文件.md', exact: true })).toHaveAttribute('aria-current', 'page')
+})
+
+test('本地目录未开启文件网址访问时提示打开设置，启用后可重试', async () => {
+  const { doc, context } = await openFileDirectoryFixture()
+  await doc.evaluate(() => localStorage.setItem('denyFileAccess', 'yes'))
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  await expect(doc.getByRole('alert')).toContainText('允许访问文件网址')
+  await expect(doc.getByRole('navigation', { name: '文档大纲', exact: true })).toBeVisible()
+  await expect(doc.getByRole('heading', { name: '当前标题', exact: true })).toBeVisible()
+  expect(await doc.evaluate(() => localStorage.getItem('directoryReads'))).toBeNull()
+  await doc.screenshot({ path: 'test-results/local-directory-file-access.png', fullPage: true })
+  const opened = context.waitForEvent('page')
+  await doc.getByRole('button', { name: '打开扩展设置', exact: true }).click()
+  const settings = await opened
+  await expect(settings).toHaveURL(/chrome:\/\/extensions\/\?id=/)
+  await settings.close()
+  await doc.evaluate(() => localStorage.removeItem('denyFileAccess'))
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  await expect(doc.getByRole('button', { name: '打开 当前文档.md', exact: true })).toBeVisible()
+})
+
+test('本地文档初次读取缺少文件网址访问权限时提示设置，开启后重试读取', async () => {
+  const { doc } = await openFileDirectoryFixture()
+  await doc.evaluate(() => localStorage.setItem('denyFileAccess', 'yes'))
+  await doc.reload()
+  await expect(doc.getByRole('alert')).toContainText('允许访问文件网址')
+  await expect(doc.getByRole('button', { name: '打开扩展设置', exact: true })).toBeVisible()
+  await doc.evaluate(() => localStorage.removeItem('denyFileAccess'))
+  await doc.getByRole('button', { name: '重试读取', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '当前标题', exact: true })).toBeVisible()
+})
+
+test('本地目录读取失败后可重试，权限关闭时再次提示开启文件网址访问', async () => {
+  const { doc, directory } = await openFileDirectoryFixture()
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  await expect(doc.getByRole('button', { name: '文件夹 空目录', exact: true })).toBeVisible()
+  await rmdir(join(directory, '空目录'))
+  await doc.getByRole('button', { name: '文件夹 空目录', exact: true }).click()
+  await expect(doc.getByRole('alert')).toBeVisible()
+  await mkdir(join(directory, '空目录'))
+  await doc.getByRole('button', { name: '重试', exact: true }).click()
+  await expect(doc.getByText('此文件夹没有 Markdown 文件或子目录', { exact: true })).toBeVisible()
+  await doc.getByRole('button', { name: '文件夹 空目录', exact: true }).click()
+  await doc.evaluate(() => localStorage.setItem('denyFileAccess', 'yes'))
+  await doc.getByRole('button', { name: '文件夹 章节', exact: true }).click()
+  await expect(doc.getByRole('alert')).toContainText('允许访问文件网址')
+})
+
+test('拖入单个本地文件没有网址时提示通过文件网址打开，不弹出目录授权', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await context.addInitScript(() => { Object.assign(window, { showDirectoryPicker: () => { throw new Error('不应打开目录授权') } }) })
+  const doc = await dropLocalFile(page, context, '拖入正文.md', '原正文')
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  await expect(doc.getByRole('alert')).toContainText('请通过本地文件网址打开')
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('原正文')
+})
+
+
 test('拖入 Markdown 在新标签页打开，文档只保留正文相关操作', async () => {
   const { page, context } = await openClient(undefined, true)
   await connectQuark(page)
@@ -403,9 +574,11 @@ test('拖入 Markdown 在新标签页打开，文档只保留正文相关操作'
   await expect(doc.getByText(/^(本地 Markdown|Markdown 阅读|Markdown 笔记)$/)).toHaveCount(0)
   await doc.reload()
   await expect(doc.getByRole('heading', { name: '拖入的标题', exact: true })).toBeVisible()
+  await expectCompactDocumentLayout(doc, '文件名称', '拖入的标题')
   await doc.screenshot({ path: 'test-results/local-document-desktop.png', fullPage: true })
   await doc.setViewportSize({ width: 480, height: 900 })
   await expect(doc.getByRole('heading', { name: '拖入的标题', exact: true })).toBeVisible()
+  await expectCompactDocumentLayout(doc, '文件名称', '拖入的标题')
   await doc.screenshot({ path: 'test-results/local-document-mobile.png', fullPage: true })
 })
 

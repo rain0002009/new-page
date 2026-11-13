@@ -7,7 +7,7 @@ export type DirectoryHandle = FileSystemDirectoryHandle & {
   queryPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
   requestPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
 }
-export type LocalFile = { title: string; body: string; baseline: string; dirty?: boolean; writable?: boolean; handle?: FileHandle; directory?: DirectoryHandle; path?: string[] }
+export type LocalFile = { title: string; body: string; baseline: string; url?: string; dirty?: boolean; writable?: boolean; handle?: FileHandle; directory?: DirectoryHandle; path?: string[] }
 export const markdownName = (name: string) => /\.(md|markdown)$/i.test(name)
 export async function readFileHandle(handle: FileHandle, directory?: DirectoryHandle, path?: string[]): Promise<LocalFile> {
   const body = await (await handle.getFile()).text()

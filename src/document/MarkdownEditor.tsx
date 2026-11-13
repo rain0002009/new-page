@@ -51,5 +51,5 @@ export default function MarkdownEditor({ value, readonly, onChange, onError, res
     if (!editor || editor.editor.status !== 'Created') return
     if (editor.getMarkdown() !== value) { replacing.current = true; try { editor.editor.action(replaceAll(value)) } finally { replacing.current = false } }
   }, [value])
-  return <div ref={host} className="min-h-[55vh]" />
+  return <div ref={host} className="flex min-h-0 flex-1 flex-col [&>.milkdown]:flex [&>.milkdown]:flex-1 [&>.milkdown]:flex-col" />
 }
