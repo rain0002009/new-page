@@ -8,7 +8,7 @@ import DragPreview, { animateDrop, snapshotElement } from './DragPreview'
 import { canSortTabs, closeCollectedTab, tabLink, type OpenTab } from './open-tabs'
 import type { QuickCollectionTarget } from './QuickCollectionGap'
 
-type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string }
+type DragItem = { kind: 'space' | 'collection' | 'link' | 'todo'; entityId: string; title: string; note?: boolean } | { kind: 'tab'; tab: OpenTab; title: string }
 type DragTarget = DragItem | { kind: 'content' } | QuickCollectionTarget
 type DropDestination = { kind: 'existing' } | { kind: 'new-link'; collectionId?: string }
 
@@ -133,7 +133,7 @@ export function DragBoard({ doc, act, notify, moveTab, children: content }: { do
       return
     }
     if (target.kind === 'new-collection') {
-      if (!target.ready || (source.kind !== 'link' && source.kind !== 'tab')) { resolve(original); return }
+      if (!target.ready || (source.kind !== 'link' && source.kind !== 'tab') || (source.kind === 'link' && source.note)) { resolve(original); return }
       const success = await act({ type: 'create-collection-with-link', parentId: target.spaceId, beforeId: target.beforeId, source: source.kind === 'tab' ? { kind: 'new', link: tabLink(source.tab) } : { kind: 'link', id: source.entityId } })
       await settle(success, source.kind === 'tab' ? { kind: 'new-link' } : { kind: 'existing' })
       if (success && source.kind === 'tab') await closeCollectedTab(source.tab, notify)
@@ -159,7 +159,7 @@ export function DragBoard({ doc, act, notify, moveTab, children: content }: { do
     const moving = doc.entities[source.entityId]
     if (!moving) { resolve(original); return }
     if (source.kind === target.kind) {
-      await settle(await act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind), moving.id, entity.id) }))
+      await settle(await act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind || (source.kind === 'link' && ['link', 'note'].includes(e.kind))), moving.id, entity.id) }))
     } else if (source.kind === 'link' && (target.kind === 'collection' || target.kind === 'space')) {
       await settle(await act({ type: 'move', id: moving.id, parentId: entity.id }))
     } else resolve(original)

@@ -12,6 +12,11 @@ export const syncStatusLabels: Record<Snapshot['status'], string> = { synced: '�
 export type ConnectRequest = { type: 'connect'; config: Connection; nickname: string; mode: 'switch' | 'migrate'; confirmed?: boolean }
 export type Request =
   | { type: 'snapshot' }
+  | { type: 'read-markdown'; url: string }
+  | { type: 'markdown-takeover'; enabled: boolean }
+  | { type: 'open-original'; url: string }
+  | { type: 'note-editor'; sourceId: string; id: string; token: string; takeover?: boolean }
+  | { type: 'save-note'; sourceId: string; id: string; token: string; title: string; body: string }
   | { type: 'quark-qr-start'; traceId?: string }
   | { type: 'quark-qr-poll'; id: string }
   | { type: 'action'; sourceId: string; action: Action }
@@ -20,7 +25,7 @@ export type Request =
   | { type: 'resolve'; sourceId: string; conflictId: string; side: 'local' | 'remote' }
   | { type: 'export'; sourceId: string }
   | { type: 'import'; sourceId: string; data: unknown; confirmed: boolean }
-export type Result = { ok: true; snapshot?: Snapshot; confirmation?: string; backup?: Document; qr?: QrState; config?: QuarkConnection } | { ok: false; error: string }
+export type Result = { ok: true; file?: { body: string; url: string }; editor?: boolean; snapshot?: Snapshot; confirmation?: string; backup?: Document; qr?: QrState; config?: QuarkConnection } | { ok: false; error: string }
 export async function rpc(request: Request): Promise<Extract<Result, { ok: true }>> {
   const response = await chrome.runtime.sendMessage(request) as Result
   if (!response?.ok) throw new Error(response?.error || '扩展后台暂时不可用，请重试')

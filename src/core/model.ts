@@ -10,6 +10,7 @@ const entitySchema = z.discriminatedUnion('kind', [
   z.object({ ...base, kind: z.literal('profile') }),
   z.object({ ...base, kind: z.literal('space') }),
   z.object({ ...base, kind: z.literal('collection'), collapsed: z.boolean() }),
+  z.object({ ...base, kind: z.literal('note'), body: z.string() }),
   z.object({ ...base, kind: z.literal('link'), url: z.string().max(10_000), icon: z.string().max(250_000), note: z.string().max(20_000), todo: z.boolean(), todoPosition: z.number().finite().optional() }),
 ])
 const documentSchema = z.object({
@@ -18,6 +19,8 @@ const documentSchema = z.object({
 })
 export type Entity = z.infer<typeof entitySchema>
 export type Link = Extract<Entity, { kind: 'link' }>
+export type Note = Extract<Entity, { kind: 'note' }>
+export type SavedItem = Link | Note
 export type Collection = Extract<Entity, { kind: 'collection' }>
 export type Document = z.infer<typeof documentSchema>
 export type Conflict = {
@@ -30,10 +33,11 @@ export type LinkInput = { title: string; url: string; icon?: string; note?: stri
 export type Action =
   | { type: 'add-space'; title: string }
   | { type: 'add-collection'; parentId: string; title: string }
+  | { type: 'add-note'; parentId: string; id: string }
   | { type: 'add-links'; parentId: string; links: LinkInput[]; beforeId?: string }
   | { type: 'collect-tabs'; parentId: string; title: string; links: LinkInput[] }
   | { type: 'create-collection-with-link'; parentId: string; beforeId?: string; source: { kind: 'link'; id: string } | { kind: 'new'; link: LinkInput } }
-  | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; collapsed?: boolean } }
+  | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; body?: string; collapsed?: boolean } }
   | { type: 'todo'; id: string; value: boolean }
   | { type: 'sort-todo'; id: string; beforeId?: string }
   | { type: 'move'; id: string; parentId: string | null; beforeId?: string }
@@ -77,7 +81,7 @@ export function readDocument(value: unknown): Document {
       entity.todoPosition ??= entity.position
     }
     const parent = entity.parentId ? doc.entities[entity.parentId] : null
-    if ((entity.kind === 'link' && parent?.kind !== 'collection') ||
+    if (((entity.kind === 'link' || entity.kind === 'note') && parent?.kind !== 'collection') ||
         (entity.kind === 'collection' && parent?.kind !== 'space') ||
         (['profile', 'space'].includes(entity.kind) && entity.parentId !== null)) throw new Error('数据的空间与收藏块关系无效')
   }
@@ -150,6 +154,13 @@ export function apply(doc: Document, action: Action): Document {
       break
     }
     case 'add-collection': insertCollection(action.parentId, action.title); break
+    case 'add-note': {
+      const collection = requireEntity(next, action.parentId, 'collection') as Collection
+      if (next.entities[action.id]) throw new Error('此笔记已存在，请重新创建')
+      next.entities[action.id] = { ...common('note', '新笔记', collection.id, insertionPosition(children(next, collection.id), undefined, now)), id: action.id, kind: 'note', body: '' }
+      collection.collapsed = false; collection.updatedAt = now
+      break
+    }
     case 'collect-tabs': {
       if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
       const first = children(next, action.parentId).find(e => e.kind === 'collection')
@@ -171,7 +182,7 @@ export function apply(doc: Document, action: Action): Document {
       const collection = requireEntity(next, action.parentId, 'collection') as Collection
       for (const input of action.links) {
         const url = savedUrl(input.url)
-        const siblings = children(next, collection.id).filter(e => e.kind === 'link')
+        const siblings = children(next, collection.id)
         const position = insertionPosition(siblings, action.beforeId, now)
         const link: Link = { ...common('link', input.title || pageLabel(url), collection.id, position), kind: 'link', url, icon: safeIcon(input.icon ?? ''), note: input.note ?? '', todo: false }
         next.entities[link.id] = link
@@ -188,6 +199,7 @@ export function apply(doc: Document, action: Action): Document {
         if (action.patch.note !== undefined) entity.note = action.patch.note
       }
       if (entity.kind === 'collection' && action.patch.collapsed !== undefined) entity.collapsed = action.patch.collapsed
+      if (entity.kind === 'note' && action.patch.body !== undefined) entity.body = action.patch.body
       entity.updatedAt = now
       break
     }
@@ -223,14 +235,14 @@ export function apply(doc: Document, action: Action): Document {
     case 'move': {
       const entity = requireEntity(next, action.id)
       if (entity.kind === 'profile') throw new Error('此内容不能移动')
-      if (entity.kind === 'link') {
+      if (entity.kind === 'link' || entity.kind === 'note') {
         if (!action.parentId || next.entities[action.parentId]?.kind !== 'collection') throw new Error('请拖入当前空间的收藏块，链接不能跨空间移动')
         const target = requireEntity(next, action.parentId!, 'collection') as Collection
         const source = next.entities[entity.parentId!]
         if (source.parentId !== target.parentId) throw new Error('链接不能跨空间移动')
         target.collapsed = false
       } else if (entity.parentId !== action.parentId) throw new Error('只能在原有区域内排序')
-      const siblings = children(next, action.parentId).filter(e => e.kind === entity.kind && e.id !== entity.id)
+      const siblings = children(next, action.parentId).filter(e => (e.kind === entity.kind || (['link', 'note'].includes(entity.kind) && ['link', 'note'].includes(e.kind))) && e.id !== entity.id)
       entity.position = insertionPosition(siblings, action.beforeId, now)
       entity.parentId = action.parentId; entity.updatedAt = now
       break
@@ -241,6 +253,7 @@ export function apply(doc: Document, action: Action): Document {
       if (entity.kind === 'space' && active(next).filter(e => e.kind === 'space').length <= 1) throw new Error('请至少保留一个空间')
       const affected = active(next).filter(e => e.id === entity.id || parents(next, e).some(p => p.id === entity.id))
       for (const item of affected) { item.deletedAt = now; item.deletedBy = entity.id; item.updatedAt = now }
+      if (entity.kind === 'note') purgeEntity(entity, now)
       break
     }
     case 'restore': {
@@ -283,6 +296,7 @@ export function apply(doc: Document, action: Action): Document {
 function purgeEntity(entity: Entity, now: number) {
   entity.purged = true; entity.title = ''; entity.updatedAt = now
   if (entity.kind === 'link') { entity.url = ''; entity.icon = ''; entity.note = ''; entity.todo = false }
+  if (entity.kind === 'note') entity.body = ''
 }
 export function prune(doc: Document, now = Date.now()): Document {
   const next = structuredClone(doc)

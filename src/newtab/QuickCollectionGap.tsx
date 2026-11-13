@@ -18,7 +18,7 @@ const line = tv({
 export default function QuickCollectionGap({ spaceId, beforeId }: { spaceId: string; beforeId?: string }) {
   const [ready, setReady] = useState(false)
   const { active, over } = useDndContext()
-  const accepts = active?.data.current?.kind === 'link' || active?.data.current?.kind === 'tab'
+  const accepts = (active?.data.current?.kind === 'link' && !active.data.current.note) || active?.data.current?.kind === 'tab'
   const { setNodeRef, isOver } = useDroppable({ id: `new-collection:${spaceId}:${beforeId ?? 'end'}`, data: { kind: 'new-collection', spaceId, beforeId, ready } satisfies QuickCollectionTarget })
   useEffect(() => {
     setReady(false)

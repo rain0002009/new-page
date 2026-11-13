@@ -1,0 +1,10 @@
+/* Milkdown owns this DOM; adapt its third-party theme to the application surface. */
+.milkdown {
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: #353d32;
+  --crepe-color-surface: #f7f8ef;
+  --crepe-color-primary: #5f7652;
+  --crepe-font-default: "Inter", "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.milkdown .ProseMirror { padding: 12px 8px; min-height: 50vh; }
+.milkdown img { max-width: 100%; }

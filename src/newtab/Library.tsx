@@ -1,8 +1,10 @@
 ﻿import { Fragment, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
-import { Bookmark, ChevronDown, ChevronRight, Edit3, Folder, LocateFixed, Plus, Search, Trash2 } from 'lucide-react'
+import { Bookmark, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Trash2 } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, pageLabel, type Collection, type Document, type Entity, type Link } from '../core/model'
+import { active, children, pageLabel, type Collection, type Document, type Entity, type Link, type Note, type SavedItem } from '../core/model'
+import { documentUrl, markdownDescription } from '../core/markdown'
+import { readLocalSnapshot } from '../core/local-workspace'
 import { Button, SiteIcon } from './ui'
 import type { Act, EditorState } from './Editor'
 import { CollectionPlaceholder, useCollectionPlaceholder, useDragItem } from './drag'
@@ -66,8 +68,34 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
   </article>
 }
 
+function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?: boolean }) {
+  const styles = linkCard({ note: true, search })
+  const drag = useDragItem(search ? `search:${note.id}` : note.id, { kind: 'link', entityId: note.id, title: note.title, note: true }, styles.base(), search)
+  const [error, setError] = useState('')
+  async function open() {
+    try { const data = await readLocalSnapshot(); await chrome.tabs.create({ url: documentUrl({ note: note.id, source: data.sourceId! }) }) }
+    catch { setError('无法打开笔记，请重试') }
+  }
+  return <article {...drag} aria-label={`笔记 ${note.title}`}>
+    <div className={styles.top()}><span className="grid place-items-center h-[30px] w-[30px] rounded-[8px] bg-[#eee5cb] text-[#9d8551]"><FileText size={20} /></span><div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction()} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div></div>
+    <a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a><span className={styles.domain()}>Markdown 笔记</span>
+    <p className={styles.note()}>{markdownDescription(note.body)}</p>{error && <span role="alert">{error}</span>}
+  </article>
+}
+
 export function CollectionSection({ collection, doc, act, edit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void }) {
-  const links = children(doc, collection.id).filter((e): e is Link => e.kind === 'link')
+  const links = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  async function createNote() {
+    setCreating(true); setCreateError('')
+    try {
+      const id = crypto.randomUUID()
+      if (!await act({ type: 'add-note', parentId: collection.id, id })) return
+      const data = await readLocalSnapshot()
+      await chrome.tabs.create({ url: documentUrl({ note: id, source: data.sourceId! }) })
+    } catch { setCreateError('笔记已保存，打开失败，请从卡片重试') } finally { setCreating(false) }
+  }
   const drag = useDragItem(collection.id, { kind: 'collection', entityId: collection.id, title: collection.title }, collectionStyles.base())
   const placeholder = useCollectionPlaceholder(doc, collection.id)
   const marker = placeholder && <CollectionPlaceholder collectionId={collection.id} target={placeholder.target} height={placeholder.height} />
@@ -76,25 +104,26 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
       <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collection.collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={() => void act({ type: 'edit', id: collection.id, patch: { collapsed: !collection.collapsed } })}>{collection.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
       <h2 className={collectionStyles.title()}>{collection.title}<span className={collectionStyles.count()} aria-hidden="true">{links.length}</span></h2>
     </div><div className={collectionStyles.tools()}>
+      <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`重命名 ${collection.title}`} onClick={() => edit({ kind: 'rename', entity: collection })}><Edit3 size={13} /></Button>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>
     <MotionRegion>{(!collection.collapsed || placeholder) && (links.length || placeholder ? <SortableContext items={links.map(link => link.id)} strategy={rectSortingStrategy}>
-      <div className={cardGrid}>{links.map(link => <Fragment key={link.id}>{placeholder?.beforeId === link.id && marker}<Card link={link} act={act} edit={edit} /></Fragment>)}{!placeholder?.beforeId && marker}</div>
+      <div className={cardGrid}>{links.map(link => <Fragment key={link.id}>{placeholder?.beforeId === link.id && marker}{link.kind === 'note' ? <NoteCard note={link} act={act} /> : <Card link={link} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
     </SortableContext> : <div className="min-h-[124px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[15px] bg-[#fafcf34d]">
       <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
       <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
-    </div>)}</MotionRegion>
+    </div>)}</MotionRegion>{createError && <p role="alert">{createError}</p>}
   </section>
 }
 
 export function SearchView({ doc, act, edit, locate }: { doc: Document; act: Act; edit: (state: EditorState) => void; locate: (link: Link) => void }) {
   const [term, setTerm] = useState('')
-  const links = active(doc).filter((e): e is Link => e.kind === 'link')
-  const result = term.trim() ? links.filter(link => `${link.title}\n${link.url}\n${link.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
+  const links = active(doc).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const result = term.trim() ? links.filter(link => `${link.title}\n${link.kind === 'note' ? link.body : link.url + '\n' + link.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
   return <><div className={searchStyles.field()}><Search size={19} /><input className={searchStyles.input()} aria-label="搜索全部收藏" type="search" placeholder="搜索标题、网址或备注…" value={term} onChange={e => setTerm(e.target.value)} autoFocus data-autofocus /><kbd className={searchStyles.shortcut()}>全部空间</kbd></div>
     <p className={searchStyles.count()}>{term ? `找到 ${result.length} 个收藏` : `共 ${links.length} 个收藏`}</p>
-    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(link => <Card key={link.id} link={link} act={act} edit={edit} location={locationName(doc, link)} locate={() => locate(link)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
+    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(link => link.kind === 'note' ? <NoteCard key={link.id} note={link} act={act} search /> : <Card key={link.id} link={link} act={act} edit={edit} location={locationName(doc, link)} locate={() => locate(link)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
   </>
 }
 export function locationName(doc: Document, entity: Entity) {

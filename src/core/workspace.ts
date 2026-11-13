@@ -7,6 +7,7 @@ import { startQr, pollQr } from './quark/auth'
 import { quarkOrigins } from './quark/transport'
 import type { LoginProgress } from './quark/progress'
 import { storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root } from './local-workspace'
+import { configureMarkdownNavigation, openOriginalMarkdown } from './markdown-navigation'
 
 let chain: Promise<unknown> = Promise.resolve()
 const syncing = new Set<string>()
@@ -142,7 +143,49 @@ async function connect(request: ConnectRequest): Promise<Result> {
   if ('snapshot' in result) { schedule(id); broadcast() }
   return result
 }
-export async function handle(request: Request): Promise<Result> {
+export async function handle(request: Request, tabId?: number): Promise<Result> {
+  if (request.type === 'markdown-takeover') { await configureMarkdownNavigation(request.enabled); return { ok: true } }
+  if (request.type === 'open-original') { await openOriginalMarkdown(request.url, tabId); return { ok: true } }
+  if (request.type === 'read-markdown') {
+    const url = new URL(request.url)
+    if (!['https:', 'http:', 'file:'].includes(url.protocol)) throw new Error('此地址不支持 Markdown 阅读')
+    try {
+      const response = await fetch(url.href, { credentials: 'omit', signal: AbortSignal.timeout(30_000) })
+      if (!response.ok) throw new Error(`读取失败（${response.status}），请重试或打开原网页`)
+      const body = await response.text()
+      if (/text\/html|application\/xhtml/i.test(response.headers.get('content-type') ?? '') || /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(body)) throw new Error('此地址不是 Markdown，请打开原网页')
+      return { ok: true, file: { body, url: response.url || url.href } }
+    } catch (cause) {
+      if (url.protocol === 'file:') throw new Error('无法读取本地地址，请在扩展详情启用「允许访问文件网址」，或选择打开本地文件')
+      throw cause
+    }
+  }
+  if (request.type === 'note-editor') {
+    if (tabId === undefined) throw new Error('请在文档标签页编辑')
+    const key = `${request.sourceId}:${request.id}`
+    const previous = await atomic(root => root.editors?.[key])
+    let alive = false
+    if (previous) {
+      try {
+        const tab = await chrome.tabs.get(previous.tabId)
+        const url = new URL(tab.pendingUrl ?? tab.url ?? '')
+        alive = url.href.startsWith(chrome.runtime.getURL('document/index.html')) && url.searchParams.get('note') === request.id && url.searchParams.get('source') === request.sourceId
+      } catch { /* Closed tabs and pages that navigated away release editing. */ }
+    }
+    if (alive && previous!.tabId !== tabId && request.takeover) {
+      const flushed = await chrome.tabs.sendMessage(previous!.tabId, { type: 'note-flush', sourceId: request.sourceId, id: request.id, token: previous!.token }).catch(() => null) as { saved?: boolean } | null
+      if (!flushed?.saved) throw new Error('原编辑页尚有未保存内容，请先回到该页保存或导出，再接管')
+    }
+    return atomic(root => {
+      const source = current(root, request.sourceId)
+      const note = active(source.doc).find(e => e.id === request.id && e.kind === 'note')
+      if (!note) throw new Error('笔记已删除，无法编辑')
+      const owner = root.editors?.[key]
+      if (owner && owner.tabId !== tabId && (owner.token !== previous?.token || (alive && !request.takeover))) return { ok: true, editor: false }
+      root.editors ??= {}; root.editors[key] = { tabId, token: request.token }
+      return { ok: true, editor: true }
+    })
+  }
   if (request.type === 'quark-qr-start' || request.type === 'quark-qr-poll') {
     const progress: LoginProgress | undefined = request.type === 'quark-qr-start' && request.traceId ? stage => {
       void chrome.runtime.sendMessage({ type: 'quark-login-stage', traceId: request.traceId, stage }).catch(() => undefined)
@@ -171,9 +214,13 @@ export async function handle(request: Request): Promise<Result> {
     }
     const source = current(root, request.sourceId)
     if (request.type === 'export') return { ok: true, backup: source.doc } as const
-    if (request.type === 'action') {
+    if (request.type === 'action' || request.type === 'save-note') {
+      if (request.type === 'save-note') {
+        const owner = root.editors?.[`${request.sourceId}:${request.id}`]
+        if (!owner || owner.tabId !== tabId || owner.token !== request.token) throw new Error('编辑权已交接，当前草稿已保留，可导出后在新编辑页继续')
+      } else if (request.action.type === 'edit' && source.doc.entities[request.action.id]?.kind === 'note') throw new Error('请在拥有编辑权的文档页修改笔记')
       const before = source.doc
-      source.doc = apply(source.doc, request.action)
+      source.doc = apply(source.doc, request.type === 'save-note' ? { type: 'edit', id: request.id, patch: { title: request.title, body: request.body } } : request.action)
       source.conflicts = source.conflicts.map(conflict => {
         const entity = source.doc.entities[conflict.entityId]
         if (equal(before.entities[conflict.entityId], entity)) return conflict
@@ -188,7 +235,7 @@ export async function handle(request: Request): Promise<Result> {
     } else if (request.type === 'import') {
       if (source.conflicts.length) throw new Error('请先解决同步冲突再导入')
       const imported = prune(readDocument(request.data))
-      if (!request.confirmed && active(source.doc).some(e => e.kind === 'link')) return { ok: true, confirmation: '导入会合并备份与当前收藏，重复网址独立保留。是否继续？' } as const
+      if (!request.confirmed && active(source.doc).some(e => e.kind === 'link' || e.kind === 'note')) return { ok: true, confirmation: '导入会合并备份与当前收藏，重复网址独立保留。是否继续？' } as const
       const combined = merge(emptyDocument(), source.doc, imported)
       source.doc = combined.doc; source.conflicts = combined.conflicts
     }

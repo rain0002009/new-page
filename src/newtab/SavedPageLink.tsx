@@ -1,15 +1,16 @@
 import { useState, type AnchorHTMLAttributes, type MouseEvent } from 'react'
 import { savedUrl } from '../core/model'
+import { documentUrl, isMarkdownUrl } from '../core/markdown'
 import { feedbackStyles } from './form-styles'
 
 export default function SavedPageLink({ href, children, ...props }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'onClick' | 'onAuxClick'> & { href: string }) {
   const [error, setError] = useState('')
   function open(event: MouseEvent<HTMLAnchorElement>) {
-    if (event.button > 1 || /^https?:/i.test(href)) return
+    if (event.button > 1 || (/^https?:/i.test(href) && !isMarkdownUrl(href))) return
     event.preventDefault()
     setError('')
     // Browser and file pages cannot be opened through ordinary extension anchors.
-    void chrome.tabs.create({ url: savedUrl(href), active: event.button === 0 && !event.ctrlKey && !event.metaKey }).catch(() => {
+    void chrome.tabs.create({ url: isMarkdownUrl(href) ? documentUrl({ url: href }) : savedUrl(href), active: event.button === 0 && !event.ctrlKey && !event.metaKey }).catch(() => {
       setError('无法打开此页面，请检查页面是否仍可用，或复制网址到地址栏打开')
     })
   }

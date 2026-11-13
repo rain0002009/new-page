@@ -18,11 +18,13 @@
   "permissions": [
     "storage",
     "tabs",
+    "webNavigation",
     "alarms",
     "webRequest",
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
+    "<all_urls>",
     "https://*.quark.cn/*",
     "https://*.uc.cn/*",
     "https://*.aliyuncs.com/*"
@@ -45,5 +47,6 @@
   },
   "chrome_url_overrides": {
     "newtab": "newtab/index.html"
-  }
+  },
+  "web_accessible_resources": [{ "resources": ["document/index.html"], "matches": ["<all_urls>"] }]
 }

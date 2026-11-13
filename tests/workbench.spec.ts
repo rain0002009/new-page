@@ -30,6 +30,13 @@ test.beforeAll(async () => {
   server = createServer({ key: cert.private, cert: cert.cert }, async (req, res) => {
     if (await quark.handle(req, res, origin)) return
     const path = new URL(req.url!, 'https://localhost').pathname
+    if (path.startsWith('/markdown/')) {
+      if (path.endsWith('html.md')) { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end('<title>实际网页</title><h1>原始网页</h1>'); return }
+      if (path.endsWith('error.md')) { res.writeHead(503).end(); return }
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+      res.end(path.endsWith('next.md') ? '# 下一篇\n\n关联文件正文' : '# 阅读指南\n\n## 安装步骤\n\n在线正文\n\n[下一篇](./next.md)\n\n![示意图](./figure.svg)\n\n| 列名 | 值 |\n| --- | --- |\n| 内容 | 通过 |\n\n- [x] 已检查\n\n```js\nconst ready = true\n```')
+      return
+    }
     if (path.startsWith('/web/')) {
       res.setHeader('Content-Type', 'text/html; charset=utf-8')
       res.end(`<title>${path.endsWith('guide') ? 'UnoCSS 指南' : 'React 文档'}</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E"><h1>Test website</h1>`)
@@ -87,7 +94,7 @@ async function openClient(existingProfile?: string, quarkMode = false) {
   // API permissions unchanged so fresh-install tests cover their initialization.
   expect(manifest.permissions).toEqual(expect.arrayContaining(['webRequest', 'declarativeNetRequestWithHostAccess']))
   expect(manifest.host_permissions).toEqual(expect.arrayContaining(['https://*.quark.cn/*', 'https://*.uc.cn/*', 'https://*.aliyuncs.com/*']))
-  manifest.host_permissions = ['https://localhost/*', 'https://*.localhost/*']
+  manifest.host_permissions = ['https://localhost/*', 'https://*.localhost/*', 'file:///*']
   await writeFile(manifestPath, JSON.stringify(manifest))
   // Redirect only the isolated test copy's API origins. Production keeps Quark.
   const backgroundPath = join(extension, 'background/service_worker.js')
@@ -134,6 +141,329 @@ async function connectQuark(page: Page, spaceTitle = '我的空间') {
   if (fromSettings) await expect(page.getByText(/当前夸克账号：/)).toBeVisible()
   else await expect(page.getByRole('heading', { name: spaceTitle, exact: true })).toBeVisible()
 }
+
+test('托管笔记新建后独立编辑、离线重开并导出正文', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  const opened = context.waitForEvent('page')
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  const note = await opened
+  await expect(note.getByRole('textbox', { name: '笔记标题', exact: true })).toHaveValue('新笔记')
+  await note.getByRole('textbox', { name: '笔记标题', exact: true }).fill('离线手记')
+  await note.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('今天记录的正文')
+  await expect(note.getByRole('status')).toContainText('已保存到本机')
+  quark.unavailable = true
+  await note.reload()
+  await expect(note.getByRole('textbox', { name: '笔记标题', exact: true })).toHaveValue('离线手记')
+  await expect(note.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('今天记录的正文')
+  const download = note.waitForEvent('download')
+  await note.getByRole('button', { name: '导出 Markdown', exact: true }).click()
+  const file = await download
+  expect(file.suggestedFilename()).toBe('离线手记.md')
+  expect((await readFile((await file.path())!, 'utf8')).trim()).toBe('今天记录的正文')
+  await expect(page.getByRole('link', { name: '离线手记', exact: true })).toBeVisible()
+})
+
+async function newNote(page: Page, context: BrowserContext, title: string, body: string) {
+  const opened = context.waitForEvent('page')
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  const note = await opened
+  await note.getByRole('textbox', { name: '笔记标题', exact: true }).fill(title)
+  await note.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill(body)
+  await expect(note.getByRole('status')).toContainText('已保存到本机')
+  return note
+}
+
+test('笔记卡片自动摘要、全文搜索并与链接混排跨块移动', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  await addLink(page, '前面的链接')
+  await newNote(page, context, '可搜索的手记', '摘要文字 独有检索词')
+  const card = page.getByRole('article', { name: '笔记 可搜索的手记', exact: true })
+  await expect(card).toContainText('摘要文字 独有检索词')
+  await expect(card.getByRole('button', { name: '删除笔记', exact: true })).toBeAttached()
+  await expect(card.getByRole('button', { name: '加入 Todo', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '搜索收藏', exact: true }).click()
+  await page.getByRole('searchbox', { name: '搜索全部收藏', exact: true }).fill('独有检索词')
+  await expect(page.getByRole('dialog').getByRole('link', { name: '可搜索的手记', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await page.getByLabel('名称', { exact: true }).fill('笔记归档')
+  await page.getByRole('button', { name: '创建', exact: true }).click()
+  const target = page.getByRole('region', { name: '收藏块 笔记归档', exact: true })
+  await drag(page, card, target)
+  await expect(target.getByRole('link', { name: '可搜索的手记', exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('region', { name: '收藏块 笔记归档', exact: true }).getByRole('link', { name: '可搜索的手记', exact: true })).toBeVisible()
+})
+
+test('单篇笔记永久删除停止编辑，父级删除仍可恢复正文', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  const note = await newNote(page, context, '永久删除手记', '待删除的正文')
+  await page.getByRole('article', { name: '笔记 永久删除手记', exact: true }).getByRole('button', { name: '删除笔记', exact: true }).click({ force: true })
+  await expect(note.getByRole('alert')).toContainText('永久删除')
+  await expect(note.getByRole('textbox', { name: '笔记标题', exact: true })).toHaveAttribute('readonly', '')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page.getByRole('button', { name: '恢复 永久删除手记', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  const second = await newNote(page, context, '随父级恢复', '保留整组正文')
+  await page.getByRole('button', { name: '删除 日常收藏', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '移到回收站', exact: true }).click()
+  await expect(second.getByRole('alert')).toContainText('回收站')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '恢复 日常收藏', exact: true }).click()
+  await expect(second.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('保留整组正文')
+  await expect(second.getByRole('textbox', { name: '笔记标题', exact: true })).not.toHaveAttribute('readonly', '')
+})
+
+test('同一笔记后开只读，接管后旧页停止写入', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  const first = await newNote(page, context, '交接手记', '交接前的正文')
+  const second = await context.newPage()
+  await second.goto(first.url())
+  await expect(second.getByRole('textbox', { name: '笔记标题', exact: true })).toHaveAttribute('readonly', '')
+  await second.getByRole('button', { name: '在此编辑', exact: true }).click()
+  await expect(first.getByRole('textbox', { name: '笔记标题', exact: true })).toHaveAttribute('readonly', '')
+  await second.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('接管后的正文')
+  await expect(second.getByRole('status')).toContainText('已保存到本机')
+  await expect(first.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('接管后的正文')
+  await second.close()
+  await first.getByRole('button', { name: '在此编辑', exact: true }).click()
+  await first.getByRole('textbox', { name: '笔记标题', exact: true }).fill('重新编辑')
+  await expect(first.getByRole('status')).toContainText('已保存到本机')
+})
+
+test('笔记正文夸克同步、冲突选择和完整备份往返', async () => {
+  const first = await openClient(undefined, true)
+  await connectQuark(first.page)
+  const one = await newNote(first.page, first.context, '同步笔记', '初始正文')
+  await sync(first.page)
+  const second = await openClient(undefined, true)
+  await connectQuark(second.page)
+  const opened = second.context.waitForEvent('page')
+  await second.page.getByRole('link', { name: '同步笔记', exact: true }).click()
+  const two = await opened
+  await expect(two.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('初始正文')
+  quark.unavailable = true
+  await one.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('设备一的正文')
+  await two.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('设备二的正文')
+  await expect(two.getByRole('status')).toContainText('已保存到本机')
+  await second.page.getByRole('button', { name: '设置', exact: true }).click()
+  await second.page.getByRole('button', { name: '立即同步', exact: true }).click()
+  await expect(second.page.getByRole('button', { name: '立即同步', exact: true })).toBeEnabled()
+  quark.unavailable = false
+  await sync(first.page)
+  await second.page.getByRole('button', { name: '立即同步', exact: true }).click()
+  const conflict = second.page.getByRole('article', { name: '冲突 同步笔记', exact: true })
+  await expect(conflict).toContainText('设备一的正文')
+  await expect(conflict).toContainText('设备二的正文')
+  await conflict.getByRole('button', { name: '保留本地版本', exact: true }).click()
+  await sync(second.page)
+  const downloading = second.page.waitForEvent('download')
+  await second.page.getByRole('button', { name: '导出备份', exact: true }).click()
+  const backup = await readFile((await (await downloading).path())!, 'utf8')
+  const restored = await openClient()
+  await connect(restored.page, '/notes-backup/')
+  await restored.page.getByRole('button', { name: '设置', exact: true }).click()
+  await restored.page.getByLabel('导入备份').setInputFiles({ name: 'notes.json', mimeType: 'application/json', buffer: Buffer.from(backup) })
+  await restored.page.getByRole('button', { name: '搜索收藏', exact: true }).click()
+  await restored.page.getByRole('searchbox', { name: '搜索全部收藏', exact: true }).fill('同步笔记')
+  await expect(restored.page.getByRole('article', { name: '笔记 同步笔记', exact: true })).toContainText('设备二的正文')
+})
+
+test('笔记排版编辑、阅读模式和标题大纲定位', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  const note = await newNote(page, context, '大纲手记', '正文')
+  const body = note.getByRole('textbox', { name: 'Markdown 正文', exact: true })
+  await body.fill('')
+  await body.pressSequentially('# 一级章节', { delay: 30 })
+  await body.press('Enter')
+  await body.pressSequentially('## 二级章节', { delay: 30 })
+  await expect(note.getByRole('navigation', { name: '文档大纲', exact: true }).getByRole('button', { name: '二级章节', exact: true })).toBeVisible()
+  await note.getByRole('button', { name: '阅读模式', exact: true }).click()
+  await expect(body).toHaveAttribute('contenteditable', 'false')
+  await expect(note.getByRole('button', { name: '文件目录', exact: true })).toBeDisabled()
+  await note.getByRole('navigation', { name: '文档大纲', exact: true }).getByRole('button', { name: '二级章节', exact: true }).click()
+  await expect(note.getByRole('heading', { name: '二级章节', exact: true })).toBeInViewport()
+  await note.setViewportSize({ width: 480, height: 900 })
+  await expect(note.getByRole('button', { name: '编辑模式', exact: true })).toBeVisible()
+  await note.screenshot({ path: 'test-results/document-mobile.png', fullPage: true })
+})
+
+test('收藏在线 Markdown 使用独立阅读页并解析相对资源', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  await addLink(page, '在线 Markdown', `${origin}/markdown/guide.MD?version=1#安装`)
+  const opened = context.waitForEvent('page')
+  await page.getByRole('link', { name: '在线 Markdown', exact: true }).click()
+  const doc = await opened
+  await expect(doc.getByRole('heading', { name: '阅读指南', exact: true })).toBeVisible()
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toHaveAttribute('contenteditable', 'false')
+  await expect(doc.getByRole('textbox', { name: '文件名称', exact: true })).toHaveValue('guide.MD')
+  await expect(doc.getByRole('button', { name: '文件目录', exact: true })).toBeDisabled()
+  await expect(doc.getByRole('table').filter({ hasText: '列名' })).toContainText('通过')
+  await expect(doc.getByRole('img', { name: '示意图', exact: true })).toHaveAttribute('src', `${origin}/markdown/figure.svg`)
+  await doc.getByRole('link', { name: '下一篇', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '下一篇', exact: true })).toBeVisible()
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('关联文件正文')
+})
+
+test('Markdown 主页面默认接管，HTML 可回退且设置关闭后保留原导航', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  const doc = await context.newPage()
+  await doc.goto(`${origin}/markdown/guide.MD?version=1#安装`).catch(() => {})
+  await expect(doc.getByRole('heading', { name: '阅读指南', exact: true })).toBeVisible()
+  await doc.goto(`${origin}/markdown/html.md`).catch(() => {})
+  await expect(doc.getByRole('alert')).toContainText('此地址不是 Markdown')
+  await doc.getByRole('button', { name: '打开原网页', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
+  await doc.goto(`${origin}/web/guide`)
+  await doc.evaluate(url => { const iframe = document.createElement('iframe'); iframe.src = url; document.body.append(iframe) }, `${origin}/markdown/html.md`)
+  await expect(doc.frameLocator('iframe').getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('checkbox', { name: '自动接管 Markdown 地址', exact: true }).uncheck()
+  await expect(page.getByRole('checkbox', { name: '自动接管 Markdown 地址', exact: true })).toBeEnabled()
+  await doc.goto(`${origin}/markdown/html.md`)
+  await expect(doc.getByRole('heading', { name: '原始网页', exact: true })).toBeVisible()
+})
+
+test('本地 Markdown 选择后写回原文件，外部修改保留两版供选择', async () => {
+  const { page, context } = await openClient(undefined, true)
+  const doc = await context.newPage()
+  // The picker boundary returns native filesystem handles, backed by this
+  // temporary browser profile rather than an in-memory editor substitute.
+  await doc.addInitScript(() => {
+    Object.assign(window, { showOpenFilePicker: async () => {
+      const root = await navigator.storage.getDirectory()
+      const file = await root.getFileHandle('本地手记.md', { create: true })
+      const writer = await file.createWritable(); await writer.write('初始正文'); await writer.close()
+      return [file]
+    } })
+  })
+  await doc.goto(new URL('/document/index.html', page.url()).href)
+  await doc.getByRole('button', { name: '打开本地文件', exact: true }).click()
+  await expect(doc.getByRole('textbox', { name: '文件名称', exact: true })).toHaveValue('本地手记.md')
+  await expect(doc.getByRole('textbox', { name: '文件名称', exact: true })).toHaveAttribute('readonly', '')
+  const body = doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })
+  await body.fill('自动写回的正文')
+  await expect(doc.getByRole('status')).toContainText('已保存到原文件')
+  const disk = () => doc.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('本地手记.md')).getFile()).text())
+  expect((await disk()).trim()).toBe('自动写回的正文')
+  await doc.evaluate(async () => { const file = await (await navigator.storage.getDirectory()).getFileHandle('本地手记.md'); const writer = await file.createWritable(); await writer.write('其他程序修改'); await writer.close() })
+  await body.fill('编辑中的版本')
+  await expect(doc.getByRole('alert')).toContainText('磁盘文件已被其他程序修改')
+  expect(await disk()).toBe('其他程序修改')
+  await expect(doc.getByRole('alert')).toContainText('编辑中的版本')
+  await doc.getByRole('button', { name: '保留编辑版本', exact: true }).click()
+  await expect(doc.getByRole('status')).toContainText('已保存到原文件')
+  expect((await disk()).trim()).toBe('编辑中的版本')
+})
+
+test('本地目录隐藏非 Markdown，展开才枚举子目录并支持相对资源', async () => {
+  const { page, context } = await openClient(undefined, true)
+  const doc = await context.newPage()
+  await doc.addInitScript(() => {
+    const prototype = FileSystemDirectoryHandle.prototype as FileSystemDirectoryHandle & { entries(): AsyncIterableIterator<[string, FileSystemHandle]> }
+    const entries = prototype.entries
+    Object.assign(prototype, { entries: function(this: FileSystemDirectoryHandle) {
+      if (this.name === '子目录') sessionStorage.setItem('childEnumerated', 'yes')
+      return entries.call(this)
+    } })
+    Object.assign(window, { showDirectoryPicker: async () => {
+      const root = await navigator.storage.getDirectory()
+      const write = async (dir: FileSystemDirectoryHandle, name: string, text: string) => { const handle = await dir.getFileHandle(name, { create: true }); const out = await handle.createWritable(); await out.write(text); await out.close() }
+      await write(root, '首篇.md', '# 本地首篇\n\n![本地图](./图.svg)\n\n[关联篇](./子目录/第二篇.markdown)')
+      await write(root, '隐藏.txt', '不应显示')
+      await write(root, '图.svg', '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>')
+      const child = await root.getDirectoryHandle('子目录', { create: true })
+      await write(child, '第二篇.markdown', '# 第二篇标题\n\n关联篇正文')
+      return root
+    } })
+  })
+  await doc.goto(new URL('/document/index.html', page.url()).href)
+  await doc.getByRole('button', { name: '打开文件夹', exact: true }).click()
+  await expect(doc.getByRole('button', { name: '首篇.md', exact: true })).toBeVisible()
+  await expect(doc.getByRole('button', { name: '隐藏.txt', exact: true })).toHaveCount(0)
+  expect(await doc.evaluate(() => sessionStorage.getItem('childEnumerated'))).toBeNull()
+  await doc.getByRole('button', { name: '首篇.md', exact: true }).click()
+  await expect(doc.getByRole('img', { name: '本地图', exact: true })).toHaveAttribute('src', /^blob:/)
+  await doc.getByRole('button', { name: '展开 子目录', exact: true }).click()
+  await expect(doc.getByRole('button', { name: '第二篇.markdown', exact: true })).toBeVisible()
+  expect(await doc.evaluate(() => sessionStorage.getItem('childEnumerated'))).toBe('yes')
+  await doc.getByRole('link', { name: '关联篇', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '第二篇标题', exact: true })).toBeVisible()
+})
+
+test('本地 Markdown 地址自动接管先预览，并提供文件权限恢复入口', async () => {
+  const { page, context, profile } = await openClient(undefined, true)
+  const path = join(profile, '本地预览.MARKDOWN')
+  await writeFile(path, '# 本地地址标题\n\n本地地址正文')
+  const doc = await context.newPage()
+  await doc.goto(pathToFileURL(path).href + '#章节').catch(() => {})
+  await expect(doc).toHaveURL(/\/document\/index\.html/)
+  const allowed = await page.evaluate(() => new Promise<boolean>(resolveAllowed => chrome.extension.isAllowedFileSchemeAccess(resolveAllowed)))
+  if (allowed) {
+    await expect(doc.getByRole('heading', { name: '本地地址标题', exact: true })).toBeVisible()
+    await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toHaveAttribute('contenteditable', 'false')
+    await expect(doc.getByRole('button', { name: '编辑原文件', exact: true })).toBeVisible()
+  } else {
+    await expect(doc.getByRole('alert')).toContainText('允许访问文件网址')
+    await expect(doc.getByRole('button', { name: '打开本地文件', exact: true })).toBeVisible()
+  }
+  expect(await readFile(path, 'utf8')).toBe('# 本地地址标题\n\n本地地址正文')
+})
+
+test('本地写入权限失效保留草稿，重开并重新授权后继续保存', async () => {
+  const { page, context } = await openClient(undefined, true)
+  const doc = await context.newPage()
+  await doc.addInitScript(() => {
+    const writable = FileSystemFileHandle.prototype.createWritable
+    FileSystemFileHandle.prototype.createWritable = function(options) {
+      if (localStorage.getItem('denyWrite') === 'yes') return Promise.reject(new DOMException('文件写入权限失效', 'NotAllowedError'))
+      return writable.call(this, options)
+    }
+    Object.assign(FileSystemFileHandle.prototype, { requestPermission: async () => { localStorage.removeItem('denyWrite'); return 'granted' } })
+    Object.assign(window, { showOpenFilePicker: async () => {
+      const handle = await (await navigator.storage.getDirectory()).getFileHandle('权限手记.md', { create: true })
+      const writer = await handle.createWritable(); await writer.write('磁盘原文'); await writer.close()
+      return [handle]
+    } })
+  })
+  await doc.goto(new URL('/document/index.html', page.url()).href)
+  await doc.getByRole('button', { name: '打开本地文件', exact: true }).click()
+  await expect(doc.getByRole('textbox', { name: '文件名称', exact: true })).toHaveValue('权限手记.md')
+  await doc.evaluate(() => localStorage.setItem('denyWrite', 'yes'))
+  await doc.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('保留未保存的草稿')
+  await expect(doc.getByRole('alert')).toContainText('文件写入权限失效')
+  await expect(doc.getByRole('status')).toContainText('尚未保存')
+  doc.once('dialog', dialog => void dialog.accept())
+  await doc.reload()
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('保留未保存的草稿')
+  await expect(doc.getByRole('status')).toContainText('已恢复编辑草稿')
+  await doc.getByRole('button', { name: '编辑原文件', exact: true }).click()
+  await expect(doc.getByRole('status')).toContainText('已保存到原文件')
+  expect((await doc.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('权限手记.md')).getFile()).text())).trim()).toBe('保留未保存的草稿')
+})
+
+test('缺少本地写回 API 时可编辑下载另存并禁用目录', async () => {
+  const { page, context } = await openClient(undefined, true)
+  const doc = await context.newPage()
+  await doc.addInitScript(() => { Object.assign(window, { showOpenFilePicker: undefined, showDirectoryPicker: undefined }) })
+  await doc.goto(new URL('/document/index.html', page.url()).href)
+  await doc.getByLabel('本地 Markdown 文件', { exact: true }).setInputFiles({ name: '降级手记.md', mimeType: 'text/markdown', buffer: Buffer.from('# 本地阅读\n\n可编辑') })
+  await expect(doc.getByRole('button', { name: '文件目录', exact: true })).toBeDisabled()
+  await doc.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('降级编辑正文')
+  const downloading = doc.waitForEvent('download')
+  await doc.getByRole('button', { name: '导出 Markdown', exact: true }).click()
+  const file = await downloading
+  expect(file.suggestedFilename()).toBe('降级手记.md')
+  expect(await readFile((await file.path())!, 'utf8')).toContain('降级编辑正文')
+  await expect(doc.getByText('此浏览器支持编辑后下载另存，不支持原文件自动写回或文件目录。', { exact: true })).toBeVisible()
+})
 
 test('夸克首次安装直接显示二维码，不依赖运行时新增权限或重新加载', async () => {
   quark.qrPending = true
