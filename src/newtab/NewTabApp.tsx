@@ -18,6 +18,8 @@ import { Button, Modal, ModalPresence } from './ui'
 import { feedbackStyles } from './form-styles'
 import QuickCollectionGap from './QuickCollectionGap'
 import { closeCollectedTab, collectionTitle, moveOpenTab, tabLink } from './open-tabs'
+import { documentUrl } from '../core/document-address'
+import { readDroppedMarkdown, rememberFile } from '../document/local-files'
 
 const workbench = tv({
   slots: {
@@ -92,6 +94,26 @@ function Workbench() {
   const [collecting, setCollecting] = useState(false)
   const collectingRef = useRef(false)
   const [collectionReveal, setCollectionReveal] = useState(0)
+  useEffect(() => {
+    let opening = false
+    const dragover = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes('Files')) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+    }
+    const drop = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes('Files')) return
+      event.preventDefault(); event.stopPropagation()
+      if (opening) return
+      opening = true
+      void readDroppedMarkdown(event.dataTransfer).then(rememberFile).then(local => chrome.tabs.create({ url: documentUrl({ local }) })).then(() => {
+        opening = false
+      }).catch(cause => { opening = false; setMessage(cause instanceof Error ? cause.message : '文件打开失败，请重新拖入') })
+    }
+    window.addEventListener('dragover', dragover, true)
+    window.addEventListener('drop', drop, true)
+    return () => { window.removeEventListener('dragover', dragover, true); window.removeEventListener('drop', drop, true) }
+  }, [])
   useEffect(() => {
     const listener = (event: { type: string }) => { if (event.type === 'changed') void client.invalidateQueries({ queryKey: stateKey }) }
     chrome.runtime.onMessage.addListener(listener)

@@ -1,12 +1,11 @@
 import { noteDocumentStyles } from './document-styles'
 import { useEffect, useRef, useState } from 'react'
-import { Download, FileText } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { readLocalSnapshot, type StoredWorkspace } from '../core/local-workspace'
 import { documentUrl, downloadMarkdown, isMarkdownUrl } from '../core/markdown'
 import { isActive } from '../core/model'
 import { rpc } from '../core/protocol'
 import { Button } from '../newtab/ui'
-import FluidBackground from '../newtab/FluidBackground'
 import MarkdownEditor from './MarkdownEditor'
 import DocumentOutline from './DocumentOutline'
 
@@ -15,7 +14,6 @@ export default function DocumentApp() {
   const id = params.get('note') ?? '', sourceId = params.get('source') ?? ''
   const token = useRef(crypto.randomUUID()).current
   const [owner, setOwner] = useState(false)
-  const [reading, setReading] = useState(false)
   const editable = useRef(false)
   const handingOff = useRef(false)
   const [draft, setDraft] = useState<{ title: string; body: string }>()
@@ -62,8 +60,8 @@ export default function DocumentApp() {
     if (!value || !dirty.current) return pending.current
     pending.current = pending.current.catch(() => {}).then(async () => {
       try {
-        await rpc({ type: 'save-note', sourceId, id, token, ...value, title: value.title.trim() || '新笔记' })
-        if (latest.current === value) { dirty.current = false; const normalized = { ...value, title: value.title.trim() || '新笔记' }; latest.current = normalized; setDraft(normalized); setStatus('已保存到本机'); setError('') }
+        await rpc({ type: 'save-note', sourceId, id, token, ...value })
+        if (latest.current === value) { dirty.current = false; setStatus('已保存到本机'); setError('') }
       } catch (cause) { setStatus('尚未保存'); setError(cause instanceof Error ? cause.message : '保存失败，内容已保留') }
     })
     return pending.current
@@ -78,14 +76,14 @@ export default function DocumentApp() {
     window.addEventListener('beforeunload', leaving)
     return () => window.removeEventListener('beforeunload', leaving)
   })
-  return <><FluidBackground /><main className={noteDocumentStyles.main()}>
-    <header className={noteDocumentStyles.header()}><span className="flex items-center gap-[8px]"><FileText size={20} />Markdown 笔记</span><div className={noteDocumentStyles.actions()}><Button onClick={() => { void chrome.tabs.create({ url: chrome.runtime.getURL('document/index.html') }) }}>打开本地文件 / 文件夹</Button><Button disabled={!owner || !available} aria-pressed={reading} onClick={() => setReading(!reading)}>{reading ? '编辑模式' : '阅读模式'}</Button><Button disabled={!draft} aria-label="导出 Markdown" onClick={() => draft && downloadMarkdown(draft.title, draft.body)}><Download size={16} />导出</Button></div></header>
+  return <main className={noteDocumentStyles.main()}>
+    <header className={noteDocumentStyles.header()}><Button disabled={!draft} aria-label="导出 Markdown" onClick={() => draft && downloadMarkdown(draft.title, draft.body)}><Download size={16} />导出</Button></header>
     <p role="status" className={noteDocumentStyles.status()}>{status}</p>
     {error && <div role="alert" className={noteDocumentStyles.error()}>{error}{dirty.current && <Button onClick={save}>重试保存</Button>}</div>}
     {!owner && available && draft && <div className="flex flex-wrap items-center gap-[12px] mb-[16px] text-[12px] text-ui-muted"><span>当前页面只读；可接管编辑权继续书写</span><Button onClick={() => { void rpc({ type: 'note-editor', sourceId, id, token, takeover: true }).catch(cause => setError(cause.message)) }}>在此编辑</Button></div>}
-    {draft && <div className={noteDocumentStyles.columns()}><aside className={noteDocumentStyles.sidebar()}><div className={noteDocumentStyles.modes()}><Button aria-pressed>大纲</Button><Button aria-label="文件目录" disabled title="托管笔记不提供本地文件目录">目录</Button></div><DocumentOutline body={draft.body} /></aside><section className={noteDocumentStyles.surface()} onClickCapture={event => { const anchor = (event.target as Element).closest('a'); if (anchor && isMarkdownUrl(anchor.href)) { event.preventDefault(); event.stopPropagation(); void save().then(() => { if (!dirty.current) void chrome.tabs.create({ url: documentUrl({ url: anchor.href }) }) }) } }}>
-      <input aria-label="笔记标题" value={draft.title} maxLength={1000} readOnly={!available || !owner || reading} onChange={event => change({ title: event.target.value })} className={noteDocumentStyles.title()} />
-      <MarkdownEditor value={draft.body} readonly={!available || !owner || reading} onChange={body => change({ body })} onError={setError} />
+    {draft && <div className={noteDocumentStyles.columns()}><aside className={noteDocumentStyles.sidebar()}><DocumentOutline body={draft.body} /></aside><section className={noteDocumentStyles.surface()} onClickCapture={event => { const anchor = (event.target as Element).closest('a'); if (anchor && isMarkdownUrl(anchor.href)) { event.preventDefault(); event.stopPropagation(); void save().then(() => { if (!dirty.current) void chrome.tabs.create({ url: documentUrl({ url: anchor.href }) }) }) } }}>
+      <input aria-label="笔记标题" value={draft.title} maxLength={1000} readOnly={!available || !owner} onChange={event => change({ title: event.target.value })} className={noteDocumentStyles.title()} />
+      <MarkdownEditor value={draft.body} readonly={!available || !owner} onChange={body => change({ body })} onError={setError} />
     </section></div>}
-  </main></>
+  </main>
 }

@@ -169,7 +169,7 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
       if (/text\/html|application\/xhtml/i.test(response.headers.get('content-type') ?? '') || /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(body)) throw new Error('此地址不是 Markdown，请打开原网页')
       return { ok: true, file: { body, url: response.url || url.href } }
     } catch (cause) {
-      if (url.protocol === 'file:') throw new Error('无法读取本地地址，请在扩展详情启用「允许访问文件网址」，或选择打开本地文件')
+      if (url.protocol === 'file:') throw new Error('无法读取本地地址，请在扩展详情启用「允许访问文件网址」，或将文件拖入新标签页')
       throw cause
     }
   }

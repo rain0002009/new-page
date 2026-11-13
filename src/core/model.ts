@@ -195,7 +195,7 @@ export function apply(doc: Document, action: Action): Document {
     }
     case 'edit': {
       const entity = requireEntity(next, action.id)
-      if (action.patch.title !== undefined) entity.title = action.patch.title.trim() || entity.title
+      if (action.patch.title !== undefined) entity.title = entity.kind === 'note' ? action.patch.title : action.patch.title.trim() || entity.title
       if (entity.kind === 'link') {
         if (action.patch.url !== undefined) entity.url = savedUrl(action.patch.url)
         if (action.patch.note !== undefined) entity.note = action.patch.note

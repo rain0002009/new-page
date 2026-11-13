@@ -7,22 +7,32 @@ export type DirectoryHandle = FileSystemDirectoryHandle & {
   queryPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
   requestPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
 }
-export type LocalFile = { title: string; body: string; baseline: string; dirty?: boolean; handle?: FileHandle; directory?: DirectoryHandle; path?: string[] }
-type Pickers = { showOpenFilePicker?: (options: unknown) => Promise<FileHandle[]>; showDirectoryPicker?: (options: unknown) => Promise<DirectoryHandle> }
-export const pickers = window as Window & Pickers
+export type LocalFile = { title: string; body: string; baseline: string; dirty?: boolean; writable?: boolean; handle?: FileHandle; directory?: DirectoryHandle; path?: string[] }
 export const markdownName = (name: string) => /\.(md|markdown)$/i.test(name)
-export async function selectFile(): Promise<LocalFile> {
-  const [handle] = await pickers.showOpenFilePicker!({ types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }], multiple: false })
-  if (!markdownName(handle.name)) throw new Error('请选择 .md 或 .markdown 文件')
-  if (handle.requestPermission && await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') throw new Error('未获得文件写入权限，请重新授权')
-  return readFileHandle(handle)
-}
 export async function readFileHandle(handle: FileHandle, directory?: DirectoryHandle, path?: string[]): Promise<LocalFile> {
   const body = await (await handle.getFile()).text()
   return { title: handle.name, body, baseline: body, handle, directory, path }
 }
+export async function readDroppedMarkdown(transfer: DataTransfer): Promise<LocalFile> {
+  const item = Array.from(transfer.items).find(item => item.kind === 'file' && markdownName(item.getAsFile()?.name ?? ''))
+  if (!item) throw new Error('请拖入 .md 或 .markdown 文件')
+  // Chrome only exposes the drop data during this event; capture both before awaiting.
+  const file = item.getAsFile()!
+  let fileHandle: FileHandle | undefined
+  let writable = false
+  try {
+    const handle = await (item as DataTransferItem & { getAsFileSystemHandle?(): Promise<FileSystemHandle | null> }).getAsFileSystemHandle?.()
+    if (handle?.kind === 'file') {
+      fileHandle = handle as FileHandle
+      writable = !fileHandle.requestPermission || await fileHandle.requestPermission({ mode: 'readwrite' }) === 'granted'
+      return { ...await readFileHandle(fileHandle), writable }
+    }
+  } catch { /* Chrome may deny filesystem access while still exposing the dropped File for reading. */ }
+  const body = await file.text()
+  return { title: file.name, body, baseline: body, handle: fileHandle, writable }
+}
 export async function relativeFile(file: LocalFile, value: string) {
-  if (!file.directory || !file.path) throw new Error('相对资源需要文件夹授权，请打开当前文件所在文件夹')
+  if (!file.directory || !file.path) throw new Error('相对资源需要文件夹访问权限')
   const segments = value.startsWith('/') ? [] : file.path.slice(0, -1)
   for (const segment of decodeURIComponent(value.split(/[?#]/)[0]).split('/')) {
     if (!segment || segment === '.') continue
