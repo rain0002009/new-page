@@ -37,6 +37,9 @@ extension-env.d.ts
 # extension.js local session state
 .extension-js
 
+# OMX local runtime state
+/.omx/
+
 # local env files
 .env*
 !.env.example
