@@ -789,6 +789,29 @@ test('笔记直接编辑、静态背景和标题大纲定位', async () => {
   expect(await note.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(480)
 })
 
+test('空文档按需加载编辑器，打开 Markdown 后仍提供代码语言高亮', async () => {
+  const { page, context, profile } = await openClient(undefined, true)
+  const doc = await context.newPage()
+  const errors: string[] = []
+  doc.on('pageerror', error => errors.push(error.message))
+  const documentUrl = new URL('/document/index.html', page.url()).href
+  await doc.goto(documentUrl)
+  await expect(doc.getByRole('status')).toHaveText('请将 Markdown 文件拖入新标签页')
+  const scripts = await doc.evaluate(() => performance.getEntriesByType('resource')
+    .map(entry => entry.name).filter(url => new URL(url).pathname.endsWith('.js')))
+  const sizes = await Promise.all(scripts.map(async url =>
+    (await readFile(join(profile, 'extension', new URL(url).pathname.slice(1)))).length))
+  expect(sizes.reduce((sum, size) => sum + size, 0), '空页不应预先加载整个编辑器').toBeLessThan(1024 * 1024)
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toHaveCount(0)
+
+  await doc.goto(`${documentUrl}?url=${encodeURIComponent(`${origin}/markdown/guide.MD`)}`)
+  await expect(doc.getByRole('heading', { name: '阅读指南', exact: true })).toBeVisible()
+  await expect(doc.locator('.cm-line')).toContainText(['const ready = true'])
+  await expect.poll(() => doc.locator('.cm-line span').count()).toBeGreaterThan(0)
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toHaveAttribute('contenteditable', 'false')
+  expect(errors).toEqual([])
+})
+
 test('收藏在线 Markdown 使用独立阅读页并解析相对资源', async () => {
   const { page, context } = await openClient(undefined, true)
   await connectQuark(page)
@@ -3518,7 +3541,8 @@ for (const input of ['键盘', '触摸'] as const) test(`${input}在窄屏待选
     await expect(page.locator('.drag-preview')).toBeVisible()
     await page.keyboard.press('ArrowUp')
   }
-  await expect(page.getByRole('img', { name: '标签页放置位置', exact: true })).toBeVisible()
+  await expect(page.locator('.tab-inbox [data-dragging]')).toHaveAttribute('data-dragging', 'true')
+  await expect(page.getByRole('img', { name: '标签页放置位置', exact: true })).toHaveCount(0)
   await page.screenshot({ path: test.info().outputPath(`tab-sort-${input}.png`) })
   if (session) await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   else await page.keyboard.press('Space')
@@ -3621,7 +3645,8 @@ test('待选排序保持置顶边界，取消和失败恢复真实顺序并跟�
   await page.mouse.move(from.x + 55, from.y + 25)
   await page.mouse.down()
   await page.mouse.move(to.x + 55, to.y + 25, { steps: 12 })
-  await expect(page.getByRole('img', { name: '标签页放置位置', exact: true })).toBeVisible()
+  await expect(page.locator('.tab-inbox [data-dragging]')).toHaveAttribute('data-dragging', 'true')
+  await expect(page.getByRole('img', { name: '标签页放置位置', exact: true })).toHaveCount(0)
   await page.keyboard.press('Escape')
   await page.mouse.up()
   await expect.poll(order).toEqual(['待选 置顶二', '待选 置顶一', '待选 普通一', '待选 普通二'])
@@ -3679,7 +3704,8 @@ for (const change of ['移动', '关闭', '置顶'] as const) test(`待选排序
   await page.mouse.move(from.x + 55, from.y + 25)
   await page.mouse.down()
   await page.mouse.move(to.x + 55, to.y + 25, { steps: 12 })
-  await expect(page.getByRole('img', { name: '标签页放置位置', exact: true })).toBeVisible()
+  await expect(page.locator('.tab-inbox [data-dragging]')).toHaveAttribute('data-dragging', 'true')
+  await expect(page.getByRole('img', { name: '标签页放置位置', exact: true })).toHaveCount(0)
   await page.evaluate(async ({ url, change }) => {
     const [tab] = await chrome.tabs.query({ url })
     if (change === '关闭') await chrome.tabs.remove(tab.id!)
@@ -4261,6 +4287,124 @@ test('批量收藏：待选跨空间保存后仅重试失败关闭且不重复�
   await page.reload()
   await page.getByRole('button', { name: '目标空间', exact: true }).click()
   await expect(saved.getByRole('link')).toHaveText(['React 文档', 'UnoCSS 指南'])
+})
+
+test('待选排序与进出组仅使用占位反馈，组外末尾不提示移出分组', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+  const opened: Page[] = []
+  for (const [index, title] of ['组内甲', '组内乙', '组外丙', '组外丁'].entries()) {
+    const tab = await context.newPage()
+    await tab.goto(`${origin}/web/react?feedback=${index}`)
+    await tab.evaluate(title => { document.title = title }, title)
+    opened.push(tab)
+  }
+  await page.evaluate(async urls => {
+    const tabs = await Promise.all(urls.map(async url => (await chrome.tabs.query({ url }))[0]))
+    const id = await chrome.tabs.group({ tabIds: [tabs[0].id!, ...tabs.slice(1).map(tab => tab.id!)] })
+    await chrome.tabGroups.update(id, { title: '资料组', color: 'blue' })
+  }, opened.slice(0, 2).map(tab => tab.url()))
+  await page.bringToFront()
+  const inbox = page.getByRole('complementary', { name: '待选网页' })
+  const source = inbox.getByRole('article', { name: '待选 组外丙', exact: true })
+  const last = inbox.getByRole('article', { name: '待选 组外丁', exact: true })
+  const from = (await source.boundingBox())!
+  await page.mouse.move(from.x + 50, from.y + 20)
+  await page.mouse.down()
+  const tail = (await inbox.locator('[data-tab-slot="-1"]').last().boundingBox())!
+  await page.mouse.move(tail.x + tail.width / 2, tail.y + tail.height / 2, { steps: 16 })
+  await expect(page.locator('.drag-preview')).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('outside-tail-feedback.png') })
+  await expect(inbox.getByText('移出分组', { exact: true })).toHaveCount(0)
+  await expect(inbox.getByText(/^加入.*分组$/)).toHaveCount(0)
+  await expect(inbox.getByRole('status', { name: '标签页放置位置', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await expect(page.locator('.drag-preview')).toHaveCount(0)
+
+  await source.click({ trial: true })
+  const sortingFrom = (await source.boundingBox())!
+  const target = (await last.boundingBox())!
+  await page.mouse.move(sortingFrom.x + 50, sortingFrom.y + 20)
+  await page.mouse.down()
+  await page.mouse.move(target.x + 50, target.y + 20, { steps: 16 })
+  await expect(source).toHaveAttribute('data-dragging', 'true')
+  expect(await source.evaluate(node => getComputedStyle(node).outlineStyle)).toBe('dashed')
+  expect((await source.boundingBox())!.height).toBeCloseTo(from.height, 0)
+  expect(await last.evaluate(node => getComputedStyle(node).outlineStyle)).toBe('none')
+  await expect(last.getByRole('img', { name: '标签页放置位置', exact: true })).toHaveCount(0)
+  await page.mouse.up()
+  await expect.poll(() => page.evaluate(async () => (await chrome.tabs.query({ currentWindow: true }))
+    .filter(tab => tab.title?.startsWith('组外')).map(tab => ({ title: tab.title, groupId: tab.groupId })))).toEqual([
+      { title: '组外丁', groupId: -1 }, { title: '组外丙', groupId: -1 },
+    ])
+
+  const group = inbox.getByRole('group', { name: '标签组 资料组', exact: true })
+  for (const direction of ['入组', '出组', '折叠组'] as const) {
+    if (direction === '折叠组') await group.getByRole('button', { name: '折叠分组 资料组', exact: true }).click()
+    const moving = direction === '出组' ? group.getByRole('article', { name: '待选 组内乙', exact: true }) : source
+    const destination = direction === '出组' ? inbox.locator('[data-tab-slot="-1"]').last()
+      : direction === '折叠组' ? group.locator('[data-drag-id]').first() : group.locator('[data-tab-slot]').last()
+    await moving.click({ trial: true })
+    const start = (await moving.boundingBox())!
+    const end = (await destination.boundingBox())!
+    await page.mouse.move(start.x + 50, start.y + 20)
+    await page.mouse.down()
+    await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 16 })
+    await expect(moving).toHaveAttribute('data-dragging', 'true')
+    const placeholder = direction === '出组' ? destination.getByRole('img', { name: '标签页占位', exact: true })
+      : group.getByRole('img', { name: '标签页占位', exact: true })
+    await expect(placeholder).toBeVisible()
+    expect((await placeholder.boundingBox())!.height).toBeCloseTo(start.height, 0)
+    expect(await moving.evaluate(node => getComputedStyle(node).position)).toBe('absolute')
+    if (direction === '入组') {
+      const second = group.getByRole('article', { name: '待选 组内乙', exact: true })
+      const next = (await second.boundingBox())!
+      await page.mouse.move(next.x + 50, next.y + next.height / 2, { steps: 10 })
+      await expect(placeholder).toBeVisible()
+      await expect.poll(async () => {
+        const placed = (await placeholder.boundingBox())!
+        const following = (await second.boundingBox())!
+        return following.y - placed.y - placed.height
+      }).toBeGreaterThanOrEqual(0)
+      const first = group.getByRole('article', { name: '待选 组内甲', exact: true })
+      const back = (await first.boundingBox())!
+      await page.mouse.move(back.x + 50, back.y + back.height / 2, { steps: 10 })
+      await expect(placeholder).toBeVisible()
+      await expect.poll(async () => (await first.boundingBox())!.y - (await placeholder.boundingBox())!.y).toBeGreaterThan(start.height)
+      const forward = (await second.boundingBox())!
+      await page.mouse.move(forward.x + 50, forward.y + forward.height / 2, { steps: 10 })
+      await expect.poll(async () => {
+        const placed = (await placeholder.boundingBox())!
+        const following = (await second.boundingBox())!
+        return following.y - placed.y - placed.height
+      }).toBeGreaterThanOrEqual(0)
+    }
+    await expect(inbox.getByText('移出分组', { exact: true })).toHaveCount(0)
+    await expect(inbox.getByText(/^加入/)).toHaveCount(0)
+    await expect(inbox.getByRole('status', { name: '标签页放置位置', exact: true })).toHaveCount(0)
+    const samples = await destination.evaluate(async node => {
+      const positions: number[] = []
+      for (let frame = 0; frame < 30; frame++) {
+        await new Promise(requestAnimationFrame)
+        positions.push(node.getBoundingClientRect().top)
+      }
+      return positions.slice(-10)
+    })
+    expect(Math.max(...samples) - Math.min(...samples), `${direction}停留时落点不跳动`).toBeLessThan(1)
+    await page.screenshot({ path: test.info().outputPath(`group-hover-${direction}.png`) })
+    if (direction === '折叠组') await page.mouse.up()
+    else { await page.keyboard.press('Escape'); await page.mouse.up() }
+    await expect(page.locator('.drag-preview')).toHaveCount(0)
+    if (direction !== '折叠组') {
+      expect(await page.evaluate(async url => (await chrome.tabs.query({ url }))[0].groupId, opened[2].url())).toBe(-1)
+    }
+  }
+  await expect(group.getByRole('button', { name: '展开分组 资料组', exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(async urls => {
+    const tabs = await Promise.all(urls.map(async url => (await chrome.tabs.query({ url }))[0]))
+    return tabs[0].groupId !== -1 && tabs[0].groupId === tabs[1].groupId
+  }, [opened[0].url(), opened[2].url()])).toBe(true)
 })
 
 test('Chrome 分组：标签拖入拖出、多选入组和完整组排序', async () => {

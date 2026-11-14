@@ -1,12 +1,12 @@
-import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react'
+import { createContext, Fragment, useContext, useEffect, useRef, useState, type FormEvent } from 'react'
 import { BookmarkPlus, ChevronDown, ChevronRight, Edit3, Group, Layers3, LoaderCircle, Ungroup, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { pageLabel, safeIcon, savedUrl } from '../core/model'
-import { canSortTabs, type OpenTab } from './open-tabs'
+import type { OpenTab } from './open-tabs'
 import type { TabSlot, WindowTabGroup } from './tab-groups'
-import { useDragItem } from './drag'
+import { useDragItem, useTabDragProjection } from './drag'
 import { SelectionIcon, useSelection } from './Selection'
 import { Button, SiteIcon } from './ui'
 import { Toast } from '../shared/Toast'
@@ -18,7 +18,7 @@ const inbox = tv({
     header: 'flex items-center justify-between',
     title: 'text-[15px] [font-weight:550]',
     count: 'font-normal text-[10px] ml-[5px] text-[#a6b09b]',
-    list: 'flex-1 overflow-y-auto pt-[25px] pb-[17px] flex flex-col',
+    list: 'relative flex-1 overflow-y-auto pt-[25px] pb-[17px] flex flex-col',
     empty: 'flex flex-1 items-center justify-center flex-col gap-[12px] text-[#b9c3ad] text-center',
     hint: 'text-[10px] text-[#acb59e]',
     tab: 'inbox-tab group/inbox-tab relative flex items-center gap-[9px] py-[12px] px-[10px] border border-solid border-[#c7d5b894] bg-[#fffffbc9] shadow-[0_2px_8px_#52673c0a] rounded-[10px] [transition:background_.2s,border-color_.2s] hover:bg-[#fffffbf0] hover:border-[#aabd92] active:cursor-grabbing text-ui-ink',
@@ -62,6 +62,7 @@ const groupButton = tv({
   variants: { collapse: { true: 'h-[25px] w-[20px]', false: 'h-[26px] w-[23px]' } },
   defaultVariants: { collapse: false },
 })
+const InboxProjectionContext = createContext<{ slot: TabSlot; height: number; ids: number[] } | null>(null)
 
 export function useWindowTabs() {
   const [tabs, setTabs] = useState<OpenTab[]>([])
@@ -112,7 +113,8 @@ export default function TabInbox({ tabs, groups = [], error, open, close, collec
 }) {
   const list = useRef<HTMLDivElement>(null)
   const selection = useSelection()
-  useLayoutMotion(list, ':scope > [data-motion-id]')
+  const projection = useTabDragProjection()
+  useLayoutMotion(list, ':scope > [data-drag-id], :scope > [data-motion-id]')
   const { active } = useDndContext()
   const dragged = active?.data.current?.kind === 'tab' ? active.data.current.tab as OpenTab : undefined
   // Retain the active source while Chrome emits changes during a drop.
@@ -122,7 +124,13 @@ export default function TabInbox({ tabs, groups = [], error, open, close, collec
     ...visibleTabs.filter(tab => !groupIds.has(tab.groupId)).map(tab => ({ kind: 'tab' as const, index: tab.index, tab })),
     ...groups.map(group => ({ kind: 'group' as const, index: group.firstIndex, group })),
   ].sort((a, b) => a.index - b.index)
-  return <aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><div className="flex items-center gap-[2px]">
+  const slot = projection?.slot
+  const slotIndex = slot && (slot.groupId === -1
+    ? [...entries.map(entry => entry.index), Math.max(...entries.map(entry => entry.kind === 'group' ? entry.group.lastIndex : entry.tab.index)) + 1]
+    : [...visibleTabs.filter(tab => tab.groupId === slot.groupId).map(tab => tab.index), (groups.find(group => group.id === slot.groupId)?.lastIndex ?? -1) + 1])
+    .filter(index => index >= slot.index).sort((a, b) => a - b)[0]
+  const preview = projection && slot && slotIndex !== undefined ? { slot: { ...slot, index: slotIndex }, height: projection.tabs.length * projection.height + (projection.tabs.length - 1) * 8, ids: projection.tabs.map(tab => tab.tabId) } : null
+  return <InboxProjectionContext.Provider value={preview}><aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><div className="flex items-center gap-[2px]">
     <Button size="icon" aria-label="一键收藏" title="一键收藏全部待选网页" disabled={!tabs.length || !!error || collecting || grouping || selection.busy} aria-busy={collecting} onClick={collect}>{collecting ? <LoaderCircle size={17} className="animate-spin" /> : <BookmarkPlus size={17} />}</Button>
     <Button size="icon" aria-label="一键分组" title="将全部待选网页放入新分组" disabled={!tabs.length || !!error || collecting || grouping || selection.busy} aria-busy={grouping} onClick={groupAll}>{grouping ? <LoaderCircle size={17} className="animate-spin" /> : <Group size={17} />}</Button>
     <Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></div></header>
@@ -130,15 +138,16 @@ export default function TabInbox({ tabs, groups = [], error, open, close, collec
       <TabDropSlot slot={{ windowId: entry.kind === 'group' ? entry.group.windowId : entry.tab.windowId, groupId: -1, index: entry.index, beforeTabId: entry.kind === 'tab' ? entry.tab.tabId : undefined }} />
       {entry.kind === 'group' ? <InboxGroup group={entry.group} tabs={visibleTabs.filter(tab => tab.groupId === entry.group.id)} notify={notify} /> : <InboxTab tab={entry.tab} notify={notify} />}
     </Fragment>)}<TabDropSlot slot={{ windowId: entries[0].kind === 'group' ? entries[0].group.windowId : entries[0].tab.windowId, groupId: -1, index: Math.max(...entries.map(entry => entry.kind === 'group' ? entry.group.lastIndex : entry.tab.index)) + 1 }} /></div></SortableContext> : <div className={styles.empty()}><Layers3 size={32} strokeWidth={1.2} /><p className={styles.hint()}>当前窗口没有可收藏的页面</p></div>)}
-  </aside>
+  </aside></InboxProjectionContext.Provider>
 }
 
-function TabDropSlot({ slot, title }: { slot: TabSlot; title?: string }) {
-  const { active } = useDndContext()
-  const { setNodeRef, isOver } = useDroppable({ id: `tab-slot:${slot.groupId}:${slot.index}`, data: { kind: 'tab-slot', ...slot } })
-  const accepts = active?.data.current?.kind === 'tab' || (slot.groupId === -1 && active?.data.current?.kind === 'tab-group')
-  return <div ref={setNodeRef} className="relative h-[8px] shrink-0" data-tab-slot={slot.groupId}>
-    {accepts && isOver && <span role="status" aria-label="标签页放置位置" className="pointer-events-none absolute z-5 inset-x-0 top-1/2 h-[2px] rounded-full bg-[#829b65]"><span className="absolute right-0 bottom-[4px] max-w-full truncate rounded-[4px] bg-ui-dialog px-[5px] text-[9px] text-ui-ink shadow-sm">{slot.groupId === -1 ? '移出分组' : `加入${title || '分组'}`}</span></span>}
+function TabDropSlot({ slot }: { slot: TabSlot }) {
+  const preview = useContext(InboxProjectionContext)
+  const { setNodeRef } = useDroppable({ id: `tab-slot:${slot.groupId}:${slot.index}`, data: { kind: 'tab-slot', ...slot } })
+  const showing = preview?.slot.groupId === slot.groupId && preview.slot.index === slot.index
+  const sourceSlot = slot.beforeTabId !== undefined && preview?.ids.includes(slot.beforeTabId)
+  return <div ref={setNodeRef} className="relative h-[8px] shrink-0" data-tab-slot={slot.groupId} style={showing ? { height: preview.height + (sourceSlot ? 8 : 16) } : sourceSlot ? { height: 0 } : undefined}>
+    {showing && <div role="img" aria-label="标签页占位" data-motion-id="tab-placeholder" className="pointer-events-none absolute inset-x-0 top-[8px] rounded-[10px] bg-[#d5e1c680] border-[1.5px] border-dashed border-[#9caf88]" style={{ height: preview.height }} />}
   </div>
 }
 
@@ -146,13 +155,15 @@ function InboxGroup({ group, tabs, notify }: { group: WindowTabGroup; tabs: Open
   const name = group.title || '未命名分组'
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const list = useRef<HTMLDivElement>(null)
+  useLayoutMotion(list, ':scope > [data-drag-id]')
   const selection = useSelection()
-  const drag = useDragItem(`tab-group:${group.id}`, { kind: 'tab-group', groupId: group.id, windowId: group.windowId, title: name }, 'flex min-w-0 items-center gap-[2px] py-[5px] text-[11px]')
+  const drag = useDragItem(`tab-group:${group.id}`, { kind: 'tab-group', groupId: group.id, windowId: group.windowId, lastIndex: group.lastIndex, title: name }, 'flex min-w-0 items-center gap-[2px] py-[5px] text-[11px]')
   async function change(run: () => Promise<unknown>) {
     setBusy(true)
     try { await run() } catch { notify('无法修改分组，请重试') } finally { setBusy(false) }
   }
-  return <div role="group" aria-label={`标签组 ${name}`} className={groupColor({ color: group.color })} data-motion-id={`tab-group:${group.id}`}>
+  return <div ref={list} role="group" aria-label={`标签组 ${name}`} className={groupColor({ color: group.color })} data-motion-id={`tab-group:${group.id}`}>
     <div {...drag}>
       <Button tone="custom" size="custom" className={groupButton({ collapse: true })} aria-label={`${group.collapsed ? '展开' : '折叠'}分组 ${name}`} aria-expanded={!group.collapsed} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(() => chrome.tabGroups.update(group.id, { collapsed: !group.collapsed }))}>{group.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</Button>
       <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-current" aria-hidden="true" /><strong className="min-w-0 flex-1 truncate ml-[4px] font-medium" title={name}>{name}</strong><span className="text-[9px] opacity-70 mr-[2px]">{group.memberCount}</span>
@@ -163,8 +174,8 @@ function InboxGroup({ group, tabs, notify }: { group: WindowTabGroup; tabs: Open
       })}><Ungroup size={13} /></Button>
     </div>
     {editing && <GroupEditor group={group} close={() => setEditing(false)} />}
-    {!group.collapsed && <SortableContext items={tabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}>{tabs.map(tab => <Fragment key={tab.tabId}><TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: tab.index, beforeTabId: tab.tabId }} title={name} /><InboxTab tab={tab} notify={notify} /></Fragment>)}<TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: group.lastIndex + 1 }} title={name} /></SortableContext>}
-    {group.collapsed && <TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: group.lastIndex + 1 }} title={name} />}
+    {!group.collapsed && <SortableContext items={tabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}>{tabs.map(tab => <Fragment key={tab.tabId}><TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: tab.index, beforeTabId: tab.tabId }} /><InboxTab tab={tab} notify={notify} /></Fragment>)}<TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: group.lastIndex + 1 }} /></SortableContext>}
+    {group.collapsed && <TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: group.lastIndex + 1 }} />}
   </div>
 }
 
@@ -201,10 +212,8 @@ function GroupEditor({ group, close }: { group: WindowTabGroup; close: () => voi
 
 function InboxTab({ tab, notify }: { tab: OpenTab; notify: (message: string) => void }) {
   const [closing, setClosing] = useState(false)
-  const { active, over } = useDndContext()
+  const { active } = useDndContext()
   const selection = useSelection()
-  const source = active?.data.current?.kind === 'tab' ? active.data.current.tab as OpenTab : undefined
-  const inserting = source && source.tabId !== tab.tabId && over?.id === `tab:${tab.tabId}` && canSortTabs(source, tab)
   const drag = useDragItem(`tab:${tab.tabId}`, { kind: 'tab', tab, title: tab.title }, styles.tab())
   async function closeTab() {
     setClosing(true)
@@ -216,6 +225,5 @@ function InboxTab({ tab, notify }: { tab: OpenTab; notify: (message: string) => 
     <SelectionIcon source="tabs" id={String(tab.tabId)} title={tab.title} size="small"><SiteIcon size="small" url={tab.icon || ''} title={tab.title} /></SelectionIcon>
     <div className={styles.description()}><button type="button" className={styles.tabTitle()} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => { if (!active) void chrome.tabs.update(tab.tabId, { active: true }).catch(() => notify('无法打开标签页，请重试')) }}>{tab.title}</button></div>
     <Button size="custom" className="h-[26px] w-[26px] shrink-0 p-0" aria-label={`关闭标签页 ${tab.title}`} title={`关闭标签页 ${tab.title}`} disabled={closing || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void closeTab()}><X size={14} /></Button>
-    {inserting && <span role="img" aria-label="标签页放置位置" className={`pointer-events-none absolute left-0 right-0 h-[2px] rounded-full bg-[#829b65] ${source.index < tab.index ? 'bottom-[-6px]' : 'top-[-6px]'}`} />}
   </article>
 }

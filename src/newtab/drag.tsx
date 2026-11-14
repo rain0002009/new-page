@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
-import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DropAnimation, type KeyboardCoordinateGetter } from '@dnd-kit/core'
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
+import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, getClientRect, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DropAnimation, type KeyboardCoordinateGetter } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { children, todos, type Document, type Entity } from '../core/model'
@@ -11,20 +11,52 @@ import { useSelection } from './Selection'
 import { moveTabsToSlot, moveWholeGroup, type TabSlot } from './tab-groups'
 import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
 
-type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string } | { kind: 'tab-group'; groupId: number; windowId: number; title: string }
+type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string } | { kind: 'tab-group'; groupId: number; windowId: number; lastIndex: number; title: string }
 type DragTarget = DragItem | { kind: 'content' } | QuickCollectionTarget | ({ kind: 'tab-slot' } & TabSlot)
 type DropDestination = { kind: 'existing' } | { kind: 'new-link'; collectionId?: string }
+type TabProjection = { tabs: OpenTab[]; height: number; width: number; slot?: TabSlot; target?: DragTarget }
+const TabProjectionContext = createContext<TabProjection | null>(null)
+export const useTabDragProjection = () => useContext(TabProjectionContext)
+
+function tabDropSlot(source: OpenTab, target?: DragTarget): TabSlot | undefined {
+  if (target?.kind === 'tab-slot') return target.windowId === source.windowId ? target : undefined
+  if (target?.kind === 'tab-group') return target.windowId === source.windowId ? { windowId: target.windowId, groupId: target.groupId, index: target.lastIndex + 1 } : undefined
+  if (target?.kind !== 'tab' || target.tab.windowId !== source.windowId || (target.tab.groupId === -1 && !canSortTabs(source, target.tab))) return
+  const forward = source.index < target.tab.index
+  return { windowId: target.tab.windowId, groupId: target.tab.groupId, index: target.tab.index + (forward ? 1 : 0), beforeTabId: forward ? undefined : target.tab.tabId }
+}
+
+// Read the final inbox layout, excluding both sortable and parent FLIP
+// transforms. Sorting thresholds must follow the rows that have made room.
+function inboxLayoutRects(rects: Parameters<CollisionDetection>[0]['droppableRects'], containers: Parameters<CollisionDetection>[0]['droppableContainers']) {
+  const result = new Map(rects)
+  for (const container of containers) {
+    if (!['tab', 'tab-slot', 'tab-group'].includes(container.data.current?.kind)) continue
+    const node = container.node.current
+    if (!node) continue
+    const rect = getClientRect(node, { ignoreTransform: true })
+    const group = node.parentElement?.closest('.tab-group')
+    const transform = group && getComputedStyle(group).transform
+    const offset = new DOMMatrixReadOnly(!transform || transform === 'none' ? undefined : transform)
+    result.set(container.id, { ...rect, top: rect.top - offset.m42, bottom: rect.bottom - offset.m42, left: rect.left - offset.m41, right: rect.right - offset.m41 })
+  }
+  return result
+}
 
 export function useDragItem(id: string, item: DragItem, className: string, disabled = false) {
   const selection = useSelection()
+  const projection = useTabDragProjection()
   const node = useRef<HTMLElement | null>(null)
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id, data: { ...item, node }, disabled: disabled || selection.busy })
   const ref = useCallback((element: HTMLElement | null) => { node.current = element; setNodeRef(element); setActivatorNodeRef(element) }, [setNodeRef, setActivatorNodeRef])
+  const targetOutline = item.kind === 'tab' || item.kind === 'tab-group' ? '' : `[&[data-drop-target]:not([data-dragging])]:[outline:2px_solid_#b2c495] ${item.kind === 'todo' ? '[&[data-drop-target]:not([data-dragging])]:outline-offset-[-2px]' : '[&[data-drop-target]:not([data-dragging])]:outline-offset-[3px]'}`
+  const projecting = !!projection?.slot && (item.kind === 'tab' || item.kind === 'tab-group')
+  const projectedSource = projecting && item.kind === 'tab' && projection.tabs.some(tab => tab.tabId === item.tab.tabId)
   return disabled ? { className } : {
-    className: `${className} cursor-grab data-[selected]:[outline:2px_solid_#829b65] data-[selected]:outline-offset-[-2px] data-[dragging]:z-2 data-[dragging]:!bg-[#d5e1c680] data-[dragging]:!shadow-none data-[dragging]:[outline:1.5px_dashed_#9caf88] data-[dragging]:outline-offset-[-1px] [&[data-dragging]>*]:invisible [&[data-dragging]::before]:hidden [&[data-drop-target]:not([data-dragging])]:[outline:2px_solid_#b2c495] ${item.kind === 'todo' ? '[&[data-drop-target]:not([data-dragging])]:outline-offset-[-2px]' : '[&[data-drop-target]:not([data-dragging])]:outline-offset-[3px]'}`,
+    className: `${className} cursor-grab data-[selected]:[outline:2px_solid_#829b65] data-[selected]:outline-offset-[-2px] data-[dragging]:z-2 data-[dragging]:!bg-[#d5e1c680] data-[dragging]:!shadow-none data-[dragging]:[outline:1.5px_dashed_#9caf88] data-[dragging]:outline-offset-[-1px] [&[data-dragging]>*]:invisible [&[data-dragging]::before]:hidden ${targetOutline}`,
     ref,
     ...attributes, role: undefined, ...listeners,
-    style: { transform: CSS.Translate.toString(transform), transition },
+    style: projectedSource ? { position: 'absolute' as const, height: projection.height, width: projection.width, opacity: 0, pointerEvents: 'none' as const } : { transform: projecting ? undefined : CSS.Translate.toString(transform), transition: projecting ? undefined : transition },
     'data-dragging': isDragging || undefined,
     'data-drop-target': isOver || undefined,
     'data-drag-id': id,
@@ -116,6 +148,16 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
   const selection = useSelection()
   const batch = useRef<{ ids: string[]; tabs: OpenTab[] }>({ ids: [], tabs: [] })
   const [dragging, setDragging] = useState<HTMLElement | null>(null)
+  const [projection, setProjection] = useState<TabProjection | null>(null)
+  const projectionRef = useRef(projection)
+  projectionRef.current = projection
+  const slots = useRef<TabSlot[]>([])
+  const detectCollision: CollisionDetection = args => {
+    if (args.active.data.current?.kind !== 'tab') return collision(args)
+    slots.current = args.droppableContainers.flatMap(container => container.data.current?.kind === 'tab-slot' ? [container.data.current as TabSlot] : [])
+    return collision({ ...args, droppableContainers: args.droppableContainers.filter(container => container.data.current?.kind !== 'tab' || !projectionRef.current?.slot || !projectionRef.current.tabs.some(tab => tab.tabId === container.data.current?.tab.tabId)), droppableRects: inboxLayoutRects(args.droppableRects, args.droppableContainers) })
+  }
+  const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => boardKeyboardCoordinates(event, { ...args, context: { ...args.context, droppableRects: inboxLayoutRects(args.context.droppableRects, args.context.droppableContainers.getEnabled()) } })
   const dragSource = useRef<DragItem | undefined>(undefined)
   const dropTargets = useRef(new Map<string, Promise<HTMLElement | null>>())
   const resolveDrop = useRef<(node: HTMLElement | null) => void>(() => {})
@@ -124,14 +166,15 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
     await animateDrop(args, destination ? await destination : null)
     if (dropTargets.current.get(String(args.active.id)) === destination) dropTargets.current.delete(String(args.active.id))
   }
-  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: boardKeyboardCoordinates }))
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates }))
   async function finish({ active, over }: DragEndEvent) {
     setDragging(null)
     const source = dragSource.current
-    const target = over?.data.current as DragTarget | undefined
+    const target = projectionRef.current?.slot ? projectionRef.current.target : over?.data.current as DragTarget | undefined
     const original = active.data.current?.node.current as HTMLElement | null
     const resolve = resolveDrop.current
     const settle = async (success: boolean, target: DropDestination = { kind: 'existing' }) => {
+      setProjection(null)
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
       const destination = target.kind === 'new-link' ? Array.from(document.querySelectorAll<HTMLElement>(target.collectionId ? `[data-drag-id="${window.CSS.escape(target.collectionId)}"] .card-grid > .link-card` : '.card-grid > .link-card')).find(node => !doc.entities[node.dataset.dragId!]) : document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(String(active.id))}"]`)
       resolve(success ? destination ?? original : original)
@@ -152,7 +195,7 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
     }
     if (target.kind === 'tab-slot' || target.kind === 'tab-group') {
       if (source.kind !== 'tab') { resolve(original); return }
-      const slot = target.kind === 'tab-slot' ? target : { windowId: target.windowId, groupId: target.groupId, index: Math.max(...(await chrome.tabs.query({ groupId: target.groupId })).map(tab => tab.index)) + 1 }
+      const slot = tabDropSlot(source.tab, target)!
       await moveTabsToSlot(batch.current.tabs, slot)
       selection.clear()
       await settle(true)
@@ -165,8 +208,7 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
         if (success) selection.clear()
         await settle(success)
       } else {
-        const forward = source.tab.index < target.tab.index
-        await moveTabsToSlot(batch.current.tabs, { windowId: target.tab.windowId, groupId: target.tab.groupId, index: target.tab.index + (forward ? 1 : 0), beforeTabId: forward ? undefined : target.tab.tabId })
+        await moveTabsToSlot(batch.current.tabs, tabDropSlot(source.tab, target)!)
         selection.clear()
         await settle(true)
       }
@@ -233,21 +275,32 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
       await settle(success)
     } else resolve(original)
   }
-  return <DndContext sensors={sensors} collisionDetection={collision} onDragStart={({ active }) => {
+  return <DndContext sensors={sensors} collisionDetection={detectCollision} onDragStart={({ active }) => {
     const item = active.data.current as DragItem | undefined
     dragSource.current = item?.kind === 'tab' ? { ...item, tab: { ...item.tab } } : item
     const ids = item?.kind === 'tab' ? selection.prepareDrag('tabs', String(item.tab.tabId)) : item?.kind === 'saved-item' ? selection.prepareDrag('saved', item.entityId) : []
     batch.current = { ids, tabs: item?.kind === 'tab' ? ids.map(id => tabs.find(tab => String(tab.tabId) === id) ?? item.tab).map(tab => ({ ...tab })) : [] }
     const node = active.data.current?.node.current as HTMLElement | null
     const snapshot = node ? snapshotElement(node) : null
-    const destination = new Promise<HTMLElement | null>(resolve => { resolveDrop.current = resolve })
+    const rect = node?.getBoundingClientRect()
+    setProjection(item?.kind === 'tab' && rect ? { tabs: batch.current.tabs, height: rect.height, width: rect.width } : null)
+    const destination = new Promise<HTMLElement | null>(resolve => { resolveDrop.current = destination => {
+      setProjection(null)
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(destination)))
+    } })
     dropTargets.current.set(String(active.id), destination)
     setDragging(snapshot)
+  }} onDragOver={({ over }) => {
+    const source = dragSource.current
+    const target = over?.data.current as DragTarget | undefined
+    const destination = source?.kind === 'tab' ? tabDropSlot(source.tab, target) : undefined
+    const slot = destination && slots.current.filter(slot => slot.windowId === destination.windowId && slot.groupId === destination.groupId && slot.index >= destination.index).sort((a, b) => a.index - b.index)[0]
+    setProjection(previous => previous ? { ...previous, slot, target: slot && previous.slot?.groupId === slot.groupId && previous.slot.index === slot.index ? previous.target : target } : previous)
   }} onDragEnd={event => {
     selection.setBusy(true)
     void finish(event).catch(cause => { notify(cause instanceof Error ? cause.message : '移动未完成，请重试'); resolveDrop.current(event.active.data.current?.node.current ?? null) }).finally(() => { selection.setBusy(false); refreshTabs() })
   }} onDragCancel={({ active }) => { resolveDrop.current(active.data.current?.node.current ?? null); setDragging(null) }} accessibility={{ screenReaderInstructions: { draggable: '按空格开始拖动，使用方向键调整位置，再按空格放下，Escape 取消。' } }}>
-    {content}
+    <TabProjectionContext.Provider value={projection}>{content}</TabProjectionContext.Provider>
     <DragFeedback element={dragging} source={dragSource.current} doc={doc} dropAnimation={dropAnimation} />
   </DndContext>
 }

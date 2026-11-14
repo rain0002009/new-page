@@ -6,7 +6,7 @@ import { documentUrl, downloadMarkdown, isMarkdownUrl } from '../core/markdown'
 import { isActive } from '../core/model'
 import { rpc } from '../core/protocol'
 import { Button } from '../newtab/ui'
-import MarkdownEditor from './MarkdownEditor'
+import MarkdownEditor from './LazyMarkdownEditor'
 import DocumentOutline from './DocumentOutline'
 import { Toast } from '../shared/Toast'
 

@@ -16,6 +16,24 @@ export default {
       ...config.resolve.alias,
       'decode-named-character-reference$': entityDecoder
     }
+    // Keep the editor's core dependencies in bounded, cacheable async chunks.
+    // Language grammars retain their existing individual dynamic imports.
+    config.optimization ??= {}
+    const splitChunks = config.optimization.splitChunks || {}
+    config.optimization.splitChunks = {
+      ...splitChunks,
+      cacheGroups: {
+        ...splitChunks.cacheGroups,
+        documentEditor: {
+          test: /[\\/]node_modules[\\/](?:@milkdown|@codemirror|@lezer|@vue|prosemirror[^\\/]*|codemirror|vue)[\\/]/,
+          chunks: 'async',
+          // A fixed name would merge independently loaded language grammars.
+          name: false,
+          maxSize: 512 * 1024,
+          priority: 20,
+        },
+      },
+    }
     return config
   },
   browser: {
