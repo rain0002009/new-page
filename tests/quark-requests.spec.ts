@@ -620,7 +620,7 @@ test('导入备份只为新加入的笔记补建 Markdown', async () => {
 test('迁移到空夸克账号时保留原有笔记并创建独立 Markdown', async () => {
   localWorkspace(withNotes(1), null)
   stored['new-page.quark.auth.v1'] = { accounts: { root: 'synthetic-cookie' } }
-  const result = await handle({ type: 'connect', config: { ...config, accountId: 'root' }, nickname: 'Rain', mode: 'migrate', confirmed: true })
+  const result = await handle({ type: 'connect', config: { ...config, accountId: 'root', folderId: 'target-root' }, nickname: 'Rain', mode: 'migrate', confirmed: true })
   expect(result.ok).toBe(true)
   await synchronize('quark:root')
   expect([...files.values()].filter(file => file.name.endsWith('.md')).map(file => file.body)).toEqual(['正文0'])
