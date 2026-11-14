@@ -87,10 +87,10 @@ export function Modal({ title, children, close, size, className }: { title: stri
 }
 const siteIcon = tv({
   slots: {
-    icon: 'site-icon relative grid shrink-0 place-items-center overflow-hidden rounded-[8px] bg-ui-icon text-ui-icon-fallback shadow-[inset_0_1px_2px_#fff,0_3px_8px_#637b3f0a]',
+    icon: 'site-icon relative grid shrink-0 place-items-center overflow-hidden bg-ui-icon text-ui-icon-fallback shadow-[inset_0_1px_2px_#fff,0_3px_8px_#637b3f0a]',
     image: 'absolute z-1 h-[20px] w-[20px] bg-ui-icon-image object-contain',
   },
-  variants: { size: { regular: { icon: 'h-[30px] w-[30px]' }, small: { icon: 'h-[28px] w-[28px]' }, compact: { icon: 'h-[26px] w-[26px]' } } },
+  variants: { size: { regular: { icon: 'h-[30px] w-[30px] rounded-[8px]' }, small: { icon: 'h-[28px] w-[28px] rounded-[8px]' }, compact: { icon: 'h-[26px] w-[26px] rounded-[8px]' }, card: { icon: 'h-[20px] w-[20px] rounded-[5px]' } } },
   defaultVariants: { size: 'regular' },
 })
 

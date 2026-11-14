@@ -77,19 +77,19 @@ export function useSelection() {
 
 const icon = tv({
   base: 'group/selection relative z-3 grid shrink-0 place-items-center rounded-[8px] border-0 p-0 bg-transparent cursor-pointer focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus disabled:cursor-default',
-  variants: { small: { true: 'h-[28px] w-[28px]', false: 'h-[30px] w-[30px]' } },
-  defaultVariants: { small: false },
+  variants: { size: { regular: 'h-[30px] w-[30px]', small: 'h-[28px] w-[28px]', card: 'h-[20px] w-[20px]' } },
+  defaultVariants: { size: 'regular' },
 })
-export function SelectionIcon({ id, source, title, children, small = false }: { id: string; source: Source; title: string; children: ReactNode; small?: boolean }) {
+export function SelectionIcon({ id, source, title, children, size = 'regular' }: { id: string; source: Source; title: string; children: ReactNode; size?: 'regular' | 'small' | 'card' }) {
   const selection = useSelection()
   const checked = selection.isSelected(source, id)
   const selecting = selection.source === source && selection.ids.length > 0
-  return <button type="button" role="checkbox" aria-label={`选择 ${title}`} aria-checked={checked} title={`选择 ${title}`} disabled={selection.busy} className={icon({ small })}
+  return <button type="button" role="checkbox" aria-label={`选择 ${title}`} aria-checked={checked} title={`选择 ${title}`} disabled={selection.busy} className={icon({ size })}
     onMouseDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()} onKeyDown={event => { if (event.key !== 'Escape') event.stopPropagation() }}
     onClick={event => { event.stopPropagation(); selection.toggle(source, id, event.shiftKey) }}>
     <span className={selecting ? 'invisible' : 'group-hover/selection:invisible group-focus-visible/selection:invisible [@media(hover:none)]:invisible'}>{children}</span>
     <span className={`absolute inset-0 grid place-items-center rounded-[7px] text-[#627e4d] ${selecting ? 'opacity-100' : 'opacity-0 group-hover/selection:opacity-100 group-focus-visible/selection:opacity-100 [@media(hover:none)]:opacity-100'}`}>
-      {checked ? <span className="grid h-[20px] w-[20px] place-items-center rounded-[4px] bg-[#6c8755] text-white"><Check size={15} /></span> : <Square size={22} />}
+      {checked ? <span className="grid h-[20px] w-[20px] place-items-center rounded-[4px] bg-[#6c8755] text-white"><Check size={15} /></span> : <Square size={size === 'card' ? 20 : 22} />}
     </span>
   </button>
 }

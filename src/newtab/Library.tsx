@@ -31,7 +31,7 @@ const collectionStyle = tv({
   },
 })
 const collectionStyles = collectionStyle()
-const cardGrid = 'card-grid grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-[13px] [@media(min-width:1700px)]:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] [@media(max-width:1200px)]:grid-cols-[repeat(auto-fill,minmax(175px,1fr))] [@media(max-width:650px)]:grid-cols-1'
+const cardGrid = 'card-grid grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-[12px] [@media(min-width:1700px)]:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] [@media(max-width:1200px)]:grid-cols-[repeat(auto-fill,minmax(190px,1fr))] [@media(max-width:650px)]:grid-cols-1'
 const search = tv({
   slots: {
     field: 'shrink-0 flex items-center bg-[#fffffbc4] border border-solid border-[#ffffffd4] rounded-[12px] py-[7px] px-[16px] gap-[11px] text-[#92a27e] shadow-[0_6px_24px_#4c683409]',
@@ -58,7 +58,7 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
   const styles = linkCard({ search: !!locate })
   const drag = useDragItem(locate ? `search:${link.id}` : link.id, { kind: 'saved-item', itemKind: 'link', entityId: link.id, title: link.title }, styles.base(), !!locate)
   return <article {...drag} data-selected={!locate && selection.isSelected('saved', link.id) || undefined} aria-label={`链接 ${link.title}`}>
-    <div className={styles.top()}><span className={styles.icon()}>{locate ? <SiteIcon url={link.icon} title={link.title} /> : <SelectionIcon id={link.id} source="saved" title={link.title}><SiteIcon url={link.icon} title={link.title} /></SelectionIcon>}</span><SavedPageLink href={link.url} className={styles.title()}>{link.title}</SavedPageLink></div>
+    <div className={styles.top()}><span className={styles.icon()}>{locate ? <SiteIcon size="card" url={link.icon} title={link.title} /> : <SelectionIcon size="card" id={link.id} source="saved" title={link.title}><SiteIcon size="card" url={link.icon} title={link.title} /></SelectionIcon>}</span><SavedPageLink href={link.url} className={styles.title()}>{link.title}</SavedPageLink></div>
     <div className={styles.actions()}>
       <Button tone="custom" size="custom" className={cardAction()} aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
       <Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
@@ -80,9 +80,9 @@ function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?
     try { const data = await readLocalSnapshot(); await chrome.tabs.create({ url: documentUrl({ note: note.id, source: data.sourceId! }) }) }
     catch { setError('无法打开笔记，请重试') }
   }
-  const noteIcon = <span className="grid place-items-center h-[30px] w-[30px] rounded-[8px] bg-[#eee5cb] text-[#9d8551]"><FileText size={20} /></span>
+  const noteIcon = <span className="grid place-items-center h-[20px] w-[20px] rounded-[5px] bg-[#eee5cb] text-[#9d8551]"><FileText size={16} /></span>
   return <article {...drag} data-selected={!search && selection.isSelected('saved', note.id) || undefined} aria-label={`笔记 ${note.title}`}>
-    <div className={styles.top()}><span className={styles.icon()}>{search ? noteIcon : <SelectionIcon id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}</span><a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a></div>
+    <div className={styles.top()}><span className={styles.icon()}>{search ? noteIcon : <SelectionIcon size="card" id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}</span><a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a></div>
     <div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div><span className={styles.domain()}>Markdown 笔记</span>
     <p className={styles.note()}>{markdownDescription(note.body)}</p><Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>
@@ -115,7 +115,7 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
     </div></div>
     <MotionRegion>{(!collection.collapsed || placeholder) && (savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
       <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} act={act} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
-    </SortableContext> : <div className="min-h-[124px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[15px] bg-[#fafcf34d]">
+    </SortableContext> : <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">
       <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
       <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
     </div>)}</MotionRegion><Toast message={createError} onClose={() => setCreateError('')} />
