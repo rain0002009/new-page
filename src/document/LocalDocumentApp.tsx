@@ -46,7 +46,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
         value.pendingImageCleanup = latest.pendingImageCleanup
       }
       await rpc({ type: 'local-image-document', id, aliases: value.imageAliasIds, body: value.baseline, sourceId: value.imageSourceId })
-      if (current.current?.handle === value.handle && !dirty.current && !conflictRef.current) setError('')
+      if (current.current?.handle === value.handle && value.writable !== false && !dirty.current && !conflictRef.current) setError('')
       return true
     } catch (cause) {
       if (current.current?.handle === value.handle) setError(`文件已保存；图床清理通知待重试：${cause instanceof Error ? cause.message : '扩展后台暂时不可用'}`)
