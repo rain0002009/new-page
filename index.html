@@ -1,0 +1,45 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>页墟 · Page Garden 隐私政策</title></head><body><main><h1>页墟 · Page Garden 隐私政策</h1>
+<p>更新日期：2026-11-14。适用版本：1.0.0。</p>
+<h2>维护者与联系方式</h2>
+<p>页墟 · Page Garden 由 GitHub 用户 rain0002009 维护。项目主页为 <a href="https://github.com/rain0002009/new-page">https://github.com/rain0002009/new-page</a> ，隐私或使用问题可通过 <a href="https://github.com/rain0002009/new-page/issues">https://github.com/rain0002009/new-page/issues</a> 联系维护者。公开反馈中请勿附带密码、Cookie、API Key、私人笔记或未脱敏备份。</p>
+<h2>处理哪些数据，为什么处理</h2>
+<p>页墟将 Chrome 新标签页用作个人网页资料与笔记的整理入口。为提供用户选择的功能，扩展处理以下数据：</p>
+<ul>
+<li>当前窗口标签页的网址、标题、图标、排列与原生标签组信息，用于展示待选网页、收藏和标签组操作。扩展没有申请 chrome.history 权限，不读取完整历史记录数据库。</li>
+<li>空间、收藏块、收藏链接、标题、备注、Todo、排序、托管 Markdown 笔记正文、回收站内容、昵称和个人偏好，用于保存、搜索、恢复和同步收藏库。</li>
+<li>用户连接服务所需的账号信息：夸克登录会话 Cookie 与账号标识、WebDAV 地址/用户名/密码，以及可选 s.ee API Key。</li>
+<li>用户主动打开或授权的本地 Markdown 文件内容、草稿、基线、文件和目录句柄与路径，用于阅读、写回原文件、浏览目录及在写入失败后恢复。</li>
+<li>用户主动打开的在线 Markdown、文档引用的图片和用户选择上传的图片，用于阅读与编辑。用户主动输入的内容可能包含个人或敏感信息。</li>
+</ul>
+<h2>本机存储</h2>
+<p>收藏库、完整托管笔记、同步基线、冲突、配置、未上传修改、登录凭据和图片清理记录保存在当前 Chrome 配置的扩展本地存储中。本地 Markdown 的完整正文、草稿和文件/目录句柄另保存在扩展的 IndexedDB 中。凭据在本机没有额外的应用层加密，应使用可信设备并保护 Chrome 配置。</p>
+<p>首次使用收藏库需要连接夸克或兼容的 WebDAV；已有本地副本在暂时离线或登录失效时可继续编辑。切换账号或数据源会保留各自的缓存、凭据和待上传修改，后台仍可能重试所有已连接数据源。当前没有在设置中一键退出并清除所有数据源的功能。</p>
+<h2>云端同步与第三方服务</h2>
+<ul>
+<li>连接夸克后，扩展直接请求夸克登录和网盘接口及其上传服务，将收藏库保存为用户网盘中的「页墟收藏/收藏.json」，并按笔记操作维护「笔记」目录中的 Markdown 副本。收藏 JSON 含完整托管笔记正文。夸克上传可能使用关联 UC 域名与阿里云对象存储。</li>
+<li>连接 WebDAV 后，扩展使用用户提供的 HTTPS 地址和认证信息，将收藏库保存到所选目录下的 new-page/data-v1.json。</li>
+<li>夸克 Cookie 和 WebDAV 密码仅存于本机，不进入收藏业务 JSON 或导出备份；为完成认证，会发送给相应服务。</li>
+<li>s.ee API Key 是收藏库配置的一部分，会同步到已连接的云端，并包含在 JSON 导出备份中。任何能够读取这些文件的人都可能取得该 Key。云端文件与备份没有扩展提供的端到端加密。</li>
+<li>配置 s.ee Key 并主动上传图片时，图片发送到 s.ee，Key 用于认证，返回的公开图片链接写入 Markdown。图片链接可被知道地址的人访问。图片清理可能查询该账号的上传记录并调用删除接口。</li>
+<li>打开在线 Markdown、显示外链图片或网页图标时，扩展或 Chrome 会请求相应源站。对方可收到 IP 地址及请求头等正常网络连接信息。普通文档与图片加载不等于向开发者上传浏览记录。</li>
+</ul>
+<p>本地和在线 Markdown 不会自动作为托管笔记整篇上传到收藏库；在本地文档中主动上传的图片仍会发送到图床。夸克、用户选择的 WebDAV 服务、s.ee 和文档/图片源站依各自政策处理请求与服务端日志。</p>
+<p>当前版本没有自建的开发者业务数据接收服务器，没有用于广告投放、画像或产品分析的遥测功能。扩展处理的数据用于上述功能，不用于出售、无关广告、信用评估或借贷用途。用户通过 GitHub 等渠道主动提交的反馈由相应平台处理，维护者仅为答复与解决问题使用这些反馈。</p>
+<h2>数据保留、删除与控制</h2>
+<p>可以在扩展中编辑或删除收藏内容，导出备份，在设置中关闭自动接管 Markdown 或清除 s.ee Key。清除 Key 不会自动删除已上传的图片，也不会追溯修改旧备份。</p>
+<p>链接、收藏块和空间删除后进入最长 30 天的回收站，可提前永久清除；单独删除一篇笔记立即永久生效，随父级删除的笔记则随父级进入回收站。后台清理可能在扩展下次运行或同步时完成；同步成功前，远端仍可能保留旧内容。删除标记、同步基线、冲突或尚未联网的其他设备也可能保留相关副本，不能保证所有副本立即消失。</p>
+<p>云端不提供同步历史恢复。旧导出备份、本地磁盘原文件和第三方服务自己的备份需由用户另行管理。Markdown 副本由扩展向网盘单向更新，手动修改网盘副本不会自动回写扩展。</p>
+<p>移除图片引用或永久删除相关笔记后，扩展至少等待 30 秒，且在收藏同步成功、确认图片归属并检查本机已知引用后尝试删除 s.ee 原图。网络或认证失败会保留任务重试；仍有引用、归属不明或缺少原 Key 时不会保证完成删除。本机无法检查的外部备份或文档可能仍引用该地址，原图删除后这些链接也会失效。</p>
+<p>卸载扩展会移除其本机扩展存储与 IndexedDB，但不会删除已经写入的本地文件、用户导出的备份或第三方云端文件。若希望停止本扩展的后台处理并清理数据，应先备份需要的内容，卸载扩展，并根据需要在夸克、WebDAV 和 s.ee 中管理文件及撤销或轮换服务凭据。仅在扩展仍运行时手动删除云端文件，不等于清理所有本地副本。</p>
+<h2>政策更新</h2>
+<p>数据处理方式变化时会更新本政策。商店披露应与所发布版本保持一致。</p>
+<h2>English summary</h2>
+<p>Page Garden is maintained by GitHub user rain0002009. Contact: <a href="https://github.com/rain0002009/new-page/issues">https://github.com/rain0002009/new-page/issues</a> . Do not post credentials or private content in public issues.</p>
+<p>The extension processes current-window tab URLs, titles, icons and groups; saved links, notes, Todo items, preferences and recycle-bin data; credentials for user-selected services; and Markdown files/images the user opens or uploads. It does not request Chrome history database access. Workspace data and credentials are stored in chrome.storage.local; full local Markdown contents, drafts, paths and file/directory handles are also stored in extension IndexedDB. Local credentials have no additional application-level encryption.</p>
+<p>Initial workspace use requires Quark or a compatible HTTPS WebDAV connection. Existing local data remains editable offline. Switching sources retains previous caches and credentials; background retries can include all connected sources. There is currently no one-click sign-out-and-clear-all-sources feature.</p>
+<p>Workspace data, including managed note bodies, is synchronized directly to the user&#39;s Quark or WebDAV account. Quark uses its login/storage endpoints and associated upload services, potentially including UC and Alibaba Cloud domains. Quark cookies and WebDAV passwords stay out of workspace exports but are sent to their respective services for authentication. The optional s.ee API key is an exception: it is included in workspace synchronization and exported backups. These files are not end-to-end encrypted by the extension.</p>
+<p>Explicit image uploads send the image and authentication to s.ee and insert a publicly accessible image URL. Remote Markdown, external images and site icons can contact their source hosts, which receive ordinary connection information such as IP addresses. Local and remote Markdown files are not automatically synchronized as whole managed notes; explicit image uploads still use the image host.</p>
+<p>The current extension has no developer-operated business-data server, advertising or analytics telemetry. Data is used to provide the described features, not sold or used for unrelated advertising, creditworthiness or lending. Third-party services operate under their own privacy policies. Voluntary support reports are handled by their platform and used by the maintainer to respond and resolve issues.</p>
+<p>Links and deleted parent containers use a recycle bin for up to 30 days; separately deleting one managed note is permanent immediately. Remote deletion depends on successful synchronization. Tombstones, synchronization baselines, conflicts, offline devices and previous exports may retain copies. There is no cloud synchronization-history recovery. Local disk files, exports and third-party backups require separate management.</p>
+<p>Image cleanup waits at least 30 seconds and requires successful synchronization, ownership checks and no locally known references. Failures retry later; deletion is not guaranteed without the original key or confirmed ownership. Deleting a hosted image can break references in external backups unknown to this device. Clearing the s.ee key does not itself delete uploaded images.</p>
+<p>Uninstalling removes extension-local storage and IndexedDB, but not disk files, exported backups or third-party cloud data. Back up desired content first; uninstall to stop extension background processing, then manage remote files and revoke/rotate service credentials as needed. Policy changes will be reflected here and in the store disclosures.</p></main></body></html>
