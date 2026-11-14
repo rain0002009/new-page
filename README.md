@@ -94,6 +94,7 @@ pnpm test
 - `docs/specs/ui-refinement-2026-11-10.md`：收藏、Todo、dnd-kit 与流体视觉的增量规格。
 - `docs/ui-refinement-validation.md`：本轮实现、双轴审查与浏览器验证记录。
 - `docs/markdown-notes-validation.md`：Markdown 笔记实现、双轴审查、验证结果与浏览器验收限制。
+- `docs/tab-groups-and-selection-validation.md`：Chrome 原生分组、双侧多选、批量操作与失败重试的验证记录。
 - `CONTEXT.md`、`docs/adr/`：领域术语与架构决策。
 
 任务跟踪使用 GitHub Issues（`rain0002009/new-page`）；技能入口为 `AGENTS.md`。
