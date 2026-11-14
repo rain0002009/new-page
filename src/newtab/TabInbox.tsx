@@ -24,7 +24,6 @@ const inbox = tv({
     tab: 'inbox-tab group/inbox-tab relative flex items-center gap-[9px] py-[12px] px-[10px] border border-solid border-[#c7d5b894] bg-[#fffffbc9] shadow-[0_2px_8px_#52673c0a] rounded-[10px] [transition:background_.2s,border-color_.2s] hover:bg-[#fffffbf0] hover:border-[#aabd92] active:cursor-grabbing text-ui-ink',
     description: 'min-w-0 flex-1',
     tabTitle: 'block w-full border-0 bg-transparent p-0 text-left text-[11px] [font-weight:550] truncate cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-ui-focus',
-    url: 'block text-[8px] text-[#a2ac96] truncate mt-[4px]',
   },
   variants: { open: {
     true: { base: 'inbox-open [@media(max-width:1000px)]:fixed [@media(max-width:1000px)]:right-0 [@media(max-width:1000px)]:w-[280px] [@media(max-width:1000px)]:z-20 [@media(max-width:1000px)]:shadow-[-15px_0_50px_#3a4e2522] [@media(max-width:1000px)]:pb-[75px] [@media(max-width:1000px)]:bg-[#f4f8edf2] [@media(max-width:1000px)]:backdrop-blur-[24px]' },
@@ -215,7 +214,7 @@ function InboxTab({ tab, notify }: { tab: OpenTab; notify: (message: string) => 
   }
   return <article {...drag} aria-label={`待选 ${tab.title}`} data-selected={selection?.isSelected('tabs', String(tab.tabId)) || undefined}>
     <SelectionIcon source="tabs" id={String(tab.tabId)} title={tab.title} small><SiteIcon size="small" url={tab.icon || ''} title={tab.title} /></SelectionIcon>
-    <div className={styles.description()}><button type="button" className={styles.tabTitle()} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => { if (!active) void chrome.tabs.update(tab.tabId, { active: true }).catch(() => notify('无法打开标签页，请重试')) }}>{tab.title}</button><span className={styles.url()} title={tab.url}>{tab.url}</span></div>
+    <div className={styles.description()}><button type="button" className={styles.tabTitle()} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => { if (!active) void chrome.tabs.update(tab.tabId, { active: true }).catch(() => notify('无法打开标签页，请重试')) }}>{tab.title}</button></div>
     <Button size="custom" className="h-[26px] w-[26px] shrink-0 p-0" aria-label={`关闭标签页 ${tab.title}`} title={`关闭标签页 ${tab.title}`} disabled={closing || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void closeTab()}><X size={14} /></Button>
     {inserting && <span role="img" aria-label="标签页放置位置" className={`pointer-events-none absolute left-0 right-0 h-[2px] rounded-full bg-[#829b65] ${source.index < tab.index ? 'bottom-[-6px]' : 'top-[-6px]'}`} />}
   </article>

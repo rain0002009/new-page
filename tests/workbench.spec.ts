@@ -1711,7 +1711,7 @@ test('待选预览双向变形连续，插入时卡片让位，取消后布局�
   await expect(page.getByRole('region', { name: '收藏块 日常收藏', exact: true }).getByRole('link')).toHaveText(['目标首项', '目标末项'])
 })
 
-test('减少动态效果时直接呈现结果，快捷建块仍保留提示和等待', async () => {
+test('减少动态效果时快捷建块立即提示松手创建', async () => {
   const { page, context } = await openClient()
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await connect(page)
@@ -1722,7 +1722,6 @@ test('减少动态效果时直接呈现结果，快捷建块仍保留提示和�
   const tab = await context.newPage()
   await tab.goto(`${origin}/web/guide`)
   await holdAtEdge(page, page.getByRole('article', { name: '待选 UnoCSS 指南', exact: true }), page.getByRole('region', { name: '收藏块 日常收藏', exact: true }))
-  await expect(page.getByText('停留新建收藏块', { exact: true })).toBeVisible()
   await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible({ timeout: 1000 })
   await page.mouse.up()
   await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true }).getByRole('link')).toHaveText('UnoCSS 指南')
@@ -1774,7 +1773,7 @@ test('拖动保留完整卡片和原尺寸，落点显示等尺寸占位', async
   await page.mouse.move(target.x + target.width / 2, target.y + 35, { steps: 20 })
   const preview = page.locator('.drag-preview')
   await expect(preview.getByText('拖动时这段备注也完整保留', { exact: true })).toBeVisible()
-  await expect(preview.getByText('react.dev', { exact: true })).toBeVisible()
+  await expect(preview.getByText('react.dev', { exact: true })).toHaveCount(0)
   const floating = (await preview.boundingBox())!
   expect(Math.abs(floating.width - source.width)).toBeLessThan(2)
   expect(Math.abs(floating.height - source.height)).toBeLessThan(2)
@@ -1869,7 +1868,7 @@ test('待选网页拖入先显示卡片占位，松手后平滑落位', async ()
   await expect.poll(() => tab.isClosed()).toBe(true)
 })
 
-test('已有收藏链接在块间停留0.6秒，松手原子建立新收藏', async () => {
+test('已有收藏链接到达块间落点即松手，立即原子建立新收藏', async () => {
   const { page } = await openClient()
   await connect(page)
   await addLink(page, '快捷移动的链接')
@@ -1891,14 +1890,7 @@ test('已有收藏链接在块间停留0.6秒，松手原子建立新收藏', as
   await page.mouse.down()
   await page.mouse.move(block.x + 90, block.y + block.height + 12, { steps: 20 })
   await expect(page.getByRole('status', { name: '快捷建块位置' })).toBeVisible()
-  await expect(page.getByText('停留新建收藏块', { exact: true })).toBeVisible()
-  await page.waitForTimeout(180)
-  await expect(page.getByText('松手新建收藏块', { exact: true })).toHaveCount(0)
-  await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true })).toHaveCount(0)
-  await page.mouse.move(block.x + 190, block.y + block.height + 12)
-  await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible({ timeout: 800 })
-  await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true })).toHaveCount(0)
-  await page.screenshot({ path: 'test-results/quick-collection-glow.png', fullPage: true })
+  expect(await page.getByText('停留新建收藏块', { exact: true }).count()).toBe(0)
   await page.mouse.up()
   const created = page.getByRole('region', { name: '收藏块 新收藏', exact: true })
   await expect(created.getByRole('link')).toHaveText('快捷移动的链接')
@@ -1937,7 +1929,7 @@ test('待选网页在首尾快捷建块，本地保存后关闭原页', async ()
   await expect(page.getByRole('link', { name: 'React 文档', exact: true })).toHaveCount(2)
 })
 
-test('快捷建块离开和换位置重新计时，提前松手与取消不收集', async () => {
+test('快捷建块切换落点后松手立即创建，取消仍不收集', async () => {
   const { page, context } = await openClient()
   await connect(page)
   const tab = await context.newPage()
@@ -1946,23 +1938,21 @@ test('快捷建块离开和换位置重新计时，提前松手与取消不收�
   const collection = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
   await holdAtEdge(page, source, collection)
   await expect(page.getByRole('status', { name: '快捷建块位置' })).toBeVisible()
-  await page.waitForTimeout(250)
   const block = (await collection.boundingBox())!
   await page.mouse.move(block.x + 90, block.y - 12, { steps: 10 })
-  await page.waitForTimeout(250)
-  await expect(page.getByText('松手新建收藏块', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await page.mouse.up()
   await expect(page.getByRole('region', { name: '收藏块 新收藏', exact: true })).toHaveCount(0)
   expect(tab.isClosed()).toBe(false)
   await holdAtEdge(page, source, collection)
   await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible({ timeout: 4000 })
   await page.mouse.move(block.x + 90, block.y - 12, { steps: 10 })
-  await expect(page.getByText('松手新建收藏块', { exact: true })).toHaveCount(0)
-  await page.keyboard.press('Escape')
+  await expect(page.getByText('松手新建收藏块', { exact: true })).toBeVisible()
   await page.mouse.up()
   await expect(page.getByRole('status', { name: '快捷建块位置' })).toHaveCount(0)
-  await expect(page.getByRole('region', { name: /^收藏块/ })).toHaveCount(1)
-  expect(tab.isClosed()).toBe(false)
+  await expect(page.getByRole('region', { name: /^收藏块/ }).getByRole('heading', { level: 2 })).toHaveText(['新收藏1', '日常收藏0'])
+  await expect.poll(() => tab.isClosed()).toBe(true)
 })
 
 test('快捷建块本地保存不等待夸克，重启后同步到另一客户端', async () => {
@@ -2016,7 +2006,7 @@ test('键盘收集待选网页并在卡片之间排序', async () => {
   await expect(page.getByRole('region', { name: '收藏块 日常收藏', exact: true }).getByRole('link')).toHaveText(['排到前面的卡片', 'React 文档'])
 })
 
-test('滚动离开快捷建块落点后清除发光和停留计时', async () => {
+test('滚动离开快捷建块落点后清除提示且不创建', async () => {
   const { page } = await openClient()
   await connect(page)
   await addLink(page, '滚动时保留原位置')
@@ -2098,7 +2088,7 @@ test('置顶标签页收集后关闭，关闭失败时保留收藏并提示', as
   expect(tab.isClosed()).toBe(false)
 })
 
-for (const input of ['键盘', '触摸'] as const) test(`${input}可以停留快捷建立收藏块`, async () => {
+for (const input of ['键盘', '触摸'] as const) test(`${input}到达快捷落点后可立即放下建立收藏块`, async () => {
   const { page, context } = await openClient()
   await connect(page)
   await addLink(page, '通过不同输入移动')

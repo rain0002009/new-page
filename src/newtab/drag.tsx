@@ -173,7 +173,7 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
       return
     }
     if (target.kind === 'new-collection') {
-      if (!target.ready || (source.kind !== 'saved-item' && source.kind !== 'tab') || (source.kind === 'saved-item' && source.itemKind === 'note' && batch.current.ids.length < 2)) { resolve(original); return }
+      if ((source.kind !== 'saved-item' && source.kind !== 'tab') || (source.kind === 'saved-item' && source.itemKind === 'note' && batch.current.ids.length < 2)) { resolve(original); return }
       if (batch.current.ids.length > 1) {
         const success = source.kind === 'saved-item' ? await act({ type: 'collect-items', ids: batch.current.ids, parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end' }) : await saveTabsBeforeClosing(batch.current.tabs, selection.pendingClosures, unsaved => act({ type: 'collect-tabs', parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end', links: unsaved.map(tabLink) }))
         await settle(success, source.kind === 'tab' ? { kind: 'new-link' } : { kind: 'existing' })

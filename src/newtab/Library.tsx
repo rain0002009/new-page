@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
 import { Bookmark, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Trash2 } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, pageLabel, type Collection, type Document, type Entity, type Link, type Note, type SavedItem } from '../core/model'
+import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem } from '../core/model'
 import { documentUrl, markdownDescription } from '../core/markdown'
 import { readLocalSnapshot } from '../core/local-workspace'
 import { Button, SiteIcon } from './ui'
@@ -15,9 +15,9 @@ import { Toast } from '../shared/Toast'
 import { SelectionIcon, useSelection } from './Selection'
 
 const cardAction = tv({
-  base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] hover:text-action-ghost-hover group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
-  variants: { todo: { true: 'text-[#829466] opacity-100', false: 'text-action-ghost opacity-0' } },
-  defaultVariants: { todo: false },
+  base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
+  variants: { tone: { regular: 'text-action-ghost hover:text-action-ghost-hover opacity-0', todo: 'text-[#829466] hover:text-action-ghost-hover opacity-100', danger: 'text-action-danger hover:bg-action-danger-hover opacity-0' } },
+  defaultVariants: { tone: 'regular' },
 })
 const collectionTool = 'h-[26px] w-[25px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface [@media(max-width:650px)]:w-[20px]'
 const collectionStyle = tv({
@@ -58,13 +58,13 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
   const styles = linkCard({ search: !!locate })
   const drag = useDragItem(locate ? `search:${link.id}` : link.id, { kind: 'saved-item', itemKind: 'link', entityId: link.id, title: link.title }, styles.base(), !!locate)
   return <article {...drag} data-selected={!locate && selection.isSelected('saved', link.id) || undefined} aria-label={`链接 ${link.title}`}>
-    <div className={styles.top()}>{locate ? <SiteIcon url={link.icon} title={link.title} /> : <SelectionIcon id={link.id} source="saved" title={link.title}><SiteIcon url={link.icon} title={link.title} /></SelectionIcon>}<div className={styles.actions()}>
+    <div className={styles.top()}><span className={styles.icon()}>{locate ? <SiteIcon url={link.icon} title={link.title} /> : <SelectionIcon id={link.id} source="saved" title={link.title}><SiteIcon url={link.icon} title={link.title} /></SelectionIcon>}</span><SavedPageLink href={link.url} className={styles.title()}>{link.title}</SavedPageLink></div>
+    <div className={styles.actions()}>
       <Button tone="custom" size="custom" className={cardAction()} aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
-      <Button tone="custom" size="custom" className={cardAction()} aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
-      <Button tone="custom" size="custom" className={cardAction({ todo: link.todo })} aria-label={link.todo ? '移出 Todo' : '加入 Todo'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
-    </div></div>
-    <SavedPageLink href={link.url} className={styles.title()}>{link.title}</SavedPageLink>
-    <span className={styles.domain()}>{pageLabel(link.url)}</span><p className={styles.note()}>{link.note}</p>
+      <Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
+      <Button tone="custom" size="custom" className={cardAction({ tone: link.todo ? 'todo' : 'regular' })} aria-label={link.todo ? '移出 Todo' : '加入 Todo'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
+    </div>
+    <p className={styles.note()}>{link.note}</p>
     {(location || locate) && <div className={styles.bottom()}>{location && <span className={styles.location()} title={location}><Folder size={10} />{location}</span>}<div className={styles.secondary()}>
       {locate && <Button size="custom" className="h-[21px] w-[23px] shrink-0 p-0" aria-label="定位收藏" onClick={locate}><LocateFixed size={13} /></Button>}
     </div></div>}
@@ -82,8 +82,8 @@ function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?
   }
   const noteIcon = <span className="grid place-items-center h-[30px] w-[30px] rounded-[8px] bg-[#eee5cb] text-[#9d8551]"><FileText size={20} /></span>
   return <article {...drag} data-selected={!search && selection.isSelected('saved', note.id) || undefined} aria-label={`笔记 ${note.title}`}>
-    <div className={styles.top()}>{search ? noteIcon : <SelectionIcon id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}<div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction()} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div></div>
-    <a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a><span className={styles.domain()}>Markdown 笔记</span>
+    <div className={styles.top()}><span className={styles.icon()}>{search ? noteIcon : <SelectionIcon id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}</span><a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a></div>
+    <div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div><span className={styles.domain()}>Markdown 笔记</span>
     <p className={styles.note()}>{markdownDescription(note.body)}</p><Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>
 }
