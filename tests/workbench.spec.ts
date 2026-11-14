@@ -4371,3 +4371,47 @@ test('批量分组：原生命名失败保留选择并重试同组且只取消�
   expect(tabs).toEqual([{ pinned: false, groupId: groups[0].id }, { pinned: false, groupId: groups[0].id }, { pinned: true, groupId: -1 }])
   expect([first, second, untouched].every(tab => !tab.isClosed())).toBe(true)
 })
+
+test('批量分组：新开收藏页重定向后失败重试仍分组且不重复打开或复用已有页', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+  await addLink(page, '会重定向的收藏', `${origin}/web/react`)
+  const existing = await context.newPage()
+  await existing.goto(`${origin}/web/guide`)
+  await page.bringToFront()
+  await page.evaluate(redirectUrl => {
+    const original = chrome.tabs.create.bind(chrome.tabs)
+    const originalGroup = chrome.tabs.group.bind(chrome.tabs)
+    let rejected = false
+    chrome.tabs.group = (async (properties: chrome.tabs.GroupOptions) => {
+      if (!rejected) { rejected = true; throw new Error('受控新页归组失败') }
+      return originalGroup(properties)
+    }) as typeof chrome.tabs.group
+    chrome.tabs.create = (async (properties: chrome.tabs.CreateProperties) => {
+      const created = await original(properties)
+      await chrome.tabs.update(created.id!, { url: redirectUrl })
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const current = await chrome.tabs.get(created.id!)
+        if (current.url === redirectUrl && current.status === 'complete') return created
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      throw new Error('受控重定向没有完成')
+    }) as typeof chrome.tabs.create
+  }, `${origin}/web/guide`)
+  await page.getByRole('checkbox', { name: '选择 会重定向的收藏', exact: true }).check()
+  const toolbar = page.getByRole('toolbar', { name: '批量操作', exact: true })
+  await toolbar.getByRole('button', { name: '分组', exact: true }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(toolbar).toContainText('已选 1 项')
+  expect(await page.evaluate(async guideUrl => (await chrome.tabs.query({ url: guideUrl })).length, existing.url())).toBe(2)
+  await toolbar.getByRole('button', { name: '分组', exact: true }).click()
+  await expect(toolbar).toHaveCount(0)
+  const actual = await page.evaluate(async guideUrl => {
+    const tabs = (await chrome.tabs.query({ currentWindow: true })).filter(tab => tab.url === guideUrl)
+    const groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT })
+    return { pages: tabs.length, grouped: tabs.filter(tab => tab.groupId !== -1).length, ungrouped: tabs.filter(tab => tab.groupId === -1).length, groups: groups.map(group => group.title) }
+  }, existing.url())
+  expect(actual).toEqual({ pages: 2, grouped: 1, ungrouped: 1, groups: ['分组1'] })
+  await expect(page.getByRole('region', { name: '收藏块 日常收藏', exact: true }).getByRole('link', { name: '会重定向的收藏', exact: true })).toHaveAttribute('href', `${origin}/web/react`)
+  expect(existing.isClosed()).toBe(false)
+})

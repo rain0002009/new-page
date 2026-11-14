@@ -58,6 +58,11 @@ const groupColors = [
   { color: 'cyan', label: '青色', swatch: 'bg-[#56a6b4]' },
   { color: 'orange', label: '橙色', swatch: 'bg-[#d79351]' },
 ] as const
+const groupButton = tv({
+  base: 'shrink-0 p-0 rounded-[7px] border-0 bg-transparent text-current hover:bg-[#ffffff90]',
+  variants: { collapse: { true: 'h-[25px] w-[20px]', false: 'h-[26px] w-[23px]' } },
+  defaultVariants: { collapse: false },
+})
 
 export function useWindowTabs() {
   const [tabs, setTabs] = useState<OpenTab[]>([])
@@ -150,10 +155,10 @@ function InboxGroup({ group, tabs, notify }: { group: WindowTabGroup; tabs: Open
   }
   return <div role="group" aria-label={`标签组 ${name}`} className={groupColor({ color: group.color })} data-motion-id={`tab-group:${group.id}`}>
     <div {...drag}>
-      <Button tone="custom" size="custom" className="h-[25px] w-[20px] shrink-0 p-0 rounded-[7px] border-0 bg-transparent text-current hover:bg-[#ffffff90]" aria-label={`${group.collapsed ? '展开' : '折叠'}分组 ${name}`} aria-expanded={!group.collapsed} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(() => chrome.tabGroups.update(group.id, { collapsed: !group.collapsed }))}>{group.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</Button>
+      <Button tone="custom" size="custom" className={groupButton({ collapse: true })} aria-label={`${group.collapsed ? '展开' : '折叠'}分组 ${name}`} aria-expanded={!group.collapsed} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(() => chrome.tabGroups.update(group.id, { collapsed: !group.collapsed }))}>{group.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</Button>
       <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-current" aria-hidden="true" /><strong className="min-w-0 flex-1 truncate ml-[4px] font-medium" title={name}>{name}</strong><span className="text-[9px] opacity-70 mr-[2px]">{group.memberCount}</span>
-      <Button tone="custom" size="custom" className="h-[26px] w-[23px] shrink-0 p-0 rounded-[7px] border-0 bg-transparent text-current hover:bg-[#ffffff90]" aria-label={`编辑分组 ${name}`} title={`编辑分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => setEditing(value => !value)}><Edit3 size={12} /></Button>
-      <Button tone="custom" size="custom" className="h-[26px] w-[23px] shrink-0 p-0 rounded-[7px] border-0 bg-transparent text-current hover:bg-[#ffffff90]" aria-label={`解除分组 ${name}`} title={`解除分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(async () => {
+      <Button tone="custom" size="custom" className={groupButton()} aria-label={`编辑分组 ${name}`} title={`编辑分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => setEditing(value => !value)}><Edit3 size={12} /></Button>
+      <Button tone="custom" size="custom" className={groupButton()} aria-label={`解除分组 ${name}`} title={`解除分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(async () => {
         const members = await chrome.tabs.query({ windowId: group.windowId, groupId: group.id })
         if (members.length) await chrome.tabs.ungroup([members[0].id!, ...members.slice(1).map(tab => tab.id!)])
       })}><Ungroup size={13} /></Button>

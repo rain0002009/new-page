@@ -4,13 +4,14 @@ export type TabSlot = { windowId: number; groupId: number; index: number; before
 export type WindowTabGroup = chrome.tabGroups.TabGroup & { memberCount: number; firstIndex: number; lastIndex: number }
 
 const unfinishedGroups = new Map<string, { id: number; title: string; tabIds: [number, ...number[]] }>()
+type GroupTab = Pick<OpenTab, 'tabId' | 'windowId'> & { url?: string }
 
-async function currentTabs(snapshot: OpenTab[]) {
+async function currentTabs(snapshot: GroupTab[]) {
   if (!snapshot.length) throw new Error('没有可操作的标签页')
   const windowId = snapshot[0].windowId
   const tabs = await Promise.all(snapshot.map(async tab => {
     const current = await chrome.tabs.get(tab.tabId)
-    if (tab.windowId !== windowId || current.windowId !== windowId || (current.pendingUrl || current.url) !== tab.url) {
+    if (tab.windowId !== windowId || current.windowId !== windowId || (tab.url !== undefined && (current.pendingUrl || current.url) !== tab.url)) {
       throw new Error('标签页已变化，请重新选择')
     }
     return current
@@ -18,7 +19,7 @@ async function currentTabs(snapshot: OpenTab[]) {
   return { tabs, windowId }
 }
 
-export async function createTabGroup(snapshot: OpenTab[]): Promise<number> {
+export async function createTabGroup(snapshot: GroupTab[]): Promise<number> {
   const { tabs, windowId } = await currentTabs(snapshot)
   const key = `${windowId}:${tabs.map(tab => tab.id!).sort((a, b) => a - b).join(',')}`
   let unfinished = unfinishedGroups.get(key)

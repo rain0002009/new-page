@@ -23,7 +23,7 @@ import { readDroppedMarkdown, rememberFile } from '../document/local-files'
 import { SelectionProvider } from './Selection'
 import BatchActions from './BatchActions'
 import { createTabGroup } from './tab-groups'
-import { closeSavedTabs } from './tab-actions'
+import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
 
 const workbench = tv({
   slots: {
@@ -167,11 +167,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     const snapshot = tabs.map(tab => ({ ...tab }))
     const targetSpace = space.id
     try {
-      const unsaved = snapshot.filter(tab => !pendingClosures.has(tab.tabId))
-      if (unsaved.length) {
-        if (!await act({ type: 'collect-tabs', parentId: targetSpace, title: collectionTitle(), links: unsaved.map(tabLink) })) return
-        unsaved.forEach(tab => pendingClosures.set(tab.tabId, tab))
-      }
+      if (!await saveTabsBeforeClosing(snapshot, pendingClosures, unsaved => act({ type: 'collect-tabs', parentId: targetSpace, title: collectionTitle(), links: unsaved.map(tabLink) }))) return
       setSelected(targetSpace); setPage('space'); setInboxOpen(false)
       setCollectionReveal(value => value + 1)
       const notices = new Set<string>()

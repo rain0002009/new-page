@@ -7,7 +7,7 @@ import { Button, Modal, ModalPresence } from './ui'
 import { useSelection } from './Selection'
 import { collectionTitle, tabLink, type OpenTab } from './open-tabs'
 import { createTabGroup } from './tab-groups'
-import { closeSavedTabs } from './tab-actions'
+import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
 
 type Props = { doc: Document; sourceId: string; spaceId?: string; tabs: OpenTab[]; act: Act; notify: (message: string) => void; refreshTabs: () => void; reveal: (spaceId: string) => void }
 export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify, refreshTabs, reveal }: Props) {
@@ -41,12 +41,7 @@ export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify
       if (success) { selection.clear(); setDialog(null); reveal(destinationSpace) }
       return
     }
-    const unsaved = snapshot.filter(tab => !selection.pendingClosures.has(tab.tabId))
-    if (unsaved.length) {
-      const success = await act(target ? { type: 'add-links', parentId: target, links: unsaved.map(tabLink) } : { type: 'collect-tabs', parentId: spaceId, title: collectionTitle(), links: unsaved.map(tabLink) })
-      if (!success) return
-      unsaved.forEach(tab => selection.pendingClosures.set(tab.tabId, tab))
-    }
+    if (!await saveTabsBeforeClosing(snapshot, selection.pendingClosures, unsaved => act(target ? { type: 'add-links', parentId: target, links: unsaved.map(tabLink) } : { type: 'collect-tabs', parentId: spaceId, title: collectionTitle(), links: unsaved.map(tabLink) }))) return
     setDialog(null)
     const failed = await closeSavedTabs(snapshot, selection.pendingClosures, notify)
     selection.retain(failed)
@@ -66,7 +61,7 @@ export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify
         let previous = opened.current.get(item.id)
         if (previous) {
           const actual = await chrome.tabs.get(previous.tabId).catch(() => null)
-          if (!actual || actual.windowId !== currentWindow.id || (actual.pendingUrl || actual.url) !== previous.url) { opened.current.delete(item.id); previous = undefined }
+          if (!actual || actual.windowId !== currentWindow.id) { opened.current.delete(item.id); previous = undefined }
         }
         if (!previous) {
           const address = item.kind === 'note' ? documentUrl({ note: item.id, source: sourceId }) : isMarkdownUrl(item.url) ? documentUrl({ url: item.url }) : item.url
@@ -78,7 +73,9 @@ export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify
       } catch { failed.push(item.id) }
     }
     if (ready.length) {
-      try { await createTabGroup(ready.map(item => item.tab)); ready.forEach(item => opened.current.delete(item.id)) }
+      // Newly opened pages may redirect while the rest of the batch opens.
+      // Their tab identities define this operation; inbox snapshots keep URL guards.
+      try { await createTabGroup(ready.map(({ tab }) => ({ tabId: tab.tabId, windowId: tab.windowId }))); ready.forEach(item => opened.current.delete(item.id)) }
       catch (cause) { failed.push(...ready.map(item => item.id)); notify(cause instanceof Error ? cause.message : '新页面已打开，分组未完成，可重试') }
     }
     selection.retain(failed)

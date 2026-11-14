@@ -9,7 +9,7 @@ import { canSortTabs, tabLink, type OpenTab } from './open-tabs'
 import type { QuickCollectionTarget } from './QuickCollectionGap'
 import { useSelection } from './Selection'
 import { moveTabsToSlot, moveWholeGroup, type TabSlot } from './tab-groups'
-import { closeSavedTabs } from './tab-actions'
+import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
 
 type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string } | { kind: 'tab-group'; groupId: number; windowId: number; title: string }
 type DragTarget = DragItem | { kind: 'content' } | QuickCollectionTarget | ({ kind: 'tab-slot' } & TabSlot)
@@ -175,22 +175,19 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
     if (target.kind === 'new-collection') {
       if (!target.ready || (source.kind !== 'saved-item' && source.kind !== 'tab') || (source.kind === 'saved-item' && source.itemKind === 'note' && batch.current.ids.length < 2)) { resolve(original); return }
       if (batch.current.ids.length > 1) {
-        const unsaved = batch.current.tabs.filter(tab => !selection.pendingClosures.has(tab.tabId))
-        const success = source.kind === 'tab' && !unsaved.length || await act(source.kind === 'saved-item' ? { type: 'collect-items', ids: batch.current.ids, parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end' } : { type: 'collect-tabs', parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end', links: unsaved.map(tabLink) })
+        const success = source.kind === 'saved-item' ? await act({ type: 'collect-items', ids: batch.current.ids, parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end' }) : await saveTabsBeforeClosing(batch.current.tabs, selection.pendingClosures, unsaved => act({ type: 'collect-tabs', parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end', links: unsaved.map(tabLink) }))
         await settle(success, source.kind === 'tab' ? { kind: 'new-link' } : { kind: 'existing' })
         if (success) {
           if (source.kind === 'tab') {
-            batch.current.tabs.forEach(tab => selection.pendingClosures.set(tab.tabId, selection.pendingClosures.get(tab.tabId) ?? tab))
             selection.retain(await closeSavedTabs(batch.current.tabs, selection.pendingClosures, notify))
           } else selection.clear()
         }
         return
       }
-      const success = source.kind === 'tab' && selection.pendingClosures.has(source.tab.tabId) || await act({ type: 'create-collection-with-link', parentId: target.spaceId, beforeId: target.beforeId, source: source.kind === 'tab' ? { kind: 'new', link: tabLink(source.tab) } : { kind: 'link', id: source.entityId } })
+      const success = source.kind === 'tab' ? await saveTabsBeforeClosing([source.tab], selection.pendingClosures, unsaved => act({ type: 'create-collection-with-link', parentId: target.spaceId, beforeId: target.beforeId, source: { kind: 'new', link: tabLink(unsaved[0]) } })) : await act({ type: 'create-collection-with-link', parentId: target.spaceId, beforeId: target.beforeId, source: { kind: 'link', id: source.entityId } })
       await settle(success, source.kind === 'tab' ? { kind: 'new-link' } : { kind: 'existing' })
       if (success) {
         if (source.kind === 'tab') {
-          selection.pendingClosures.set(source.tab.tabId, selection.pendingClosures.get(source.tab.tabId) ?? source.tab)
           selection.retain(await closeSavedTabs([source.tab], selection.pendingClosures, notify))
         } else selection.clear()
       }
@@ -207,11 +204,9 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
       const parentId = target.kind === 'collection' ? entity.id : target.kind === 'saved-item' ? entity.parentId : null
       if (parentId) {
         const snapshot = batch.current.tabs.length ? batch.current.tabs : [source.tab]
-        const unsaved = snapshot.filter(tab => !selection.pendingClosures.has(tab.tabId))
-        const success = !unsaved.length || await act({ type: 'add-links', parentId, links: unsaved.map(tabLink), beforeId: target.kind === 'saved-item' ? target.entityId : undefined })
+        const success = await saveTabsBeforeClosing(snapshot, selection.pendingClosures, unsaved => act({ type: 'add-links', parentId, links: unsaved.map(tabLink), beforeId: target.kind === 'saved-item' ? target.entityId : undefined }))
         await settle(success, { kind: 'new-link', collectionId: parentId })
         if (success) {
-          snapshot.forEach(tab => selection.pendingClosures.set(tab.tabId, selection.pendingClosures.get(tab.tabId) ?? tab))
           selection.retain(await closeSavedTabs(snapshot, selection.pendingClosures, notify))
         }
       }

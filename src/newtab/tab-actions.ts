@@ -1,5 +1,12 @@
 import type { OpenTab } from './open-tabs'
 
+export async function saveTabsBeforeClosing(tabs: OpenTab[], pending: Map<number, OpenTab>, save: (unsaved: OpenTab[]) => Promise<boolean>) {
+  const unsaved = tabs.filter(tab => !pending.has(tab.tabId))
+  if (unsaved.length && !await save(unsaved)) return false
+  unsaved.forEach(tab => pending.set(tab.tabId, tab))
+  return true
+}
+
 // A saved tab can be retried without re-saving it; identities and the original
 // URL/window guard remain fixed until closing succeeds or the page changes.
 export async function closeSavedTabs(tabs: OpenTab[], pending: Map<number, OpenTab>, notify: (message: string) => void) {
