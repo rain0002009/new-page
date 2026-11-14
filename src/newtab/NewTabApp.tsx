@@ -208,7 +208,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
 }
 function Brand({ sidebar = false }: { sidebar?: boolean }) {
   const styles = brand({ sidebar })
-  return <div className={styles.base()}><span className={styles.icon()}><Leaf size={22} strokeWidth={1.8} /></span><div className={sidebar ? '[@media(max-width:650px)]:hidden' : undefined}>拾页<small className={styles.caption()}>PAGE GARDEN</small></div></div>
+  return <div className={styles.base()}><span className={styles.icon()}><Leaf size={22} strokeWidth={1.8} /></span><div className={sidebar ? '[@media(max-width:650px)]:hidden' : undefined}>页墟<small className={styles.caption()}>PAGE GARDEN</small></div></div>
 }
 function SpaceRow({ item, selected, select, rename, remove }: { item: Entity; selected: boolean; select: () => void; rename: () => void; remove: () => void }) {
   const drag = useDragItem(item.id, { kind: 'space', entityId: item.id, title: item.title }, styles.space())

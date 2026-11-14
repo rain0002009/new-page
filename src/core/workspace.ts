@@ -3,7 +3,8 @@ import { emptyDocument, merge, refreshConflicts, resolveConflict } from './merge
 import type { ConnectRequest, Request, Result } from './protocol'
 import { RevisionChanged } from './webdav'
 import { normalizeRemote, remoteKey, remoteStore, isQuark, type Connection, type RemoteRead } from './remote'
-import { startQr, pollQr } from './quark/auth'
+import { startQr, pollQr, repairFolder } from './quark/auth'
+import { QuarkStore } from './quark/store'
 import { quarkOrigins } from './quark/transport'
 import type { LoginProgress } from './quark/progress'
 import { storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root, type WorkspaceSource } from './local-workspace'
@@ -123,22 +124,26 @@ export function schedule(id: string, delay = 600) {
   if (pending) clearTimeout(pending)
   scheduled.set(id, setTimeout(() => { scheduled.delete(id); void synchronize(id) }, delay))
 }
-export function synchronize(id: string): Promise<void> {
+export function synchronize(id: string, repairing = false): Promise<void> {
   const pending = scheduled.get(id)
   if (pending) { clearTimeout(pending); scheduled.delete(id) }
   const running = inFlight.get(id)
-  if (running) return running
-  const task = synchronizeSource(id).finally(() => inFlight.delete(id))
+  if (running) return repairing ? Promise.reject(new Error('正在同步，请稍后重试修复')) : running
+  const task = synchronizeSource(id, repairing).finally(() => inFlight.delete(id))
   inFlight.set(id, task)
   return task
 }
-async function synchronizeSource(id: string) {
+async function synchronizeSource(id: string, repairing = false) {
   syncing.add(id)
   let retry = false
   try {
     const initial = await atomic(root => {
       const source = root.sources[id]
       if (!source || source.conflicts.length) return null
+      if (repairing) {
+        if (!isQuark(source.config)) throw new Error('只有夸克收藏库支持此修复操作')
+        source.pendingNoteIds = [...new Set([...(source.pendingNoteIds ?? []), ...Object.values(source.doc.entities).filter(entity => entity.kind === 'note').map(entity => entity.id)])]
+      }
       const before = source.doc
       source.doc = prune(source.doc)
       queueDocumentImageChanges(root, id, before, source.doc)
@@ -147,15 +152,30 @@ async function synchronizeSource(id: string) {
     })
     if (!initial) return
     broadcast()
-    const client = remoteStore(initial.config, initial.etag, initial.pendingNoteIds)
+    if (repairing && isQuark(initial.config)) {
+      const previousFolderId = initial.config.folderId
+      const config = await repairFolder(initial.config)
+      if (config.folderId !== previousFolderId) {
+        await atomic(root => {
+          const source = root.sources[id]
+          if (!source || !isQuark(source.config) || source.config.accountId !== config.accountId || source.config.folderId !== previousFolderId) throw new Error('数据源已变更，请重试修复')
+          source.config = config
+          source.etag = null
+          delete source.resolvedRevision
+        })
+        initial.config = config
+        initial.etag = null
+      }
+    }
+    const client = repairing && isQuark(initial.config) ? new QuarkStore(initial.config, initial.etag, initial.pendingNoteIds, true) : remoteStore(initial.config, initial.etag, initial.pendingNoteIds)
     const remote: RemoteRead = await client.read()
     let unchanged: Document | null = null
     const upload = await atomic(root => {
       const source = root.sources[id]
       if (!source || source.conflicts.length) return null
       // Disappearance of an established file is not a fresh empty account.
-      if (!remote.doc && Object.keys(source.base.entities).length) throw new Error('远端数据文件被移除，本地数据已保留；请检查服务器后重试')
-      const result = merge(source.base, source.doc, remote.doc ?? emptyDocument())
+      if (!repairing && !remote.doc && Object.keys(source.base.entities).length) throw new Error('远端数据文件被移除，本地数据已保留；请检查服务器后重试')
+      const result = merge(repairing && !remote.doc ? emptyDocument() : source.base, source.doc, remote.doc ?? emptyDocument())
       const before = source.doc
       source.doc = prune(result.doc); source.conflicts = includeCloudConflicts(result.conflicts, source.resolvedRevision === remote.etag ? [] : remote.conflicts)
       queueDocumentImageChanges(root, id, before, source.doc)
@@ -191,7 +211,7 @@ async function synchronizeSource(id: string) {
       source.status = retry ? 'pending' : 'synced'; source.error = ''
     })
   } catch (error) {
-    retry = error instanceof RevisionChanged
+    retry = !repairing && error instanceof RevisionChanged
     await atomic(root => {
       const source = root.sources[id]
       if (source) { source.status = retry ? 'pending' : 'error'; source.error = error instanceof Error ? error.message : '同步失败，本地数据已保留' }
@@ -203,7 +223,12 @@ async function synchronizeSource(id: string) {
   }
 }
 async function connect(request: ConnectRequest): Promise<Result> {
-  const config = normalizeRemote(request.config), id = await remoteKey(config)
+  const config = normalizeRemote(request.config)
+  const defaultId = await remoteKey(config)
+  const id = isQuark(config) ? await atomic(root => Object.keys(root.sources).find(id => {
+    const saved = root.sources[id].config
+    return isQuark(saved) && saved.folderId === config.folderId
+  }) ?? defaultId) : defaultId
   if (!isQuark(config) && !await chrome.permissions.contains({ origins: [new URL(config.url).origin + '/*'] })) throw new Error('未获得 WebDAV 服务器访问权限，请重新点击连接并授权')
   const knownRevision = await atomic(root => root.sources[id]?.etag ?? null)
   const client = remoteStore(config, knownRevision)
@@ -332,6 +357,19 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     return { ok: true, qr }
   }
   if (request.type === 'connect') return connect(request)
+  if (request.type === 'quark-repair') {
+    await atomic(root => {
+      const source = current(root, request.sourceId)
+      if (!isQuark(source.config)) throw new Error('只有夸克收藏库支持此修复操作')
+      if (source.conflicts.length) throw new Error('请先处理同步冲突再修复')
+    })
+    await synchronize(request.sourceId, true)
+    return atomic(root => {
+      const source = current(root, request.sourceId)
+      if (source.status === 'error') throw new Error(source.error || '修复失败，请重试；本地数据已保留')
+      return { ok: true, snapshot: snapshot(root) } as const
+    })
+  }
   if (request.type === 'sync') {
     await atomic(root => current(root, request.sourceId))
     await synchronize(request.sourceId)

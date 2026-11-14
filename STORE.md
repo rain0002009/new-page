@@ -1,10 +1,10 @@
 # Store metadata (unpublished)
 
-Last updated: 2026-11-10
+Last updated: 2026-11-14
 
 ## Listing
 
-- Name: 拾页 · Page Garden
+- Name: 页墟 · Page Garden
 - Summary: 用空间和收藏块整理网页，用书签标记 Todo，通过自己的 WebDAV 同步收藏。
 - Language: zh-CN
 - License: MIT

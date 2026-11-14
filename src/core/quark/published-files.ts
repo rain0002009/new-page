@@ -4,8 +4,8 @@ import { listAll } from './auth'
 import type { QuarkClient } from './client'
 import type { QuarkEntry } from './types'
 
-const temporaryPrefix = '.拾页上传-'
-const previousPrefix = '.拾页旧版-'
+const temporaryPrefix = '.页墟上传-'
+const previousPrefix = '.页墟旧版-'
 const notePattern = /--([a-f0-9]{32})\.md$/
 const receiptSchema = z.record(z.string(), z.object({ fid: z.string(), name: z.string(), size: z.number(), updatedAt: z.string().optional(), hash: z.string() }))
 export type NoteReceipts = z.infer<typeof receiptSchema>
@@ -100,7 +100,7 @@ export async function publishFiles(client: QuarkClient, folder: string, doc: Doc
         }
       }
       for (const file of entries) {
-        const artifact = /^(?:\.拾页上传-|\.拾页旧版-)([a-f0-9]{32})-/.exec(file.name)
+        const artifact = /^(?:\.页墟上传-|\.页墟旧版-)([a-f0-9]{32})-/.exec(file.name)
         // replace already cleans artifacts for the current title. Limit all
         // other cleanup to this note, leaving unrelated Markdown untouched.
         if (obsolete.includes(file) || (!file.isDirectory && artifact && targets.has(artifact[1]) && (!replaced || artifact[1] !== suffix))) { await check(); await client.deleteFile(file.fid) }

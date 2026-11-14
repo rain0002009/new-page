@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Cloud, Download, Upload, RotateCcw, Trash2, AlertTriangle } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { type Entity, type Conflict, type Document } from '../core/model'
@@ -44,6 +44,8 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
   const [nickname, setNickname] = useState(data.document.entities.profile.title)
   const [pending, setPending] = useState<{ data: unknown; message: string } | null>(null)
   const [recycleAction, setRecycleAction] = useState<{ type: 'purge'; entity: Entity } | { type: 'empty-trash' } | null>(null)
+  const [repairOpen, setRepairOpen] = useState(false)
+  const repairRunning = useRef(false)
   const [busy, setBusy] = useState(false)
   const [takeover, setTakeover] = useState(true)
   useEffect(() => { void chrome.storage.local.get(['markdownTakeover', 'markdownTakeoverError']).then(value => { setTakeover(value.markdownTakeover !== false); if (value.markdownTakeoverError) onError(String(value.markdownTakeoverError)) }) }, [])
@@ -56,6 +58,17 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
     const result = await rpc({ type: 'import', sourceId: data.sourceId!, data: value, confirmed })
     if (result.confirmation) setPending({ data: value, message: result.confirmation })
     else if (result.snapshot) { receive(result.snapshot); setPending(null) }
+  }
+  async function repairQuark() {
+    if (repairRunning.current || busy || data.status === 'syncing' || data.conflicts.length) return
+    repairRunning.current = true
+    try {
+      await execute(async () => {
+        const result = await rpc({ type: 'quark-repair', sourceId: data.sourceId! })
+        if (result.snapshot) receive(result.snapshot)
+        setRepairOpen(false)
+      })
+    } finally { repairRunning.current = false }
   }
   const deleted = Object.values(data.document.entities).filter(e => !e.purged && e.deletedAt !== null && e.deletedBy === e.id).sort((a, b) => b.deletedAt! - a.deletedAt!)
   const profile = data.document.entities.profile
@@ -70,8 +83,8 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
       <label className={fields.label({ className: 'mt-[22px]' })}>显示昵称<input className={fields.control()} aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label>
     </section>
     {data.conflicts.length > 0 && <section className={styles.card()}><h2 className={styles.title()}><AlertTriangle size={16} />选择要保留的版本</h2><p className={styles.description()}>两个版本均已保留在本机。处理完后继续同步，你也可以继续整理其他收藏。</p>{data.conflicts.map(conflict => <ConflictChoice key={conflict.id} conflict={conflict} busy={busy} choose={side => void execute(async () => { const result = await rpc({ type: 'resolve', sourceId: data.sourceId!, conflictId: conflict.id, side }); if (result.snapshot) receive(result.snapshot) })} />)}</section>}
-    <section className={styles.card()}><h2 className={styles.title()}>连接与同步</h2><p className={styles.description()} role="status">{syncStatusLabels[data.status]}</p><div className={styles.sync()}><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><Button disabled={busy} onClick={() => void execute(async () => { const result = await rpc({ type: 'sync', sourceId: data.sourceId! }); if (result.snapshot) receive(result.snapshot) })}><Cloud size={16} />立即同步</Button></div><ConnectionForm key={data.sourceId} initial={data.connection} connected done={receive} onError={onError} /></section>
-    <section className={styles.card()}><h2 className={styles.title()}>备份与迁移</h2><p className={styles.description()}>备份包含收藏、完整笔记正文、顺序、待办与回收站；不包含网盘登录信息或 WebDAV 密码。</p>{data.connection?.kind === 'quark' && <p className={styles.description()}>夸克「拾页收藏」中只保留当前收藏.json 和笔记目录中的 Markdown，不保留同步历史。普通同步包含完整笔记正文；独立 Markdown 在新建或编辑保存时更新，网盘中的手工修改不会回写。重要修改前可导出备份。</p>}<div className={styles.backup()}><Button disabled={busy} onClick={() => void execute(async () => {
+    <section className={styles.card()}><h2 className={styles.title()}>连接与同步</h2><p className={styles.description()} role="status">{syncStatusLabels[data.status]}</p><div className={styles.sync()}><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><div className="flex flex-wrap gap-[8px]"><Button disabled={busy} onClick={() => void execute(async () => { const result = await rpc({ type: 'sync', sourceId: data.sourceId! }); if (result.snapshot) receive(result.snapshot) })}><Cloud size={16} />立即同步</Button>{data.connection?.kind === 'quark' && <Button disabled={busy || data.status === 'syncing' || data.conflicts.length > 0} onClick={() => setRepairOpen(true)}><RotateCcw size={16} />修复夸克同步</Button>}</div></div><ConnectionForm key={data.sourceId} initial={data.connection} connected done={receive} onError={onError} /></section>
+    <section className={styles.card()}><h2 className={styles.title()}>备份与迁移</h2><p className={styles.description()}>备份包含收藏、完整笔记正文、顺序、待办与回收站；不包含网盘登录信息或 WebDAV 密码。</p>{data.connection?.kind === 'quark' && <p className={styles.description()}>夸克「页墟收藏」中只保留当前收藏.json 和笔记目录中的 Markdown，不保留同步历史。普通同步包含完整笔记正文；独立 Markdown 在新建或编辑保存时更新，网盘中的手工修改不会回写。重要修改前可导出备份。</p>}<div className={styles.backup()}><Button disabled={busy} onClick={() => void execute(async () => {
       const result = await rpc({ type: 'export', sourceId: data.sourceId! })
       const url = URL.createObjectURL(new Blob([JSON.stringify(result.backup, null, 2)], { type: 'application/json' }))
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = `page-garden-${new Date().toISOString().slice(0, 10)}.json`; anchor.click()
@@ -85,6 +98,12 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
         <div className="flex shrink-0 items-center gap-[8px]"><Button aria-label={`恢复 ${entity.title}`} disabled={busy} onClick={() => void execute(async () => { await act({ type: 'restore', id: entity.id }) })}><RotateCcw size={14} />恢复</Button><Button tone="danger" aria-label={`彻底删除 ${entity.title}`} disabled={busy} onClick={() => setRecycleAction({ type: 'purge', entity })}><Trash2 size={14} />删除</Button></div>
       </div>)}</div> : <p className={styles.empty()}>回收站空空的</p>}
     </section>
+    <ModalPresence>{repairOpen && <Modal title="修复夸克同步" close={() => { if (!busy) setRepairOpen(false) }}>
+      <p className="text-[14px] [overflow-wrap:anywhere]">将用当前本地收藏和完整笔记正文，重建夸克中缺失的「页墟收藏」文件夹、收藏.json 和笔记 Markdown 文件。</p>
+      <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>云端已有完整收藏时会进行正常同步；遇到冲突需要选择保留的版本。</p>
+      <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>修复无法找回本地已没有的内容。网络或登录失败时保留本地数据，可在恢复连接后重试。</p>
+      <div className="flex justify-end gap-[8px] mt-[24px]"><Button data-autofocus disabled={busy} onClick={() => setRepairOpen(false)}>取消</Button><Button tone="primary" disabled={busy || data.status === 'syncing' || data.conflicts.length > 0} onClick={() => void repairQuark()}>{busy ? '正在修复…' : '确认修复'}</Button></div>
+    </Modal>}</ModalPresence>
     <ModalPresence>{recycleAction && <Modal title={recycleAction.type === 'purge' ? '彻底删除' : '清空回收站'} close={() => { if (!busy) setRecycleAction(null) }}>
       <p className="text-[14px] [overflow-wrap:anywhere]">{recycleAction.type === 'purge' ? `彻底删除「${recycleAction.entity.title}」及其包含的内容？` : '彻底删除回收站中的全部内容？'}</p>
       <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>删除后无法从回收站恢复。</p>

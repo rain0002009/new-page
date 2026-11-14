@@ -36,7 +36,7 @@ export class QuarkStore {
   private etag: string | null = null
   private loaded = false
   private syncVersion = 0
-  constructor(private config: QuarkConnection, private knownRevision: string | null = null, private noteIds: string[] = []) {}
+  constructor(private config: QuarkConnection, private knownRevision: string | null = null, private noteIds: string[] = [], private repairing = false) {}
   async verify() { await (await accountClient(this.config)).getAccountInfo() }
   async read() {
     const client = await accountClient(this.config)
@@ -45,7 +45,8 @@ export class QuarkStore {
     const recovered = !file ? await recoverIndex(client, this.root, known(this.knownRevision).fid) : undefined
     if (recovered) { this.root = await listAll(client, this.config.folderId); file = current(this.root) }
     if (!file) {
-      if (this.knownRevision || this.root.some(history)) throw new Error('夸克收藏.json 已被移除，请检查备份；本地数据已保留')
+      if (!this.repairing && (this.knownRevision || this.root.some(history))) throw new Error('夸克收藏.json 已被移除，请在设置中修复夸克同步；本地数据已保留')
+      this.syncVersion = known(this.knownRevision).syncVersion ?? 0
       this.loaded = true
       return { doc: null, etag: null }
     }
@@ -76,7 +77,8 @@ export class QuarkStore {
     const root = writing ? await this.check(client, expected) : this.root
     let result: Awaited<ReturnType<typeof publishFiles>>
     try {
-      result = await publishFiles(client, this.config.folderId, doc, root, this.body, this.receipts, this.syncVersion, () => this.check(client, expected).then(() => undefined), this.noteIds, writing)
+      const noteIds = this.repairing ? [...new Set([...this.noteIds, ...Object.values(doc.entities).filter(entity => entity.kind === 'note').map(entity => entity.id)])] : this.noteIds
+      result = await publishFiles(client, this.config.folderId, doc, root, this.body, this.receipts, this.syncVersion, () => this.check(client, expected).then(() => undefined), noteIds, writing)
     } catch (cause) {
       if (cause instanceof QuarkApiError && (cause.status === 409 || cause.status === 404)) throw new RevisionChanged()
       throw cause

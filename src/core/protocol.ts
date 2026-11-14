@@ -24,6 +24,7 @@ export type Request =
   | { type: 'action'; sourceId: string; action: Action }
   | ConnectRequest
   | { type: 'sync'; sourceId: string }
+  | { type: 'quark-repair'; sourceId: string }
   | { type: 'resolve'; sourceId: string; conflictId: string; side: 'local' | 'remote' }
   | { type: 'export'; sourceId: string }
   | { type: 'import'; sourceId: string; data: unknown; confirmed: boolean }

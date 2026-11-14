@@ -40,6 +40,23 @@ export async function accountClient(config: QuarkConnection) {
     await edit(state => { if (state.accounts[config.accountId] === previous) state.accounts[config.accountId] = cookie })
   })
 }
+export async function repairFolder(config: QuarkConnection): Promise<QuarkConnection> {
+  const client = await accountClient(config)
+  const entries = await listAll(client, '0')
+  if (entries.some(entry => entry.isDirectory && entry.fid === config.folderId)) return config
+  const folders = entries.filter(entry => entry.isDirectory && entry.name === '页墟收藏')
+  if (folders.length > 1) throw new Error('夸克存在多个「页墟收藏」文件夹，请整理后重试修复；本地数据已保留')
+  let folderId = folders[0]?.fid ?? await client.createDirectory('0', '页墟收藏')
+  for (let attempt = 0; !folderId && attempt < 4; attempt++) {
+    if (attempt) await new Promise(done => setTimeout(done, 400 * attempt))
+    const visible = (await listAll(client, '0')).filter(entry => entry.isDirectory && entry.name === '页墟收藏')
+    if (visible.length > 1) throw new Error('夸克存在多个「页墟收藏」文件夹，请整理后重试修复；本地数据已保留')
+    folderId = visible[0]?.fid
+  }
+  if (!folderId) throw new Error('夸克目录尚未可见，请稍后重试修复；本地数据已保留')
+  // Keep the local account binding and its credentials when replacing a deleted folder.
+  return { ...config, folderId }
+}
 export async function startQr(progress?: LoginProgress): Promise<QrState> {
   progress?.('preparing')
   let cookie = ''
@@ -68,14 +85,14 @@ async function finishQr(id: string): Promise<{ qr: QrState; config?: QuarkConnec
   await client.getAccountInfoByServiceTicket(result.serviceTicket)
   const info = await client.getAccountInfo()
   if (!login.cookie) throw new Error('未获取到夸克登录信息，请刷新二维码后重试')
-  const folders = (await listAll(client, '0')).filter(entry => entry.isDirectory && entry.name === '拾页收藏').sort((a, b) => a.fid.localeCompare(b.fid))
+  const folders = (await listAll(client, '0')).filter(entry => entry.isDirectory && entry.name === '页墟收藏').sort((a, b) => a.fid.localeCompare(b.fid))
   let folderId: string | undefined = folders[0]?.fid
   if (!folderId) {
-    folderId = await client.createDirectory('0', '拾页收藏')
+    folderId = await client.createDirectory('0', '页墟收藏')
     // Some responses omit fid. Retry visibility instead of immediately failing.
     for (let attempt = 0; !folderId && attempt < 4; attempt++) {
       if (attempt) await new Promise(done => setTimeout(done, 400 * attempt))
-      folderId = (await listAll(client, '0')).find(entry => entry.isDirectory && entry.name === '拾页收藏')?.fid
+      folderId = (await listAll(client, '0')).find(entry => entry.isDirectory && entry.name === '页墟收藏')?.fid
     }
   }
   if (!folderId) throw new Error('夸克目录尚未可见，请稍后重试；现有文件未被删除')

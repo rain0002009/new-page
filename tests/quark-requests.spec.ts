@@ -547,7 +547,7 @@ test('编辑发布失败后保留旧 Markdown，重试重新上传遗留临时�
   }
   await expect(store.write(changed, etag)).rejects.toThrow('rename failed')
   expect(files.get(old.fid)?.name).toMatch(/.md$/)
-  const pending = [...files.values()].find(file => file.name.startsWith('.拾页上传-') && file.parentFid === old.parentFid)!
+  const pending = [...files.values()].find(file => file.name.startsWith('.页墟上传-') && file.parentFid === old.parentFid)!
   pending.body = '损坏的临时副本'
   QuarkClient.prototype.renameFile = rename
   await store.write(changed, etag)
@@ -557,7 +557,7 @@ test('编辑发布失败后保留旧 Markdown，重试重新上传遗留临时�
   expect(markdownDownloads).toEqual([])
   expect(downloads.has(old.fid)).toBe(false)
   expect(downloads.has(pending.fid)).toBe(false)
-  expect([...files.values()].some(file => file.name.startsWith('.拾页'))).toBe(false)
+  expect([...files.values()].some(file => file.name.startsWith('.页墟'))).toBe(false)
 })
 
 test('首次 Markdown 发布失败后更名或删除，重试不遗留无回执的临时文件', async () => {
@@ -576,7 +576,7 @@ test('首次 Markdown 发布失败后更名或删除，重试不遗留无回执�
   await retry.read()
   await retry.write(changed, etag)
   expect([...files.values()].filter(file => file.name.endsWith('.md')).map(file => file.body)).toEqual(['正文0'])
-  expect([...files.values()].some(file => file.name.startsWith('.拾页'))).toBe(false)
+  expect([...files.values()].some(file => file.name.startsWith('.页墟'))).toBe(false)
   expect(markdownDownloads).toEqual([])
 })
 
@@ -650,7 +650,7 @@ test('更名过程中后台退出后，新实例恢复已校验的旧当前文�
   const { etag } = await save()
   const previous = current()
   const target = createHash('sha256').update('收藏.json').digest('hex').slice(0, 32)
-  previous.name = '.拾页旧版-' + target + '-' + previous.fid
+  previous.name = '.页墟旧版-' + target + '-' + previous.fid
   const restarted = new QuarkStore(config, etag)
   const remote = await restarted.read()
   expect(remote.doc?.entities.profile.title).toBe('Rain')
@@ -664,10 +664,10 @@ test('首次发布中断后可恢复完整临时 JSON，损坏临时文件不会
   const previous = current()
   const target = createHash('sha256').update('收藏.json').digest('hex').slice(0, 32)
   const content = createHash('sha256').update(previous.body).digest('hex').slice(0, 32)
-  previous.name = '.拾页上传-' + target + '-' + content
+  previous.name = '.页墟上传-' + target + '-' + content
   const restarted = new QuarkStore(config)
   expect((await restarted.read()).doc?.entities.profile.title).toBe('Rain')
-  previous.name = '.拾页上传-' + target + '-' + content
+  previous.name = '.页墟上传-' + target + '-' + content
   previous.body = '{broken'
   await expect(new QuarkStore(config).read()).rejects.toThrow()
   expect([...files.values()].some(file => file.name === '收藏.json')).toBe(false)

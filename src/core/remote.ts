@@ -7,7 +7,7 @@ export type Connection = WebDAVConnection | QuarkConnection
 export const isQuark = (config: Connection): config is QuarkConnection => 'kind' in config && config.kind === 'quark'
 export function normalizeRemote(config: Connection): Connection {
   if (!isQuark(config)) return normalizeConnection(config)
-  if (!config.accountId || config.accountId !== config.folderId || /[\r\n]/.test(config.accountId)) throw new Error('夸克账号信息无效，请重新扫码')
+  if (!config.accountId || !config.folderId || /[\r\n]/.test(config.accountId + config.folderId)) throw new Error('夸克账号信息无效，请重新扫码')
   return { kind: 'quark', accountId: config.accountId, folderId: config.folderId, nickname: config.nickname.slice(0, 80) }
 }
 export async function remoteKey(config: Connection) {
