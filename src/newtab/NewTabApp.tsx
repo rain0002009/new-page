@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Edit3, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
@@ -17,9 +17,13 @@ import { CollectionSection, Empty, SearchView } from './Library'
 import { Button, Modal, ModalPresence } from './ui'
 import { Toast } from '../shared/Toast'
 import QuickCollectionGap from './QuickCollectionGap'
-import { closeCollectedTab, collectionTitle, moveOpenTab, tabLink } from './open-tabs'
+import { collectionTitle, moveOpenTab, tabLink, type OpenTab } from './open-tabs'
 import { documentUrl } from '../core/document-address'
 import { readDroppedMarkdown, rememberFile } from '../document/local-files'
+import { SelectionProvider } from './Selection'
+import BatchActions from './BatchActions'
+import { createTabGroup } from './tab-groups'
+import { closeSavedTabs } from './tab-actions'
 
 const workbench = tv({
   slots: {
@@ -86,7 +90,7 @@ export default function NewTabApp() {
 }
 function Workbench({ data, error }: { data: Snapshot | undefined; error: Error | null }) {
   const client = useQueryClient()
-  const { tabs, error: tabError, refresh: refreshTabs } = useWindowTabs()
+  const { tabs, groups, error: tabError, refresh: refreshTabs } = useWindowTabs()
   const [inboxOpen, setInboxOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [selected, setSelected] = useState('')
@@ -94,7 +98,10 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const [searchOpen, setSearchOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [collecting, setCollecting] = useState(false)
+  const [grouping, setGrouping] = useState(false)
+  const groupingRef = useRef(false)
   const collectingRef = useRef(false)
+  const pendingClosures = useMemo(() => new Map<number, OpenTab>(), [data?.sourceId])
   const [collectionReveal, setCollectionReveal] = useState(0)
   useEffect(() => {
     let opening = false
@@ -144,19 +151,33 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const collections = space ? children(doc, space.id).filter((e): e is Collection => e.kind === 'collection') : []
   const links = all.filter((e): e is Link => e.kind === 'link')
   const status = syncStatusLabels[data.status]
+  async function groupTabs() {
+    if (groupingRef.current || !tabs.length || tabError) return
+    groupingRef.current = true; setGrouping(true)
+    try { await createTabGroup(tabs.map(tab => ({ ...tab }))) }
+    catch (cause) { setMessage(cause instanceof Error ? cause.message : '分组未完成，请重试') }
+    finally { groupingRef.current = false; setGrouping(false); refreshTabs() }
+  }
+  function reveal(targetSpace: string) {
+    setSelected(targetSpace); setPage('space'); setInboxOpen(false); setCollectionReveal(value => value + 1)
+  }
   async function collectTabs() {
     if (collectingRef.current || !space || !tabs.length || tabError) return
     collectingRef.current = true; setCollecting(true)
     const snapshot = tabs.map(tab => ({ ...tab }))
     const targetSpace = space.id
     try {
-      if (!await act({ type: 'collect-tabs', parentId: targetSpace, title: collectionTitle(), links: snapshot.map(tabLink) })) return
+      const unsaved = snapshot.filter(tab => !pendingClosures.has(tab.tabId))
+      if (unsaved.length) {
+        if (!await act({ type: 'collect-tabs', parentId: targetSpace, title: collectionTitle(), links: unsaved.map(tabLink) })) return
+        unsaved.forEach(tab => pendingClosures.set(tab.tabId, tab))
+      }
       setSelected(targetSpace); setPage('space'); setInboxOpen(false)
       setCollectionReveal(value => value + 1)
       const notices = new Set<string>()
-      for (const tab of snapshot) await closeCollectedTab(tab, message => notices.add(message))
+      await closeSavedTabs(snapshot, pendingClosures, message => notices.add(message))
       if (notices.size) setMessage([...notices].join('；'))
-    } finally { collectingRef.current = false; setCollecting(false) }
+    } finally { collectingRef.current = false; setCollecting(false); refreshTabs() }
   }
   function locate(link: Link) {
     setSearchOpen(false)
@@ -165,7 +186,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
     setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
   }
-  return <DragBoard doc={doc} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
+  return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(item => item.kind === 'link' || item.kind === 'note').map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     {notices}
     <aside className={styles.sidebar()}><Brand sidebar /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
@@ -183,10 +204,11 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
-    <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />
+    <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} groups={groups} groupAll={() => void groupTabs()} grouping={grouping} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />
+    <BatchActions key={data.sourceId} doc={doc} sourceId={data.sourceId!} spaceId={space?.id} tabs={tabs} act={act} notify={setMessage} refreshTabs={refreshTabs} reveal={reveal} />
     <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}</ModalPresence>
     <ModalPresence>{editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}</ModalPresence>
-  </div></DragBoard>
+  </div></DragBoard></SelectionProvider>
 }
 function Brand({ sidebar = false }: { sidebar?: boolean }) {
   const styles = brand({ sidebar })

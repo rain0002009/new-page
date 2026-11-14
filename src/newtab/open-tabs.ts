@@ -1,6 +1,6 @@
 import type { LinkInput } from '../core/model'
 
-export type OpenTab = LinkInput & { tabId: number; windowId: number; pinned: boolean; index: number }
+export type OpenTab = LinkInput & { tabId: number; windowId: number; pinned: boolean; index: number; groupId: number }
 
 export function collectionTitle(date = new Date()) {
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -28,19 +28,5 @@ export async function moveOpenTab(source: OpenTab, target: OpenTab, notify: (mes
   } catch {
     notify('无法调整标签页顺序，请重试')
     return false
-  }
-}
-
-export async function closeCollectedTab(tab: OpenTab, notify: (message: string) => void) {
-  try {
-    const current = await chrome.tabs.get(tab.tabId)
-    if ((current.pendingUrl || current.url) !== tab.url || current.windowId !== tab.windowId) {
-      notify(`收藏已保存，原标签页已变化，已保留当前页面：${tab.title}`)
-      return
-    }
-    await chrome.tabs.remove(tab.tabId)
-  } catch (error) {
-    if (error instanceof Error && /No tab with id/i.test(error.message)) return
-    notify(`收藏已保存，无法关闭原标签页，请手动关闭：${tab.title}`)
   }
 }

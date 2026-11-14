@@ -35,12 +35,15 @@ export type Action =
   | { type: 'add-collection'; parentId: string; title: string }
   | { type: 'add-note'; parentId: string; id: string }
   | { type: 'add-links'; parentId: string; links: LinkInput[]; beforeId?: string }
-  | { type: 'collect-tabs'; parentId: string; title: string; links: LinkInput[] }
+  | { type: 'collect-tabs'; parentId: string; title: string; links: LinkInput[]; beforeId?: string; placement?: 'top' | 'end' }
   | { type: 'create-collection-with-link'; parentId: string; beforeId?: string; source: { kind: 'link'; id: string } | { kind: 'new'; link: LinkInput } }
   | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; body?: string; collapsed?: boolean; seeApiKey?: string; fluidAnimation?: boolean } }
   | { type: 'todo'; id: string; value: boolean }
   | { type: 'sort-todo'; id: string; beforeId?: string }
   | { type: 'move'; id: string; parentId: string | null; beforeId?: string }
+  | { type: 'move-items'; ids: string[]; parentId: string; beforeId?: string }
+  | { type: 'collect-items'; ids: string[]; parentId: string; title: string; beforeId?: string; placement?: 'top' | 'end' }
+  | { type: 'delete-items'; ids: string[] }
   | { type: 'delete'; id: string }
   | { type: 'restore'; id: string }
   | { type: 'purge'; id: string }
@@ -122,6 +125,14 @@ function requireEntity(doc: Document, id: string, kind?: Entity['kind']) {
   if (!entity || !isActive(doc, entity) || (kind && entity.kind !== kind)) throw new Error('内容已改变，请刷新后重试')
   return entity
 }
+function requireSavedItems(doc: Document, ids: string[]): SavedItem[] {
+  if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string')) throw new Error('请选择要操作的收藏内容')
+  return [...new Set(ids)].map(id => {
+    const entity = requireEntity(doc, id)
+    if (entity.kind !== 'link' && entity.kind !== 'note') throw new Error('请选择收藏链接或笔记')
+    return entity
+  })
+}
 function appendPosition(doc: Document, parentId: string | null, kind: Entity['kind']) { return Math.max(0, ...children(doc, parentId).filter(e => e.kind === kind).map(e => e.position)) + 1024 }
 function insertionPosition(siblings: Entity[], beforeId: string | undefined, now: number) {
   const index = beforeId ? siblings.findIndex(e => e.id === beforeId) : siblings.length
@@ -166,7 +177,7 @@ export function apply(doc: Document, action: Action): Document {
     case 'collect-tabs': {
       if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
       const first = children(next, action.parentId).find(e => e.kind === 'collection')
-      const collection = insertCollection(action.parentId, action.title, first?.id)
+      const collection = insertCollection(action.parentId, action.title, action.beforeId ?? (action.placement === 'end' ? undefined : first?.id))
       return apply(next, { type: 'add-links', parentId: collection.id, links: action.links })
     }
     case 'create-collection-with-link': {
@@ -251,6 +262,48 @@ export function apply(doc: Document, action: Action): Document {
       const siblings = children(next, action.parentId).filter(e => (e.kind === entity.kind || (['link', 'note'].includes(entity.kind) && ['link', 'note'].includes(e.kind))) && e.id !== entity.id)
       entity.position = insertionPosition(siblings, action.beforeId, now)
       entity.parentId = action.parentId; entity.updatedAt = now
+      break
+    }
+    case 'move-items': {
+      const items = requireSavedItems(next, action.ids)
+      const target = requireEntity(next, action.parentId, 'collection') as Collection
+      for (const item of items) {
+        const source = requireEntity(next, item.parentId!, 'collection')
+        if (source.parentId !== target.parentId) throw new Error('收藏内容不能跨空间移动')
+      }
+      const selected = new Set(items.map(item => item.id))
+      const original = children(next, target.id)
+      if (action.beforeId && !original.some(item => item.id === action.beforeId)) throw new Error('拖拽目标已改变')
+      // A selected anchor leaves with the batch; use its next stationary sibling.
+      const anchor = action.beforeId && selected.has(action.beforeId)
+        ? original.slice(original.findIndex(item => item.id === action.beforeId) + 1).find(item => !selected.has(item.id))?.id
+        : action.beforeId
+      const siblings = original.filter(item => !selected.has(item.id))
+      for (const item of items) {
+        item.position = insertionPosition(siblings, anchor, now)
+        item.parentId = target.id; item.updatedAt = now
+        siblings.splice(anchor ? siblings.findIndex(sibling => sibling.id === anchor) : siblings.length, 0, item)
+      }
+      target.collapsed = false; target.updatedAt = now
+      break
+    }
+    case 'collect-items': {
+      const items = requireSavedItems(next, action.ids)
+      requireEntity(next, action.parentId, 'space')
+      for (const item of items) {
+        const source = requireEntity(next, item.parentId!, 'collection')
+        if (source.parentId !== action.parentId) throw new Error('收藏内容不能跨空间移动')
+      }
+      const first = action.placement === 'end' ? undefined : children(next, action.parentId).find(item => item.kind === 'collection')?.id
+      const collection = insertCollection(action.parentId, action.title, action.beforeId ?? first)
+      return apply(next, { type: 'move-items', ids: items.map(item => item.id), parentId: collection.id })
+    }
+    case 'delete-items': {
+      const items = requireSavedItems(next, action.ids)
+      for (const item of items) {
+        item.deletedAt = now; item.deletedBy = item.id; item.updatedAt = now
+        if (item.kind === 'note') purgeEntity(item, now)
+      }
       break
     }
     case 'delete': {

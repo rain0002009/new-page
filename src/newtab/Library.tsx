@@ -12,6 +12,7 @@ import { linkCard } from './link-card-styles'
 import { MotionRegion } from './motion'
 import SavedPageLink from './SavedPageLink'
 import { Toast } from '../shared/Toast'
+import { SelectionIcon, useSelection } from './Selection'
 
 const cardAction = tv({
   base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] hover:text-action-ghost-hover group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
@@ -53,10 +54,11 @@ const empty = tv({
 const emptyStyles = empty()
 
 export function Card({ link, act, edit, location, locate }: { link: Link; act: Act; edit: (state: EditorState) => void; location?: string; locate?: () => void }) {
+  const selection = useSelection()
   const styles = linkCard({ search: !!locate })
   const drag = useDragItem(locate ? `search:${link.id}` : link.id, { kind: 'saved-item', itemKind: 'link', entityId: link.id, title: link.title }, styles.base(), !!locate)
-  return <article {...drag} aria-label={`链接 ${link.title}`}>
-    <div className={styles.top()}><SiteIcon url={link.icon} title={link.title} /><div className={styles.actions()}>
+  return <article {...drag} data-selected={!locate && selection.isSelected('saved', link.id) || undefined} aria-label={`链接 ${link.title}`}>
+    <div className={styles.top()}>{locate ? <SiteIcon url={link.icon} title={link.title} /> : <SelectionIcon id={link.id} source="saved" title={link.title}><SiteIcon url={link.icon} title={link.title} /></SelectionIcon>}<div className={styles.actions()}>
       <Button tone="custom" size="custom" className={cardAction()} aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
       <Button tone="custom" size="custom" className={cardAction()} aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
       <Button tone="custom" size="custom" className={cardAction({ todo: link.todo })} aria-label={link.todo ? '移出 Todo' : '加入 Todo'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
@@ -70,6 +72,7 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
 }
 
 function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?: boolean }) {
+  const selection = useSelection()
   const styles = linkCard({ note: true, search })
   const drag = useDragItem(search ? `search:${note.id}` : note.id, { kind: 'saved-item', itemKind: 'note', entityId: note.id, title: note.title }, styles.base(), search)
   const [error, setError] = useState('')
@@ -77,8 +80,9 @@ function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?
     try { const data = await readLocalSnapshot(); await chrome.tabs.create({ url: documentUrl({ note: note.id, source: data.sourceId! }) }) }
     catch { setError('无法打开笔记，请重试') }
   }
-  return <article {...drag} aria-label={`笔记 ${note.title}`}>
-    <div className={styles.top()}><span className="grid place-items-center h-[30px] w-[30px] rounded-[8px] bg-[#eee5cb] text-[#9d8551]"><FileText size={20} /></span><div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction()} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div></div>
+  const noteIcon = <span className="grid place-items-center h-[30px] w-[30px] rounded-[8px] bg-[#eee5cb] text-[#9d8551]"><FileText size={20} /></span>
+  return <article {...drag} data-selected={!search && selection.isSelected('saved', note.id) || undefined} aria-label={`笔记 ${note.title}`}>
+    <div className={styles.top()}>{search ? noteIcon : <SelectionIcon id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}<div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction()} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div></div>
     <a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a><span className={styles.domain()}>Markdown 笔记</span>
     <p className={styles.note()}>{markdownDescription(note.body)}</p><Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>

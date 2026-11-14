@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { tv } from 'tailwind-variants/lite'
+import { useSelection } from './Selection'
 
 const dwellMs = 600
 
@@ -18,7 +19,8 @@ const line = tv({
 export default function QuickCollectionGap({ spaceId, beforeId }: { spaceId: string; beforeId?: string }) {
   const [ready, setReady] = useState(false)
   const { active, over } = useDndContext()
-  const accepts = (active?.data.current?.kind === 'saved-item' && active.data.current.itemKind === 'link') || active?.data.current?.kind === 'tab'
+  const selection = useSelection()
+  const accepts = (active?.data.current?.kind === 'saved-item' && (active.data.current.itemKind === 'link' || selection.source === 'saved' && selection.ids.length > 1)) || active?.data.current?.kind === 'tab'
   const { setNodeRef, isOver } = useDroppable({ id: `new-collection:${spaceId}:${beforeId ?? 'end'}`, data: { kind: 'new-collection', spaceId, beforeId, ready } satisfies QuickCollectionTarget })
   useEffect(() => {
     setReady(false)
