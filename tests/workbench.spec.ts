@@ -986,6 +986,76 @@ test('本地目录直接读取真实文件列表，仅展开时读取子目录�
   await expect(doc.getByRole('button', { name: '打开 子文件.md', exact: true })).toHaveAttribute('aria-current', 'page')
 })
 
+test('本地 Markdown 切换文件后支持浏览器后退和前进', async () => {
+  const { doc } = await openFileDirectoryFixture()
+  const initial = doc.url()
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  await doc.getByRole('button', { name: '打开 同级 #100%.MARKDOWN', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '同级标题', exact: true })).toBeVisible()
+  const sibling = doc.url()
+  await doc.getByRole('link', { name: '子文件', exact: true }).click()
+  await expect(doc.getByRole('heading', { name: '子文件标题', exact: true })).toBeVisible()
+  const child = doc.url()
+  await doc.goBack()
+  await expect(doc).toHaveURL(sibling)
+  await expect(doc.getByRole('heading', { name: '同级标题', exact: true })).toBeVisible()
+  await doc.goBack()
+  await expect(doc).toHaveURL(initial)
+  await expect(doc.getByRole('heading', { name: '当前标题', exact: true })).toBeVisible()
+  await doc.goForward()
+  await expect(doc.getByRole('heading', { name: '同级标题', exact: true })).toBeVisible()
+  await doc.goForward()
+  await expect(doc).toHaveURL(child)
+  await expect(doc.getByRole('heading', { name: '子文件标题', exact: true })).toBeVisible()
+  await doc.reload()
+  await expect(doc.getByRole('heading', { name: '子文件标题', exact: true })).toBeVisible()
+  await doc.goBack()
+  await expect(doc).toHaveURL(sibling)
+  await expect(doc.getByRole('heading', { name: '同级标题', exact: true })).toBeVisible()
+})
+
+for (const width of [1500, 480]) test(`切换本地 Markdown 期间保持正文位置且不闪现读取提示：${width}`, async () => {
+  const { doc } = await openFileDirectoryFixture()
+  await doc.setViewportSize({ width, height: 960 })
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  const title = doc.getByRole('textbox', { name: '文件名称', exact: true })
+  const before = await title.boundingBox()
+  const editor = await doc.getByRole('textbox', { name: 'Markdown 正文', exact: true }).elementHandle()
+  await doc.evaluate(() => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime)
+    Object.assign(chrome.runtime, { sendMessage: async (message: { type: string }) => {
+      if (message.type === 'read-markdown') await new Promise<void>(resolve => Object.assign(window, { releaseMarkdownRead: resolve }))
+      return send(message)
+    } })
+  })
+  await doc.getByRole('button', { name: '打开 同级 #100%.MARKDOWN', exact: true }).click()
+  await expect.poll(() => doc.evaluate(() => typeof (window as Window & { releaseMarkdownRead?: () => void }).releaseMarkdownRead)).toBe('function')
+  await expect(doc.getByText('正在读取…', { exact: true })).toHaveCount(0)
+  await expect(doc.getByRole('heading', { name: '当前标题', exact: true })).toBeVisible()
+  expect((await title.boundingBox())!.y).toBe(before!.y)
+  await doc.screenshot({ path: `test-results/markdown-switch-pending-${width}.png`, fullPage: true })
+  await doc.evaluate(() => (window as Window & { releaseMarkdownRead?: () => void }).releaseMarkdownRead!())
+  await expect(doc.getByRole('heading', { name: '同级标题', exact: true })).toBeVisible()
+  expect((await title.boundingBox())!.y).toBe(before!.y)
+  expect(await editor!.evaluate(node => node.isConnected)).toBe(true)
+  await doc.screenshot({ path: `test-results/markdown-switch-complete-${width}.png`, fullPage: true })
+})
+
+test('切换到相同正文的本地 Markdown 时按新文件位置解析相对链接', async () => {
+  const { doc, directory, fileUrl } = await openFileDirectoryFixture()
+  const body = '# 相同正文\n\n[目标文件](./target.md)'
+  await writeFile(join(directory, '当前文档.md'), body)
+  await writeFile(join(directory, '章节', '相同正文.md'), body)
+  await doc.reload()
+  const link = doc.getByRole('link', { name: '目标文件', exact: true })
+  await expect(link).toHaveAttribute('href', new URL('target.md', fileUrl).href)
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  await doc.getByRole('button', { name: '文件夹 章节', exact: true }).click()
+  await doc.getByRole('button', { name: '打开 相同正文.md', exact: true }).click()
+  await expect(doc.getByRole('textbox', { name: '文件名称', exact: true })).toHaveValue('相同正文.md')
+  await expect(link).toHaveAttribute('href', new URL('章节/target.md', fileUrl).href)
+})
+
 test('本地目录未开启文件网址访问时提示打开设置，启用后可重试', async () => {
   const { doc, context } = await openFileDirectoryFixture()
   await doc.evaluate(() => localStorage.setItem('denyFileAccess', 'yes'))
@@ -1069,15 +1139,28 @@ test('拖入 Markdown 在新标签页打开，文档只保留正文相关操作'
   await doc.screenshot({ path: 'test-results/local-document-mobile.png', fullPage: true })
 })
 
-test('未连接收藏库也能在新标签页打开 Chrome 原生本地文件拖放', async () => {
+test('本地 Markdown 接管在后台响应较慢时也不显示原始文本', async () => {
   const { page, context, profile } = await openClient(undefined, true)
-  const path = join(profile, '原生拖入.markdown')
-  await writeFile(path, '# 原生拖放标题\n\n来自本地文件夹的正文')
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
-  const originalUrl = page.url()
-  // Keep the native OS file drop, but decline the permission boundary without
-  // waiting for a human in Chrome's permission dialog. The document must open.
-  await page.evaluate(() => { Object.assign(FileSystemFileHandle.prototype, { requestPermission: async () => 'denied' }) })
+  const path = join(profile, '接管闪烁.md')
+  await writeFile(path, '# 接管完成\n\n不应闪现的原始正文')
+  const rawFrames: string[] = []
+  context.on('console', message => { if (message.text().startsWith('RAW_MARKDOWN_FRAME')) rawFrames.push(message.text()) })
+  await context.addInitScript(() => {
+    if (location.protocol !== 'file:') return
+    const inspect = () => {
+      const pre = document.querySelector('body > pre')
+      if (pre?.textContent && pre.getBoundingClientRect().height > 0 && getComputedStyle(pre).visibility === 'visible' && getComputedStyle(pre).display !== 'none') console.log('RAW_MARKDOWN_FRAME', pre.textContent)
+      requestAnimationFrame(inspect)
+    }
+    requestAnimationFrame(inspect)
+  })
+  await context.serviceWorkers()[0]!.evaluate(() => {
+    const get = chrome.storage.local.get.bind(chrome.storage.local)
+    Object.assign(chrome.storage.local, { get: async (key: string) => {
+      if (key === 'markdownTakeover') await new Promise(resolve => setTimeout(resolve, 300))
+      return get(key)
+    } })
+  })
   const opened = context.waitForEvent('page')
   const session = await context.newCDPSession(page)
   const data = { items: [], files: [path], dragOperationsMask: 1 }
@@ -1085,11 +1168,74 @@ test('未连接收藏库也能在新标签页打开 Chrome 原生本地文件拖
   await session.send('Input.dispatchDragEvent', { type: 'dragOver', x: 750, y: 400, data })
   await session.send('Input.dispatchDragEvent', { type: 'drop', x: 750, y: 400, data })
   const doc = await opened
-  await expect(doc.getByRole('heading', { name: '原生拖放标题', exact: true })).toBeVisible()
+  await expect(doc.getByRole('heading', { name: '接管完成', exact: true })).toBeVisible()
+  expect(rawFrames).toEqual([])
+})
+
+test('本地文件早期接管在后台失败时恢复原文，其他格式和子框架保持可见', async () => {
+  const { page, context, profile } = await openClient(undefined, true)
+  const markdown = join(profile, '原始内容.MD'), plain = join(profile, '普通文本.txt'), html = join(profile, '本地框架.html')
+  await writeFile(markdown, '# 本地原始内容')
+  await writeFile(plain, '普通文本内容')
+  await writeFile(html, '<iframe src="./原始内容.MD"></iframe>')
+  await context.serviceWorkers()[0]!.evaluate(() => {
+    const get = chrome.storage.local.get.bind(chrome.storage.local)
+    Object.assign(chrome.storage.local, { get: (key: string) => key === 'markdownTakeover' ? Promise.reject(new Error('测试读取设置失败')) : get(key) })
+  })
+  const doc = await context.newPage()
+  await doc.goto(pathToFileURL(markdown).href)
+  await expect(doc.locator('body > pre')).toBeVisible()
+  await expect(doc.locator('body > pre')).toContainText('# 本地原始内容')
+  await doc.goto(pathToFileURL(plain).href)
+  await expect(doc.locator('body > pre')).toBeVisible()
+  await expect(doc.locator('body > pre')).toContainText('普通文本内容')
+  await doc.goto(pathToFileURL(html).href)
+  await expect(doc.frameLocator('iframe').locator('body > pre')).toBeVisible()
+  await expect(doc.frameLocator('iframe').locator('body > pre')).toContainText('# 本地原始内容')
+  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+})
+
+for (const mode of ['未连接收藏库', '已连接收藏库', '关闭自动接管', '缺少文件网址权限'] as const) test(`Chrome 原生本地文件拖放保留文件网址：${mode}`, async () => {
+  const { page, context, profile } = await openClient(undefined, true)
+  const path = join(profile, '原生 拖入 #100%.markdown')
+  await writeFile(path, '# 原生拖放标题\n\n来自本地文件夹的正文')
+  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  if (mode === '已连接收藏库') await connectQuark(page)
+  if (mode === '关闭自动接管') await page.evaluate(() => chrome.storage.local.set({ markdownTakeover: false }))
+  if (mode === '缺少文件网址权限') await context.addInitScript(() => { chrome.extension.isAllowedFileSchemeAccess = (() => Promise.resolve(false)) as typeof chrome.extension.isAllowedFileSchemeAccess })
+  const originalUrl = page.url()
+  // A native file URL opens without requesting filesystem handle permissions.
+  await page.evaluate(() => { Object.assign(FileSystemFileHandle.prototype, { requestPermission: () => { throw new Error('不应申请文件句柄授权') } }) })
+  const opened = context.waitForEvent('page')
+  const session = await context.newCDPSession(page)
+  const data = { items: [], files: [path], dragOperationsMask: 1 }
+  await session.send('Input.dispatchDragEvent', { type: 'dragEnter', x: 750, y: 400, data })
+  await session.send('Input.dispatchDragEvent', { type: 'dragOver', x: 750, y: 400, data })
+  await session.send('Input.dispatchDragEvent', { type: 'drop', x: 750, y: 400, data })
+  const doc = await opened
   await expect(page).toHaveURL(originalUrl)
+  if (mode === '关闭自动接管') {
+    await expect(doc).toHaveURL(url => decodeURI(url.href) === decodeURI(pathToFileURL(path).href))
+    await expect(doc.locator('body')).toContainText('来自本地文件夹的正文')
+    return
+  }
+  if (mode === '缺少文件网址权限') {
+    await expect(doc.getByRole('alert')).toContainText('允许访问文件网址')
+    await expect(doc.getByRole('button', { name: '打开扩展设置', exact: true })).toBeVisible()
+    await doc.getByRole('button', { name: '打开原网页', exact: true }).click()
+    await expect(doc).toHaveURL(url => decodeURI(url.href) === decodeURI(pathToFileURL(path).href))
+    await expect(doc.locator('body > pre')).toBeVisible()
+    await expect(doc.locator('body > pre')).toContainText('来自本地文件夹的正文')
+    return
+  }
+  await expect(doc.getByRole('heading', { name: '原生拖放标题', exact: true })).toBeVisible()
+  expect(decodeURI(new URL(doc.url()).searchParams.get('url')!)).toBe(decodeURI(pathToFileURL(path).href))
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toHaveAttribute('contenteditable', 'false')
   await expect(doc.getByRole('button', { name: /打开本地|打开文件夹|导出 Markdown/ })).toHaveCount(0)
   await doc.reload()
   await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('来自本地文件夹的正文')
+  await doc.getByRole('button', { name: '本地目录', exact: true }).click()
+  await expect(doc.getByRole('button', { name: '打开 原生 拖入 #100%.markdown', exact: true })).toHaveAttribute('aria-current', 'page')
   expect(await readFile(path, 'utf8')).toBe('# 原生拖放标题\n\n来自本地文件夹的正文')
 })
 

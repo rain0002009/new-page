@@ -13,7 +13,6 @@ import { Toast } from '../shared/Toast'
 export default function LocalDocumentApp({ address = '' }: { address?: string }) {
   const [file, setFile] = useState<LocalFile>()
   const current = useRef<LocalFile>()
-  const [resourceEpoch, setResourceEpoch] = useState(0)
   const resources = useRef<string[]>([])
   const [error, setError] = useState('')
   const [status, setStatus] = useState(address ? '正在读取…' : '请将 Markdown 文件拖入新标签页')
@@ -53,7 +52,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
       return false
     }
   }
-  async function show(next: LocalFile, changedDisk?: string) {
+  async function show(next: LocalFile, changedDisk?: string, navigate = false) {
     const selection = ++selectionEpoch.current, requestedId = recordId.current
     if (next.handle) {
       if (!next.imageSourceId) next.imageSourceId = (await readLocalSnapshot()).sourceId ?? undefined
@@ -67,22 +66,24 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
     current.current = next; setFile(next); dirty.current = !!next.dirty
     setError(changedDisk !== undefined ? '磁盘文件已被其他程序修改，编辑草稿已保留，请选择版本' : next.handle && next.writable === false ? '未获得写入权限，当前内容只读；可重新授权后编辑' : '')
     setConflict(changedDisk !== undefined ? { disk: changedDisk, body: next.body } : undefined); conflictRef.current = changedDisk !== undefined
-    setResourceEpoch(value => value + 1)
     resources.current.forEach(url => URL.revokeObjectURL(url)); resources.current = []
     setStatus(next.dirty ? '尚未保存 · 已恢复编辑草稿' : next.handle && next.writable !== false ? '已保存到原文件' : '')
+    const target = next.handle ? documentUrl({ local: recordId.current }) : next.url ? documentUrl({ url: next.url }) : undefined
+    if (target && target !== location.href) {
+      if (navigate) history.pushState(null, '', target)
+      else history.replaceState(null, '', target)
+    }
     if (next.handle) {
-      history.replaceState(null, '', documentUrl({ local: recordId.current }))
       await notifyImages(next, recordId.current)
     }
-    else if (next.url) history.replaceState(null, '', documentUrl({ url: next.url }))
   }
-  async function readAddress(isDisposed = () => false, url = current.current?.url ?? address) {
+  async function readAddress(isDisposed = () => false, url = current.current?.url ?? address, navigate = false) {
     const selection = selectionEpoch.current
-    setLoading(true); setError(''); setStatus('正在读取…')
+    setLoading(true); setError(''); if (!current.current) setStatus('正在读取…')
     try {
       await requireFileUrlAccess()
       const result = await rpc({ type: 'read-markdown', url })
-      if (!isDisposed() && selection === selectionEpoch.current && result.file) await show({ title: decodeURIComponent(new URL(url).pathname.split('/').pop()!), body: result.file.body, baseline: result.file.body, url })
+      if (!isDisposed() && selection === selectionEpoch.current && result.file) await show({ title: decodeURIComponent(new URL(url).pathname.split('/').pop()!), body: result.file.body, baseline: result.file.body, url }, undefined, navigate)
     } catch (cause) {
       if (!isDisposed() && selection === selectionEpoch.current) { setStatus('读取失败'); setError(cause instanceof Error ? cause.message : '读取失败，请重试') }
     } finally { if (!isDisposed() && selection === selectionEpoch.current) setLoading(false) }
@@ -184,7 +185,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
       const selection = selectionEpoch.current
       const next = await readFileHandle(handle, current.current?.directory, path)
       ensureSelection(selection)
-      recordId.current = crypto.randomUUID(); await show(next)
+      recordId.current = crypto.randomUUID(); await show(next, undefined, true)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '文件打开失败，请重新拖入文件') }
   }
   async function browseDirectory() {
@@ -211,7 +212,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
       await save()
       if (unprotectedChanges()) throw new Error('当前内容尚未保存，请先保存后再切换文件')
       selectionEpoch.current++
-      await readAddress(() => false, url)
+      await readAddress(() => false, url, true)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '文件打开失败，请重试') }
   }
   return <main className={documentStyles.main()}>
@@ -239,7 +240,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
       }).catch(cause => setError(cause.message))
     }}>
       <input aria-label="文件名称" value={file.title} readOnly className={documentStyles.title()} />
-      <MarkdownEditor key={`${recordId.current}:${resourceEpoch}`} value={file.body} readonly={!file.handle || file.writable === false} onChange={change} onError={setError} resource={async (url, image) => {
+      <MarkdownEditor key={recordId.current} documentId={file.url} value={file.body} readonly={!file.handle || file.writable === false} onChange={change} onError={setError} resource={async (url, image) => {
         if (file.url) return new URL(url, file.url).href
         if (/^[a-z][a-z\d+.-]*:/i.test(url) || url.startsWith('#')) return url
         if (!image) return '#local:' + encodeURIComponent(url)

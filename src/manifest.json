@@ -32,5 +32,10 @@
   "chrome_url_overrides": {
     "newtab": "newtab/index.html"
   },
+  "content_scripts": [{
+    "matches": ["file:///*"],
+    "js": ["document/local-markdown-start.ts"],
+    "run_at": "document_start"
+  }],
   "web_accessible_resources": [{ "resources": ["document/index.html"], "matches": ["<all_urls>"] }]
 }

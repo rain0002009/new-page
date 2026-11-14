@@ -23,13 +23,24 @@ export async function openOriginalMarkdown(url: string, tabId?: number) {
   await chrome.tabs.update(tabId, { url })
 }
 export function startMarkdownNavigation() {
-  // Local files have no HTTP response headers; retain their navigation path.
+  chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (message?.type !== 'local-markdown-navigation' || sender.id !== chrome.runtime.id || sender.frameId !== 0 || sender.tab?.id === undefined || !sender.url?.startsWith('file:') || !isMarkdownUrl(sender.url)) return false
+    const url = sender.url, tabId = sender.tab.id
+    void chrome.storage.local.get('markdownTakeover').then(values => {
+      respond({ reader: values.markdownTakeover !== false && bypass.get(tabId) !== withoutHash(url) ? documentUrl({ url }) : undefined })
+    }, () => respond({}))
+    return true
+  })
+  // Without file access Chrome cannot inject the early script. Keep the
+  // existing reader entry so it can explain how to enable file access.
   chrome.webNavigation.onBeforeNavigate.addListener(details => {
     if (details.frameId !== 0) return
     if (bypass.get(details.tabId) === withoutHash(details.url)) return
     if (!details.url.startsWith(chrome.runtime.getURL(''))) bypass.delete(details.tabId)
     if (!details.url.startsWith('file:') || !isMarkdownUrl(details.url)) return
-    void takeOver(details.tabId, details.url).catch(() => {})
+    void chrome.extension.isAllowedFileSchemeAccess().then(allowed => {
+      if (!allowed) return takeOver(details.tabId, details.url)
+    }).catch(() => {})
   })
   // A .md URL may serve an HTML page (for example GitHub's file viewer).
   // Wait for the actual response type before replacing a remote navigation.

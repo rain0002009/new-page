@@ -9,8 +9,15 @@ import LocalDocumentApp from './LocalDocumentApp'
 import { Toast } from '../shared/Toast'
 
 export default function ExternalDocumentApp() {
+  const [navigation, setNavigation] = useState(0)
+  useEffect(() => {
+    // History traversal must restore the document as well as its address.
+    const restore = () => setNavigation(value => value + 1)
+    window.addEventListener('popstate', restore)
+    return () => window.removeEventListener('popstate', restore)
+  }, [])
   const address = location.search.startsWith('?address=') ? location.href.split('?address=')[1] : new URLSearchParams(location.search).get('url') ?? ''
-  return !address || address.startsWith('file:') ? <LocalDocumentApp address={address} /> : <RemoteDocument address={address} />
+  return !address || address.startsWith('file:') ? <LocalDocumentApp key={navigation} address={address} /> : <RemoteDocument key={navigation} address={address} />
 }
 function RemoteDocument({ address }: { address: string }) {
   const [file, setFile] = useState<{ body: string; url: string }>()

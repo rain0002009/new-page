@@ -8,10 +8,11 @@ import { readSeeApiKey, uploadImage } from '../core/see'
 import { storageKey } from '../core/local-workspace'
 import { preserveStandardImages } from './image-markdown'
 
-export default function MarkdownEditor({ value, readonly, onChange, onError, resource }: { value: string; readonly: boolean; onChange: (value: string) => void; onError: (message: string) => void; resource?: (url: string, image: boolean) => Promise<string> }) {
+export default function MarkdownEditor({ value, readonly, onChange, onError, resource, documentId }: { value: string; readonly: boolean; onChange: (value: string) => void; onError: (message: string) => void; resource?: (url: string, image: boolean) => Promise<string>; documentId?: string }) {
   const host = useRef<HTMLDivElement>(null)
   const instance = useRef<Crepe>()
   const replacing = useRef(false)
+  const renderedDocument = useRef(documentId)
   const [uploadEnabled, setUploadEnabled] = useState<boolean | null>(null)
   const latest = useRef({ value, readonly, onChange, onError, resource })
   latest.current = { value, readonly, onChange, onError, resource }
@@ -101,7 +102,16 @@ export default function MarkdownEditor({ value, readonly, onChange, onError, res
   useEffect(() => {
     const editor = instance.current
     if (!editor || editor.editor.status !== 'Created') return
-    if (editor.getMarkdown() !== value) { replacing.current = true; try { editor.editor.action(replaceAll(value)) } finally { replacing.current = false } }
-  }, [value])
+    // Identical Markdown in another file still needs fresh relative resource URLs.
+    if (editor.getMarkdown() !== value || renderedDocument.current !== documentId) {
+      replacing.current = true
+      try {
+        // Recreate resource views even when their Markdown matches the old file.
+        // Both transactions finish before paint; the editor itself stays mounted.
+        if (renderedDocument.current !== documentId) editor.editor.action(replaceAll(''))
+        editor.editor.action(replaceAll(value)); renderedDocument.current = documentId
+      } finally { replacing.current = false }
+    }
+  }, [value, documentId])
   return <div ref={host} className="flex min-h-0 flex-1 flex-col [&>.milkdown]:flex [&>.milkdown]:flex-1 [&>.milkdown]:flex-col" />
 }

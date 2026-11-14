@@ -19,7 +19,7 @@ import { Toast } from '../shared/Toast'
 import QuickCollectionGap from './QuickCollectionGap'
 import { collectionTitle, moveOpenTab, tabLink, type OpenTab } from './open-tabs'
 import { documentUrl } from '../core/document-address'
-import { readDroppedMarkdown, rememberFile } from '../document/local-files'
+import { markdownName, readDroppedMarkdown, rememberFile } from '../document/local-files'
 import { SelectionProvider } from './Selection'
 import BatchActions from './BatchActions'
 import { createTabGroup } from './tab-groups'
@@ -112,6 +112,12 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     }
     const drop = (event: DragEvent) => {
       if (!event.dataTransfer?.types.includes('Files')) return
+      // Native Chrome drops know the file URL; File/handle APIs hide that path.
+      // Stop page handlers from cancelling Chrome's default open-in-new-tab.
+      if (event.isTrusted && event.dataTransfer.files.length === 1 && markdownName(event.dataTransfer.files[0].name)) {
+        event.stopPropagation()
+        return
+      }
       event.preventDefault(); event.stopPropagation()
       if (opening) return
       opening = true
