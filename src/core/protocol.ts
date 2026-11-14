@@ -17,6 +17,8 @@ export type Request =
   | { type: 'open-original'; url: string }
   | { type: 'note-editor'; sourceId: string; id: string; token: string; takeover?: boolean }
   | { type: 'save-note'; sourceId: string; id: string; token: string; title: string; body: string }
+  | { type: 'local-image-document'; id: string; body: string; previous?: string; sourceId?: string; aliases?: string[] }
+  | { type: 'uploaded-image'; sourceId: string; url: string; credential: string; hash?: string }
   | { type: 'quark-qr-start'; traceId?: string }
   | { type: 'quark-qr-poll'; id: string }
   | { type: 'action'; sourceId: string; action: Action }

@@ -7,7 +7,8 @@ export type DirectoryHandle = FileSystemDirectoryHandle & {
   queryPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
   requestPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
 }
-export type LocalFile = { title: string; body: string; baseline: string; url?: string; dirty?: boolean; writable?: boolean; handle?: FileHandle; directory?: DirectoryHandle; path?: string[] }
+export type LocalImageCleanup = { before: string; after: string; sourceId?: string }
+export type LocalFile = { title: string; body: string; baseline: string; url?: string; dirty?: boolean; writable?: boolean; handle?: FileHandle; directory?: DirectoryHandle; path?: string[]; imageSourceId?: string; imageAliasIds?: string[]; pendingImageCleanup?: LocalImageCleanup[] }
 export const markdownName = (name: string) => /\.(md|markdown)$/i.test(name)
 export async function readFileHandle(handle: FileHandle, directory?: DirectoryHandle, path?: string[]): Promise<LocalFile> {
   const body = await (await handle.getFile()).text()
@@ -51,12 +52,48 @@ async function database() {
     request.onsuccess = () => resolve(request.result)
   })
 }
-export async function rememberFile(file: LocalFile, id: string = crypto.randomUUID()): Promise<string> {
+function cleanupIdentity(entry: LocalImageCleanup) { return JSON.stringify([entry.before, entry.after, entry.sourceId]) }
+let remembering: Promise<unknown> = Promise.resolve()
+export function rememberFile(file: LocalFile, id: string = crypto.randomUUID(), acknowledged: LocalImageCleanup[] = []): Promise<string> {
+  const write = () => storeFile(file, id, acknowledged)
+  const task = remembering.catch(() => {}).then(() => typeof navigator !== 'undefined' && navigator.locks
+    ? navigator.locks.request('page-garden-local-files', write) : write())
+  remembering = task
+  return task
+}
+async function storeFile(file: LocalFile, id: string, acknowledged: LocalImageCleanup[]): Promise<string> {
   const db = await database()
-  try { await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(file, id)
+  try {
+    const records = await new Promise<{ id: string; file: LocalFile }[]>((resolve, reject) => {
+      const tx = db.transaction('files'), store = tx.objectStore('files')
+      const keys = store.getAllKeys(), values = store.getAll()
+      tx.oncomplete = () => resolve(values.result.map((value, index) => ({ id: String(keys.result[index]), file: value as LocalFile })))
+      tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error)
+    })
+    const same: typeof records = []
+    for (const record of records) {
+      if (record.id === id) { same.push(record); continue }
+      if (file.handle && record.file.handle && await file.handle.isSameEntry(record.file.handle).catch(() => false)) same.push(record)
+    }
+    const canonical = same[0]?.id ?? id
+    const existing = same.find(record => record.id === canonical)?.file
+    if (!same.some(record => record.id === id) && existing?.dirty && !file.dirty) {
+      // Opening the same handle under a new URL must not erase a recoverable draft.
+      file.body = existing.body; file.baseline = existing.baseline; file.dirty = true
+    }
+    file.imageSourceId = existing?.imageSourceId ?? file.imageSourceId
+    file.imageAliasIds = [...new Set(same.map(record => record.id).filter(value => value !== canonical))]
+    const completed = new Set(acknowledged.map(cleanupIdentity))
+    const queued = [...same.flatMap(record => record.file.pendingImageCleanup ?? []), ...(file.pendingImageCleanup ?? [])]
+    file.pendingImageCleanup = [...new Map(queued.filter(entry => !completed.has(cleanupIdentity(entry))).map(entry => [cleanupIdentity(entry), entry])).values()]
+    await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(file, canonical)
+    // Preserve old IDs as aliases so existing document URLs still open the latest draft.
+    for (const alias of file.imageAliasIds ?? []) tx.objectStore('files').put(file, alias)
     tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error)
-  }); return id } finally { db.close() }
+    })
+    return canonical
+  } finally { db.close() }
 }
 export async function recallFile(id: string): Promise<LocalFile> {
   const db = await database()

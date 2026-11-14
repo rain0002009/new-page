@@ -7,10 +7,12 @@ import { apply, createDocument } from '../src/core/model'
 import type { QuarkEntry } from '../src/core/quark/types'
 import { handle, synchronize } from '../src/core/workspace'
 import { storageKey, type StoredWorkspace } from '../src/core/local-workspace'
+import { imageCredential } from '../src/core/hosted-images'
 
 type StoredFile = QuarkEntry & { body: string }
 const config = { kind: 'quark', accountId: 'test-account', folderId: 'root', nickname: 'Rain' } as const
 const originalChrome = Object.getOwnPropertyDescriptor(globalThis, 'chrome')
+const originalFetch = globalThis.fetch
 const originals = {
   getAccountInfo: QuarkClient.prototype.getAccountInfo,
   listDirectory: QuarkClient.prototype.listDirectory,
@@ -62,6 +64,7 @@ test.beforeEach(() => {
 
 test.afterEach(() => {
   Object.assign(QuarkClient.prototype, originals)
+  globalThis.fetch = originalFetch
   if (originalChrome) Object.defineProperty(globalThis, 'chrome', originalChrome)
   else Reflect.deleteProperty(globalThis, 'chrome')
 })
@@ -92,6 +95,262 @@ function localWorkspace(doc: ReturnType<typeof createDocument>, etag: string | n
   stored[storageKey] = root
   return root
 }
+
+const cleanupImageUrl = 'https://images.example.test/cleanup.png'
+const cleanupImageBody = `正文\n\n![图片](${cleanupImageUrl})`
+function imageCleanupDocument(count = 1) {
+  let doc = apply(withNotes(count), { type: 'edit', id: 'profile', patch: { seeApiKey: 'cleanup-test-key' } })
+  for (let index = 0; index < count; index++) doc = apply(doc, { type: 'edit', id: `note-${index}`, patch: { body: cleanupImageBody } })
+  return doc
+}
+function mockImageCleanupService(options: { failDelete?: () => boolean; networkFailure?: () => boolean; historyAbsent?: () => boolean; onRequest?: (path: string) => void } = {}) {
+  const calls: string[] = []
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input))
+    if (url.origin !== 'https://s.ee') throw new Error('Unexpected network request in image cleanup test')
+    expect(init?.method).toBe('GET')
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer cleanup-test-key')
+    calls.push(url.pathname + url.search)
+    options.onRequest?.(url.pathname)
+    if (url.pathname === '/api/v1/files') return Response.json({ code: 200, success: true, data: !options.historyAbsent?.() && url.searchParams.get('page') === '1' ? [{ url: cleanupImageUrl, hash: 'cleanup-hash' }] : [] })
+    if (url.pathname === '/api/v1/file/delete/cleanup-hash') {
+      if (options.networkFailure?.()) throw new Error('Synthetic response loss after remote deletion')
+      if (options.failDelete?.()) return Response.json({ success: false }, { status: 503 })
+      return Response.json({ success: true, code: '200' })
+    }
+    throw new Error('Unexpected s.ee API request in image cleanup test')
+  }
+  return calls
+}
+function expireImageCleanup(root: StoredWorkspace) {
+  for (const job of root.imageCleanup ?? []) job.notBefore = 0
+}
+
+test('图片清理：正文保存后排持久任务，宽限期不删除，到期且同步成功后删除', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(), ['note-0'])
+  const root = localWorkspace(doc, etag)
+  const calls = mockImageCleanupService({ onRequest: () => {
+    const cloud = JSON.parse(current().body)
+    expect(cloud.entities['note-0'].body).toBe('移除了图片')
+  } })
+  await handle({ type: 'note-editor', sourceId: 'source', id: 'note-0', token: 'image-editor' }, 7)
+  await handle({ type: 'save-note', sourceId: 'source', id: 'note-0', token: 'image-editor', title: '笔记0', body: '移除了图片' }, 7)
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.imageCleanup?.[0]).toMatchObject({ sourceId: 'source', url: cleanupImageUrl })
+  expect(root.imageCleanup?.[0].notBefore).toBeGreaterThan(Date.now())
+  await synchronize('source')
+  expect(calls).toEqual([])
+  // Rehydrate the persisted root to exercise processing independently of the editor.
+  const restarted = structuredClone(root)
+  stored[storageKey] = restarted
+  expireImageCleanup(restarted)
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/files?page=1', '/api/v1/files?page=2', '/api/v1/file/delete/cleanup-hash'])
+  expect(restarted.imageCleanup).toEqual([])
+  expect(restarted.sources.source.status).toBe('synced')
+})
+
+test('图片清理：单篇笔记永久删除后清理原图，删除失败保留任务并在后续同步重试', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(), ['note-0'])
+  const root = localWorkspace(doc, etag)
+  let failing = true
+  const calls = mockImageCleanupService({ failDelete: () => failing })
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  expect(root.sources.source.doc.entities['note-0'].purged).toBe(true)
+  expect(root.imageCleanup).toHaveLength(1)
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.sources.source.status).toBe('error')
+  expect(root.sources.source.error).toContain('图床图片清理未完成')
+  failing = false
+  await synchronize('source')
+  expect(calls.filter(path => path.includes('/file/delete/'))).toHaveLength(2)
+  expect(root.imageCleanup).toEqual([])
+  expect(root.sources.source.status).toBe('synced')
+})
+
+test('图片清理：其他笔记及回收站仍有同图引用时不删除，永久清空后才删除', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(2), ['note-0', 'note-1'])
+  const root = localWorkspace(doc, etag)
+  const calls = mockImageCleanupService()
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual([])
+  const collection = Object.values(root.sources.source.doc.entities).find(entity => entity.kind === 'collection')!
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: collection.id } })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual([])
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'empty-trash' } })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toContain('/api/v1/file/delete/cleanup-hash')
+  expect(root.imageCleanup).toEqual([])
+})
+
+test('图片清理：本地文档登记保护引用，成功写回后的差异才进入清理队列', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(), ['note-0'])
+  const root = localWorkspace(doc, etag)
+  const calls = mockImageCleanupService()
+  await handle({ type: 'local-image-document', id: 'local-file', body: cleanupImageBody })
+  expect(root.imageDocuments?.['local-file'].urls).toEqual([cleanupImageUrl])
+  expect(root.imageCleanup).toBeUndefined()
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual([])
+  await handle({ type: 'local-image-document', id: 'local-file', previous: cleanupImageBody, body: '写回后的本地正文' })
+  expect(root.imageDocuments?.['local-file'].urls).toEqual([])
+  expect(root.imageCleanup).toHaveLength(1)
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toContain('/api/v1/file/delete/cleanup-hash')
+  expect(root.imageCleanup).toEqual([])
+})
+
+test('图片清理：上传 RPC 保存归属和删除凭据，命中缓存时直接删除而不查询历史', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(), ['note-0'])
+  const root = localWorkspace(doc, etag)
+  const calls = mockImageCleanupService()
+  const credential = imageCredential('cleanup-test-key')
+  await handle({ type: 'uploaded-image', sourceId: 'source', url: cleanupImageUrl + '#preview', credential, hash: 'cleanup-hash' })
+  expect(root.imageOwners?.[cleanupImageUrl]).toMatchObject({ sourceId: 'source', credential, hash: 'cleanup-hash' })
+  expect(root.imageOwners?.[cleanupImageUrl]?.revision).toEqual(expect.any(String))
+  expect(root.imageOwners?.[cleanupImageUrl + '#preview']).toBeUndefined()
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  expect(root.imageCleanup?.[0].credential).toBe(credential)
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/file/delete/cleanup-hash'])
+  expect(root.imageCleanup).toEqual([])
+  expect(root.imageOwners?.[cleanupImageUrl]).toBeUndefined()
+})
+
+test('图片清理：上传后切换收藏库，本地移图仍归原来源且其他来源引用继续保护', async () => {
+  const initial = apply(createDocument('Rain'), { type: 'edit', id: 'profile', patch: { seeApiKey: 'cleanup-test-key' } })
+  const { doc, etag } = await save(initial)
+  const root = localWorkspace(doc, etag)
+  const credential = imageCredential('cleanup-test-key')
+  await handle({ type: 'uploaded-image', sourceId: 'source', url: cleanupImageUrl, credential, hash: 'cleanup-hash' })
+  await handle({ type: 'local-image-document', id: 'local-source-a', sourceId: 'source', body: cleanupImageBody })
+  const otherDoc = apply(imageCleanupDocument(), { type: 'edit', id: 'profile', patch: { seeApiKey: 'other-account-key' } })
+  root.sources.other = { ...root.sources.source, doc: otherDoc, base: structuredClone(otherDoc) }
+  root.active = 'other'
+  const calls = mockImageCleanupService()
+  await handle({ type: 'local-image-document', id: 'local-source-a', sourceId: 'source', previous: cleanupImageBody, body: '本地图片已移除' })
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.imageCleanup?.[0]).toMatchObject({ sourceId: 'source', url: cleanupImageUrl, credential })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual([])
+  root.sources.other.doc = apply(root.sources.other.doc, { type: 'edit', id: 'note-0', patch: { body: '其他收藏库也移除了图片' } })
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/file/delete/cleanup-hash'])
+  expect(root.imageCleanup).toEqual([])
+  expect(root.active).toBe('other')
+})
+
+test('图片清理：替换 Key 时保留任务并显示错误，恢复原 Key 后重试缓存删除', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(), ['note-0'])
+  const root = localWorkspace(doc, etag)
+  const calls = mockImageCleanupService()
+  await handle({ type: 'uploaded-image', sourceId: 'source', url: cleanupImageUrl, credential: imageCredential('cleanup-test-key'), hash: 'cleanup-hash' })
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'edit', id: 'profile', patch: { seeApiKey: 'replacement-account-key' } } })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual([])
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.sources.source.status).toBe('error')
+  expect(root.sources.source.error).toContain('API Key 已变更')
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'edit', id: 'profile', patch: { seeApiKey: 'cleanup-test-key' } } })
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/file/delete/cleanup-hash'])
+  expect(root.imageCleanup).toEqual([])
+  expect(root.sources.source.status).toBe('synced')
+})
+
+test('图片清理：缓存删除响应丢失后丢弃 hash，下轮查询历史确认已不存在才清任务', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(), ['note-0'])
+  const root = localWorkspace(doc, etag)
+  let responseLost = true
+  const calls = mockImageCleanupService({ networkFailure: () => responseLost, historyAbsent: () => !responseLost })
+  await handle({ type: 'uploaded-image', sourceId: 'source', url: cleanupImageUrl, credential: imageCredential('cleanup-test-key'), hash: 'cleanup-hash' })
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/file/delete/cleanup-hash'])
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.imageOwners?.[cleanupImageUrl]?.hash).toBeUndefined()
+  expect(root.sources.source.status).toBe('error')
+  responseLost = false
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/file/delete/cleanup-hash', '/api/v1/files?page=1'])
+  expect(root.imageCleanup).toEqual([])
+  expect(root.sources.source.status).toBe('synced')
+})
+
+test('图片清理：旧删除响应返回时保留同地址新上传记录和新版本清理任务', async () => {
+  const { doc, etag } = await save(imageCleanupDocument(), ['note-0'])
+  const root = localWorkspace(doc, etag)
+  const credential = imageCredential('cleanup-test-key')
+  await handle({ type: 'uploaded-image', sourceId: 'source', url: cleanupImageUrl, credential, hash: 'cleanup-hash' })
+  const oldOwnerRevision = root.imageOwners![cleanupImageUrl].revision
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  expireImageCleanup(root)
+  const oldJobRevision = root.imageCleanup![0].revision
+  let releaseResponse!: () => void
+  let reportStarted!: () => void
+  const responseReady = new Promise<void>(resolve => { releaseResponse = resolve })
+  const requestStarted = new Promise<void>(resolve => { reportStarted = resolve })
+  const calls: string[] = []
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input))
+    expect(url.origin).toBe('https://s.ee')
+    expect(url.pathname).toBe('/api/v1/file/delete/cleanup-hash')
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer cleanup-test-key')
+    calls.push(url.pathname)
+    reportStarted()
+    await responseReady
+    return Response.json({ success: true, code: '200' })
+  }
+  const syncing = synchronize('source')
+  await requestStarted
+  await handle({ type: 'uploaded-image', sourceId: 'source', url: cleanupImageUrl, credential, hash: 'new-upload-hash' })
+  await handle({ type: 'local-image-document', id: 'replacement-file', sourceId: 'source', previous: cleanupImageBody, body: '新上传的图也已移除' })
+  const newOwnerRevision = root.imageOwners![cleanupImageUrl].revision
+  const newJobRevision = root.imageCleanup![0].revision
+  expect(newOwnerRevision).not.toBe(oldOwnerRevision)
+  expect(newJobRevision).not.toBe(oldJobRevision)
+  releaseResponse()
+  await syncing
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.imageCleanup![0].revision).toBe(newJobRevision)
+  expect(root.imageOwners![cleanupImageUrl]).toMatchObject({ revision: newOwnerRevision, hash: 'new-upload-hash' })
+  // Cancel the local RPC's scheduled sync while the new task remains in its grace period.
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/file/delete/cleanup-hash'])
+})
+
+test('图片清理：移图时没有 Key，后来其他 Key 的空历史不能确认原账号或清除任务', async () => {
+  const noKey = apply(imageCleanupDocument(), { type: 'edit', id: 'profile', patch: { seeApiKey: '' } })
+  const { doc, etag } = await save(noKey, ['note-0'])
+  const root = localWorkspace(doc, etag)
+  const calls = mockImageCleanupService({ historyAbsent: () => true })
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'delete', id: 'note-0' } })
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.imageCleanup![0].credential).toBe('')
+  await handle({ type: 'action', sourceId: 'source', action: { type: 'edit', id: 'profile', patch: { seeApiKey: 'cleanup-test-key' } } })
+  expireImageCleanup(root)
+  await synchronize('source')
+  expect(calls).toEqual(['/api/v1/files?page=1'])
+  expect(root.imageCleanup).toHaveLength(1)
+  expect(root.imageCleanup![0].credential).toBe('')
+  expect(root.sources.source.status).toBe('error')
+  expect(root.sources.source.error).toContain('无法确认待删除图片的原账号')
+})
 
 test('没有变化且无笔记时只列目录一次、下载当前 JSON 一次', async () => {
   const { etag } = await save()

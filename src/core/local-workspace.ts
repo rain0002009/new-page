@@ -1,9 +1,10 @@
 import type { Conflict, Document } from './model'
 import type { Snapshot } from './protocol'
 import type { Connection } from './remote'
+import type { ImageCleanup, ImageOwner, LocalImageDocument } from './hosted-images'
 
 export type WorkspaceSource = { config: Connection; doc: Document; base: Document; etag: string | null; resolvedRevision?: string | null; pendingNoteIds?: string[]; conflicts: Conflict[]; status: Snapshot['status']; error: string; lastSync: number | null }
-export type StoredWorkspace = { active: string | null; sources: Record<string, WorkspaceSource>; editors?: Record<string, { tabId: number; token: string }> }
+export type StoredWorkspace = { active: string | null; sources: Record<string, WorkspaceSource>; editors?: Record<string, { tabId: number; token: string }>; imageCleanup?: ImageCleanup[]; imageDocuments?: Record<string, LocalImageDocument>; imageOwners?: Record<string, ImageOwner> }
 export const storageKey = 'new-page.workspace.v1'
 
 export function workspaceSnapshot(root: StoredWorkspace): Snapshot {

@@ -8,11 +8,15 @@ import { quarkOrigins } from './quark/transport'
 import type { LoginProgress } from './quark/progress'
 import { storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root, type WorkspaceSource } from './local-workspace'
 import { configureMarkdownNavigation, openOriginalMarkdown } from './markdown-navigation'
+import { deleteHostedImage, findHostedImages } from './see'
+import { imageCredential, imageIsReferenced, queueDocumentImageChanges, sourceImageKey, updateLocalImageDocument } from './hosted-images'
+import { normalizeImageUrl } from './image-references'
 
 let chain: Promise<unknown> = Promise.resolve()
 const syncing = new Set<string>()
 const inFlight = new Map<string, Promise<void>>()
 const scheduled = new Map<string, ReturnType<typeof setTimeout>>()
+let imageCleanupChain: Promise<unknown> = Promise.resolve()
 
 function atomic<T>(work: (root: Root) => T | Promise<T>): Promise<T> {
   const result = chain.then(async () => {
@@ -26,6 +30,68 @@ function atomic<T>(work: (root: Root) => T | Promise<T>): Promise<T> {
   return result
 }
 function broadcast() { void chrome.runtime.sendMessage({ type: 'changed' }).catch(() => undefined) }
+function cleanupImages(id: string): Promise<unknown> {
+  const work = imageCleanupChain.catch(() => {}).then(async () => {
+    const batch = await atomic(root => {
+      const source = root.sources[id]
+      if (!source || source.status !== 'synced' || source.conflicts.length) return null
+      const jobs = (root.imageCleanup ?? []).filter(job => job.sourceId === id && job.notBefore <= Date.now() && !imageIsReferenced(root, job.url))
+      return jobs.length ? { key: sourceImageKey(root, id), jobs: structuredClone(jobs) } : null
+    })
+    if (!batch) return
+    try {
+      if (!batch.key) throw new Error('图片待删除：请在设置中恢复 s.ee API Key，系统将自动重试')
+      const credential = imageCredential(batch.key)
+      const eligible = batch.jobs.filter(job => !job.credential || job.credential === credential)
+      const cached = await atomic(root => new Map(eligible.flatMap(job => {
+        const owner = root.imageOwners?.[job.url]
+        return owner?.sourceId === id && owner.credential === credential && owner.hash ? [[job.url, { hash: owner.hash, revision: owner.revision }] as const] : []
+      })))
+      const unresolved = eligible.filter(job => !cached.has(job.url))
+      const hashes = unresolved.length ? await findHostedImages(batch.key, unresolved.map(job => job.url)) : new Map<string, string>()
+      for (const [url, owner] of cached) hashes.set(url, owner.hash)
+      let unknownOwner = false
+      for (const job of eligible) {
+        const ready = await atomic(root => {
+          const source = root.sources[id]
+          const pending = root.imageCleanup?.find(candidate => candidate.sourceId === id && candidate.url === job.url)
+          return !!pending && pending.revision === job.revision && pending.notBefore <= Date.now() && source?.status === 'synced' && !source.conflicts.length &&
+            sourceImageKey(root, id) === batch.key && !imageIsReferenced(root, job.url)
+        })
+        if (!ready) continue
+        const hash = hashes.get(job.url)
+        if (!hash && !job.credential) { unknownOwner = true; continue }
+        // Only an exact match in the authenticated account authorizes deletion.
+        // External URLs and already-absent files need no deletion request.
+        if (hash) {
+          try { await deleteHostedImage(batch.key, hash) } catch (cause) {
+            // A timed-out request may already have deleted the file. Resolve
+            // its URL through authenticated history again on the next retry.
+            await atomic(root => {
+              const owner = root.imageOwners?.[job.url]
+              if (owner?.hash === hash && owner.revision === cached.get(job.url)?.revision) delete owner.hash
+            })
+            throw cause
+          }
+        }
+        await atomic(root => {
+          root.imageCleanup = root.imageCleanup?.filter(candidate => candidate.sourceId !== id || candidate.url !== job.url || candidate.revision !== job.revision)
+          if (hash && root.imageOwners && cached.has(job.url) && root.imageOwners[job.url]?.revision === cached.get(job.url)?.revision) delete root.imageOwners[job.url]
+        })
+      }
+      if (unknownOwner) throw new Error('无法确认待删除图片的原账号，请恢复原 s.ee API Key 后重试')
+      if (eligible.length !== batch.jobs.length) throw new Error('图片待删除：s.ee API Key 已变更，请恢复移除图片时使用的 Key 后重试')
+    } catch (cause) {
+      await atomic(root => {
+        const source = root.sources[id]
+        if (source) { source.status = 'error'; source.error = cause instanceof Error ? `图床图片清理未完成：${cause.message}` : '图床图片清理失败，稍后自动重试' }
+      })
+    }
+    broadcast()
+  })
+  imageCleanupChain = work
+  return work
+}
 function current(root: Root, id: string) {
   if (root.active !== id || !root.sources[id]) throw new Error('数据源已切换，请在当前页面重试')
   return root.sources[id]
@@ -73,7 +139,10 @@ async function synchronizeSource(id: string) {
     const initial = await atomic(root => {
       const source = root.sources[id]
       if (!source || source.conflicts.length) return null
-      source.doc = prune(source.doc); source.status = 'syncing'; source.error = ''
+      const before = source.doc
+      source.doc = prune(source.doc)
+      queueDocumentImageChanges(root, id, before, source.doc)
+      source.status = 'syncing'; source.error = ''
       return structuredClone(source)
     })
     if (!initial) return
@@ -87,7 +156,9 @@ async function synchronizeSource(id: string) {
       // Disappearance of an established file is not a fresh empty account.
       if (!remote.doc && Object.keys(source.base.entities).length) throw new Error('远端数据文件被移除，本地数据已保留；请检查服务器后重试')
       const result = merge(source.base, source.doc, remote.doc ?? emptyDocument())
+      const before = source.doc
       source.doc = prune(result.doc); source.conflicts = includeCloudConflicts(result.conflicts, source.resolvedRevision === remote.etag ? [] : remote.conflicts)
+      queueDocumentImageChanges(root, id, before, source.doc)
       source.base = remote.doc ?? emptyDocument(); source.etag = remote.etag
       if (source.conflicts.length) { source.status = 'conflict'; return null }
       readDocument(source.doc)
@@ -128,6 +199,7 @@ async function synchronizeSource(id: string) {
   } finally {
     syncing.delete(id); broadcast()
     if (retry) schedule(id, 1000)
+    else await cleanupImages(id)
   }
 }
 async function connect(request: ConnectRequest): Promise<Result> {
@@ -172,6 +244,8 @@ async function connect(request: ConnectRequest): Promise<Result> {
       }
     }
     root.sources[id] = { config, doc: prune(doc), base: remote.doc ?? emptyDocument(), etag: remote.etag, resolvedRevision: cached?.resolvedRevision, pendingNoteIds: cached?.pendingNoteIds, conflicts, status: conflicts.length ? 'conflict' : 'pending', error: '', lastSync: cached?.lastSync ?? null }
+    queueDocumentImageChanges(root, id, doc, root.sources[id].doc)
+    if (cached) queueDocumentImageChanges(root, id, cached.doc, root.sources[id].doc)
     if (request.mode === 'migrate') queueNoteChanges(root.sources[id], beforeMigration)
     root.active = id
     return { ok: true, snapshot: snapshot(root) } as const
@@ -180,6 +254,27 @@ async function connect(request: ConnectRequest): Promise<Result> {
   return result
 }
 export async function handle(request: Request, tabId?: number): Promise<Result> {
+  if (request.type === 'uploaded-image') {
+    await atomic(root => {
+      if (!root.sources[request.sourceId]) throw new Error('上传来源已不存在，无法登记图片清理信息')
+      const url = normalizeImageUrl(request.url)
+      if (!url || !/^[a-f0-9]{64}$/.test(request.credential)) throw new Error('图片上传记录无效')
+      root.imageOwners ??= {}
+      root.imageOwners[url] = { sourceId: request.sourceId, credential: request.credential, hash: request.hash, revision: crypto.randomUUID() }
+    })
+    return { ok: true }
+  }
+  if (request.type === 'local-image-document') {
+    await atomic(root => {
+      updateLocalImageDocument(root, request.id, request.body, request.previous, request.sourceId)
+      for (const alias of request.aliases ?? []) if (alias !== request.id && root.imageDocuments) delete root.imageDocuments[alias]
+    })
+    if (request.previous !== undefined) {
+      const ids = await atomic(root => [...new Set(root.imageCleanup?.map(job => job.sourceId))])
+      for (const id of ids) schedule(id)
+    }
+    return { ok: true }
+  }
   if (request.type === 'markdown-takeover') { await configureMarkdownNavigation(request.enabled); return { ok: true } }
   if (request.type === 'open-original') { await openOriginalMarkdown(request.url, tabId); return { ok: true } }
   if (request.type === 'read-markdown') {
@@ -246,7 +341,7 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     if (request.type === 'snapshot') {
       if (root.active) {
         const source = root.sources[root.active], cleaned = prune(source.doc)
-        if (!equal(cleaned, source.doc)) { source.doc = cleaned; source.status = 'pending'; schedule(root.active) }
+        if (!equal(cleaned, source.doc)) { const before = source.doc; source.doc = cleaned; queueDocumentImageChanges(root, root.active, before, cleaned); source.status = 'pending'; schedule(root.active) }
         if (source.status === 'syncing' && !syncing.has(root.active)) { source.status = 'pending'; schedule(root.active) }
       }
       return { ok: true, snapshot: snapshot(root) } as const
@@ -279,6 +374,7 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
       source.doc = combined.doc; source.conflicts = combined.conflicts
     }
     queueNoteChanges(source, before)
+    queueDocumentImageChanges(root, request.sourceId, before, source.doc)
     source.status = source.conflicts.length ? 'conflict' : 'pending'
     source.error = ''
     schedule(request.sourceId)

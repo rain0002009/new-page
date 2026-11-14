@@ -22,6 +22,8 @@ let suspendDataWrites = false
 const files = new Map<string, { body: string; revision: number }>()
 const clients: { context: BrowserContext; profile: string }[] = []
 const quark = new QuarkFixture()
+const imageHistory: { url: string; hash: string }[] = []
+const imageDeletes: string[] = []
 
 test.beforeAll(async () => {
   const cert = await generate([{ name: 'commonName', value: 'localhost' }], {
@@ -30,6 +32,16 @@ test.beforeAll(async () => {
   server = createServer({ key: cert.private, cert: cert.cert }, async (req, res) => {
     if (await quark.handle(req, res, origin)) return
     const path = new URL(req.url!, 'https://localhost').pathname
+    if (path.startsWith('/api/v1/file/delete/')) {
+      if (req.headers.authorization !== 'Bearer see-cleanup-test') { res.writeHead(401).end(); return }
+      imageDeletes.push(decodeURIComponent(path.slice('/api/v1/file/delete/'.length)))
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ success: true, code: '200' })); return
+    }
+    if (path === '/api/v1/files') {
+      if (req.headers.authorization !== 'Bearer see-cleanup-test') { res.writeHead(401).end(); return }
+      const page = new URL(req.url!, 'https://localhost').searchParams.get('page')
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ code: 200, data: page === '1' ? imageHistory : [] })); return
+    }
     if (path.startsWith('/markdown/')) {
       if (path.endsWith('redirect.md')) { res.writeHead(302, { Location: '/markdown/html.md' }).end(); return }
       if (path.endsWith('sniffed.md')) { res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.end('<!DOCTYPE html><html><title>实际网页</title><h1>原始网页</h1></html>'); return }
@@ -77,7 +89,7 @@ test.beforeAll(async () => {
   origin = `https://localhost:${(server.address() as { port: number }).port}`
 })
 
-test.beforeEach(() => { files.clear(); quark.reset(); unavailable = false; unsafeWrites = false; omitGetTag = false; omitPutTag = false; rejectNextWrite = false; suspendDataWrites = false })
+test.beforeEach(() => { files.clear(); quark.reset(); imageHistory.length = 0; imageDeletes.length = 0; unavailable = false; unsafeWrites = false; omitGetTag = false; omitPutTag = false; rejectNextWrite = false; suspendDataWrites = false })
 test.afterEach(async () => {
   for (const client of clients.splice(0)) {
     await client.context.close()
@@ -102,6 +114,7 @@ async function openClient(existingProfile?: string, quarkMode = false) {
   const backgroundPath = join(extension, 'background/service_worker.js')
   let background = await readFile(backgroundPath, 'utf8')
   for (const host of ['https://drive-pc.quark.cn', 'https://uop.quark.cn', 'https://pan.quark.cn']) background = background.replaceAll(host, origin)
+  background = background.replaceAll('https://s.ee', origin)
   background = background.replaceAll('https://*.quark.cn/*', 'https://localhost/*').replaceAll('https://*.uc.cn/*', 'https://localhost/*').replaceAll('https://*.aliyuncs.com/*', 'https://*.localhost/*')
   await writeFile(backgroundPath, background)
   const newtabPath = join(extension, 'chrome_url_overrides/newtab.js')
@@ -304,6 +317,127 @@ test('s.ee 图片粘贴使用最新全局密钥，失败可重试，直链随 Ma
   expect(uploads).toHaveLength(2)
   await note.reload()
   await expect(note.locator('img[src="https://images.example.test/upload.png"]')).toBeVisible()
+})
+
+test('s.ee 自动清理正文移除的图片和整篇删除笔记的图片', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('s.ee API Key', { exact: true }).fill('see-cleanup-test')
+  await page.getByRole('button', { name: '保存 s.ee API Key', exact: true }).click()
+  await expect(page.getByText('s.ee API Key 已保存', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  let uploads = 0
+  await context.route('https://s.ee/api/v1/file/upload', route => {
+    const image = { url: `https://images.example.test/cleanup-${++uploads}.png`, hash: `cleanup-hash-${uploads}` }
+    imageHistory.push(image)
+    // The second upload exercises recovery for old responses with only a URL.
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: uploads === 1 ? image : { url: image.url } }) })
+  })
+  await context.route('https://images.example.test/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="green"/></svg>' }))
+  async function finishCleanup() {
+    const result = await page.evaluate(async () => {
+      const key = 'new-page.workspace.v1'
+      const root = (await chrome.storage.local.get(key))[key] as StoredWorkspace
+      root.imageCleanup?.forEach(job => { job.notBefore = 0 })
+      await chrome.storage.local.set({ [key]: root })
+      return chrome.runtime.sendMessage({ type: 'sync', sourceId: root.active })
+    })
+    expect(result.ok).toBe(true)
+    expect(result.snapshot.error).toBe('')
+  }
+  const first = await newNote(page, context, '正文删图', '保留正文')
+  await transferImage(first)
+  await expect(first.locator('img[src="https://images.example.test/cleanup-1.png"]')).toBeVisible()
+  await expect(first.getByRole('status')).toContainText('已保存到本机')
+  await first.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('图片已经移除')
+  await expect.poll(() => page.evaluate(async () => ((await chrome.storage.local.get('new-page.workspace.v1'))['new-page.workspace.v1'] as StoredWorkspace).imageCleanup?.length ?? 0)).toBe(1)
+  expect(imageDeletes).toEqual([])
+  await finishCleanup()
+  expect(imageDeletes).toEqual(['cleanup-hash-1'])
+  await expect(first.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('图片已经移除')
+
+  const second = await newNote(page, context, '整篇删图', '第二篇正文')
+  await transferImage(second)
+  await expect(second.locator('img[src="https://images.example.test/cleanup-2.png"]')).toBeVisible()
+  await expect(second.getByRole('status')).toContainText('已保存到本机')
+  await page.getByRole('article', { name: '笔记 整篇删图', exact: true }).getByRole('button', { name: '删除笔记', exact: true }).click({ force: true })
+  await expect(second.getByRole('alert')).toContainText('永久删除')
+  await finishCleanup()
+  expect(imageDeletes).toEqual(['cleanup-hash-1', 'cleanup-hash-2'])
+})
+
+test('s.ee 本地删图在通知失败后保留磁盘保存并重开补发清理', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('s.ee API Key', { exact: true }).fill('see-cleanup-test')
+  await page.getByRole('button', { name: '保存 s.ee API Key', exact: true }).click()
+  await expect(page.getByText('s.ee API Key 已保存', { exact: true })).toBeVisible()
+  const image = { url: 'https://images.example.test/local-cleanup.png', hash: 'local-cleanup-hash' }
+  imageHistory.push(image)
+  await context.route('https://s.ee/api/v1/file/upload', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 200, data: image }) }))
+  await context.route('https://images.example.test/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="green"/></svg>' }))
+  const title = '清理通知重试.md'
+  const doc = await dropLocalFile(page, context, title, '本地保存正文')
+  const editor = doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })
+  await expect(editor).toHaveAttribute('contenteditable', 'true')
+  await editor.click()
+  await editor.press('Control+End')
+  await transferImage(doc)
+  await expect(doc.locator(`img[src="${image.url}"]`)).toBeVisible()
+  const diskBody = () => doc.evaluate(async name => (await (await (await navigator.storage.getDirectory()).getFileHandle(name)).getFile()).text(), title)
+  await expect.poll(diskBody).toContain(image.url)
+  await expect(doc.getByRole('status')).toContainText('已保存到原文件')
+  await doc.evaluate(() => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime)
+    let failNextCleanup = true
+    chrome.runtime.sendMessage = ((message: { type?: string; previous?: string }) => {
+      if (failNextCleanup && message.type === 'local-image-document' && message.previous !== undefined) {
+        failNextCleanup = false
+        return Promise.reject(new Error('模拟图床通知暂时不可用'))
+      }
+      return send(message)
+    }) as typeof chrome.runtime.sendMessage
+  })
+  await doc.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('移除图片后的正文')
+  await expect(doc.getByRole('alert')).toContainText('文件已保存；图床清理通知待重试')
+  await expect(doc.getByRole('status')).toContainText('已保存到原文件')
+  await expect.poll(diskBody).toContain('移除图片后的正文')
+  expect(await diskBody()).not.toContain(image.url)
+  const pending = await doc.evaluate(async () => {
+    const id = new URLSearchParams(location.search).get('local')!
+    return new Promise<{ pending: { before: string; after: string }[]; baseline: string; dirty?: boolean }>((resolveRead, reject) => {
+      const request = indexedDB.open('page-garden-documents', 1)
+      request.onsuccess = () => {
+        const db = request.result, read = db.transaction('files').objectStore('files').get(id)
+        read.onsuccess = () => { const file = read.result; db.close(); resolveRead({ pending: file.pendingImageCleanup ?? [], baseline: file.baseline, dirty: file.dirty }) }
+        read.onerror = () => { db.close(); reject(read.error) }
+      }
+      request.onerror = () => reject(request.error)
+    })
+  })
+  expect(pending.pending).toHaveLength(1)
+  expect(pending.pending[0].before).toContain(image.url)
+  expect(pending.pending[0].after).toContain('移除图片后的正文')
+  expect(pending.baseline).toContain('移除图片后的正文')
+  expect(pending.dirty).toBe(false)
+  expect(imageDeletes).toEqual([])
+  await doc.reload()
+  await expect(doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })).toContainText('移除图片后的正文')
+  await expect(doc.getByRole('status')).toContainText('已保存到原文件')
+  await expect(doc.getByRole('alert')).toHaveCount(0)
+  await expect(doc.getByRole('button', { name: '保留编辑版本', exact: true })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(async () => ((await chrome.storage.local.get('new-page.workspace.v1'))['new-page.workspace.v1'] as StoredWorkspace).imageCleanup?.some(job => job.url === 'https://images.example.test/local-cleanup.png') ?? false)).toBe(true)
+  const result = await page.evaluate(async () => {
+    const key = 'new-page.workspace.v1', root = (await chrome.storage.local.get(key))[key] as StoredWorkspace
+    root.imageCleanup?.forEach(job => { job.notBefore = 0 })
+    await chrome.storage.local.set({ [key]: root })
+    return chrome.runtime.sendMessage({ type: 'sync', sourceId: root.active })
+  })
+  expect(result.ok).toBe(true)
+  expect(result.snapshot.error).toBe('')
+  expect(imageDeletes).toEqual(['local-cleanup-hash'])
 })
 
 test('s.ee 本地可写 Markdown 支持拖放及原生上传按钮，并拒绝非图片', async () => {

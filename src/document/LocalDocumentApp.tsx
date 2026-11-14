@@ -2,10 +2,11 @@ import { documentStyles } from './document-styles'
 import { useEffect, useRef, useState } from 'react'
 import { documentUrl } from '../core/markdown'
 import { rpc } from '../core/protocol'
+import { readLocalSnapshot } from '../core/local-workspace'
 import { Button } from '../newtab/ui'
 import LocalDocumentSidebar, { FileAccessSettingsButton } from './LocalDocumentSidebar'
 import MarkdownEditor from './MarkdownEditor'
-import { recallFile, rememberFile, markdownName, readFileHandle, relativeFile, type LocalFile, type FileHandle } from './local-files'
+import { recallFile, rememberFile, markdownName, readFileHandle, relativeFile, type LocalFile, type FileHandle, type LocalImageCleanup } from './local-files'
 import { fileDirectoryUrl, requireFileUrlAccess } from './local-directory'
 import { Toast } from '../shared/Toast'
 
@@ -30,13 +31,49 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   const pending = useRef(Promise.resolve())
   const drafts = useRef(Promise.resolve())
   const recordId = useRef(new URLSearchParams(location.search).get('local') ?? crypto.randomUUID())
-  async function show(next: LocalFile) {
-    selectionEpoch.current++; setLoading(false)
-    current.current = next; setFile(next); dirty.current = !!next.dirty; setError(next.handle && next.writable === false ? '未获得写入权限，当前内容只读；可重新授权后编辑' : ''); setConflict(undefined); conflictRef.current = false
+  function persist(value: LocalFile, id: string, acknowledged: LocalImageCleanup[] = []) {
+    const task = drafts.current.catch(() => {}).then(() => rememberFile(value, id, acknowledged))
+    drafts.current = task.then(() => {}, () => {})
+    return task
+  }
+  async function notifyImages(value: LocalFile, id: string) {
+    try {
+      for (const entry of [...(value.pendingImageCleanup ?? [])]) {
+        await rpc({ type: 'local-image-document', id, aliases: value.imageAliasIds, previous: entry.before, body: entry.after, sourceId: entry.sourceId })
+        const selected = current.current
+        const latest = selected && selected.handle === value.handle ? selected : value
+        await persist(latest, id, [entry])
+        value.pendingImageCleanup = latest.pendingImageCleanup
+      }
+      await rpc({ type: 'local-image-document', id, aliases: value.imageAliasIds, body: value.baseline, sourceId: value.imageSourceId })
+      if (current.current?.handle === value.handle && !dirty.current && !conflictRef.current) setError('')
+      return true
+    } catch (cause) {
+      if (current.current?.handle === value.handle) setError(`文件已保存；图床清理通知待重试：${cause instanceof Error ? cause.message : '扩展后台暂时不可用'}`)
+      return false
+    }
+  }
+  async function show(next: LocalFile, changedDisk?: string) {
+    const selection = ++selectionEpoch.current, requestedId = recordId.current
+    if (next.handle) {
+      if (!next.imageSourceId) next.imageSourceId = (await readLocalSnapshot()).sourceId ?? undefined
+      const id = await persist(next, requestedId)
+      if (selection !== selectionEpoch.current) return
+      recordId.current = id
+    }
+    // Resolve the stable file identity before exposing an editable document.
+    // Remounting it after an asynchronous write can cancel a new image upload.
+    setLoading(false)
+    current.current = next; setFile(next); dirty.current = !!next.dirty
+    setError(changedDisk !== undefined ? '磁盘文件已被其他程序修改，编辑草稿已保留，请选择版本' : next.handle && next.writable === false ? '未获得写入权限，当前内容只读；可重新授权后编辑' : '')
+    setConflict(changedDisk !== undefined ? { disk: changedDisk, body: next.body } : undefined); conflictRef.current = changedDisk !== undefined
     setResourceEpoch(value => value + 1)
     resources.current.forEach(url => URL.revokeObjectURL(url)); resources.current = []
     setStatus(next.dirty ? '尚未保存 · 已恢复编辑草稿' : next.handle && next.writable !== false ? '已保存到原文件' : '')
-    if (next.handle) { await rememberFile(next, recordId.current); history.replaceState(null, '', documentUrl({ local: recordId.current })) }
+    if (next.handle) {
+      history.replaceState(null, '', documentUrl({ local: recordId.current }))
+      await notifyImages(next, recordId.current)
+    }
     else if (next.url) history.replaceState(null, '', documentUrl({ url: next.url }))
   }
   async function readAddress(isDisposed = () => false, url = current.current?.url ?? address) {
@@ -63,25 +100,36 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
           const selection = selectionEpoch.current
           const remembered = await recallFile(local)
           if (disposed || selection !== selectionEpoch.current) return
-          await show(remembered)
+          let disk: string | undefined
           try {
-            const disk = await remembered.handle?.getFile().then(value => value.text())
-            if (disposed || current.current !== remembered) return
-            if (disk !== undefined && !remembered.dirty) await show({ ...remembered, body: disk, baseline: disk })
-            else if (disk !== undefined && disk !== remembered.baseline) { conflictRef.current = true; setConflict({ disk, body: remembered.body }); setError('磁盘文件已被其他程序修改，编辑草稿已保留，请选择版本') }
-            else if (remembered.dirty) void save()
-          } catch { if (!disposed && current.current === remembered) setError('文件权限已失效，内容已保留，请重新授权后读取或保存') }
+            disk = await remembered.handle?.getFile().then(value => value.text())
+          } catch {
+            if (disposed || selection !== selectionEpoch.current) return
+            await show(remembered)
+            setError('文件权限已失效，内容已保留，请重新授权后读取或保存')
+            return
+          }
+          if (disposed || selection !== selectionEpoch.current) return
+          const next = disk !== undefined && !remembered.dirty ? { ...remembered, body: disk, baseline: disk } : remembered
+          const changedDisk = remembered.dirty && disk !== undefined && disk !== remembered.baseline ? disk : undefined
+          await show(next, changedDisk)
+          if (disposed || current.current !== next) return
+          if (remembered.dirty && changedDisk === undefined) void save()
         } else if (address) await readAddress(() => disposed)
       } catch (cause) { if (!disposed) setError(cause instanceof Error ? cause.message : '读取失败，请重新拖入文件') }
     })()
     return () => { disposed = true; clearTimeout(timer.current); resources.current.forEach(url => URL.revokeObjectURL(url)) }
   }, [address])
   function save() {
-    const value = current.current
-    if (!value?.handle || value.writable === false || !dirty.current || conflictRef.current) return pending.current
+    const value = current.current, id = recordId.current
+    if (!value?.handle) return pending.current
     pending.current = pending.current.catch(() => {}).then(async () => {
       const active = current.current
-      if (!active || active.handle !== value.handle || conflictRef.current) return
+      if (!active || active.handle !== value.handle) return
+      if (!active.dirty || value.writable === false || conflictRef.current) {
+        try { await persist(active, id); await notifyImages(active, id) } catch { setError('文件内容已保留；图床清理记录暂时无法保存，请重试') }
+        return
+      }
       try {
         const disk = await (await value.handle!.getFile()).text()
         if (disk !== active.baseline) {
@@ -89,10 +137,18 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
         }
         const writer = await value.handle!.createWritable()
         try { await writer.write(value.body); await writer.close() } catch (cause) { await writer.abort().catch(() => {}); throw cause }
-        if (current.current) current.current.baseline = value.body
-        if (current.current === value) { dirty.current = false; value.dirty = false; setStatus('已保存到原文件'); setError('') }
-        await drafts.current
-        await rememberFile(current.current!, recordId.current)
+        const selected = current.current
+        const latest = selected && selected.handle === value.handle ? selected : value
+        value.baseline = value.body; latest.baseline = value.body
+        latest.pendingImageCleanup = [...(latest.pendingImageCleanup ?? []), { before: disk, after: value.body, sourceId: value.imageSourceId }]
+        if (latest === value) { dirty.current = false; value.dirty = false; setStatus('已保存到原文件'); setError('') }
+        // Commit the outbox before contacting the background. Notification failure
+        // cannot turn a successful disk write into an apparent file conflict.
+        try { await persist(latest, id) } catch {
+          setError('文件已保存；图床清理记录暂时无法保存，请保持页面打开并重试')
+          return
+        }
+        await notifyImages(latest, id)
       } catch (cause) { setStatus('尚未保存'); setError(`${cause instanceof Error ? cause.message : '写入失败'}；编辑内容已保留，可重新授权或重试`) }
     })
     return pending.current
@@ -100,8 +156,8 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   function change(body: string) {
     if (!current.current?.handle || current.current.writable === false) return
     selectionEpoch.current++
-    const next = { ...current.current, body, dirty: true }; current.current = next; setFile(next); dirty.current = true
-    drafts.current = drafts.current.catch(() => {}).then(async () => { await rememberFile(next, recordId.current) }).catch(() => setError('编辑草稿暂时无法保存，请保持页面打开并重试保存'))
+    const next = { ...current.current, body, dirty: true }, id = recordId.current; current.current = next; setFile(next); dirty.current = true
+    void persist(next, id).catch(() => setError('编辑草稿暂时无法保存，请保持页面打开并重试保存'))
     setStatus('正在保存…')
     clearTimeout(timer.current); timer.current = setTimeout(save, 200)
   }
@@ -119,7 +175,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
       ensureSelection(selection)
       const next = { ...value, writable: true }; current.current = next; setFile(next); setError('')
       if (dirty.current) await save()
-      else { await rememberFile(next, recordId.current); setStatus('已保存到原文件') }
+      else { const id = recordId.current; await persist(next, id); await notifyImages(next, id); setStatus('已保存到原文件') }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '授权失败，请重试') }
   }
   async function openFile(handle: FileHandle, path: string[]) {
@@ -161,7 +217,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   return <main className={documentStyles.main()}>
     {status && <p role="status" className={documentStyles.status()}>{status}</p>}
     <Toast message={error} onClose={() => setError('')}>
-      {!conflict && <>{!file && address ? <Button disabled={loading} onClick={() => void readAddress()}>重试读取</Button> : dirty.current && <Button onClick={() => void save()}>重试保存</Button>}{file?.handle && <Button onClick={() => void authorize()}>重新授权</Button>}</>}
+      {!conflict && <>{!file && address ? <Button disabled={loading} onClick={() => void readAddress()}>重试读取</Button> : (dirty.current || !!file?.pendingImageCleanup?.length) && <Button onClick={() => void save()}>重试保存</Button>}{file?.handle && <Button onClick={() => void authorize()}>重新授权</Button>}</>}
       {address && <Button onClick={() => { void rpc({ type: 'open-original', url: current.current?.url ?? address }).catch(cause => setError(cause.message)) }}>打开原网页</Button>}
       {error.includes('允许访问文件网址') && <FileAccessSettingsButton />}
     </Toast>
