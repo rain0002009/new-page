@@ -48,7 +48,8 @@
     "test": "pnpm build:chrome && playwright test",
     "test:e2e": "playwright test",
     "preview": "extension preview --browser chrome",
-    "build:chrome": "extension build --browser chrome"
+    "build:chrome": "extension build --browser chrome",
+    "package:chrome": "node scripts/prepare-chrome-store.mjs"
   },
   "packageManager": "pnpm@12.16.1",
   "pnpm": {

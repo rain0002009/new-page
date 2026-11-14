@@ -79,3 +79,5 @@ pnpm test          # 构建并运行 Chrome 自动化测试
 ```
 
 [使用与开发指南](docs/guide.md) · [功能规格](docs/specs/new-tab-bookmarks.md) · [领域与架构](CONTEXT.md) · [问题与建议](https://github.com/rain0002009/new-page/issues)
+
+Chrome 应用商店的文案、隐私政策、权限说明、审核步骤与打包方法见[发布材料](docs/chrome-web-store/README.md)。
