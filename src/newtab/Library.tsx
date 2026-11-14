@@ -19,19 +19,19 @@ const cardAction = tv({
   variants: { tone: { regular: 'text-action-ghost hover:text-action-ghost-hover opacity-0', todo: 'text-[#829466] hover:text-action-ghost-hover opacity-100', danger: 'text-action-danger hover:bg-action-danger-hover opacity-0' } },
   defaultVariants: { tone: 'regular' },
 })
-const collectionTool = 'h-[26px] w-[25px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface [@media(max-width:650px)]:w-[20px]'
+const collectionTool = 'h-[32px] w-[32px] shrink-0 p-0 rounded-[6px] border border-solid border-transparent bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface [@media(max-width:650px)]:w-[20px]'
 const collectionStyle = tv({
   slots: {
     base: 'collection relative pt-[4px] pb-[8px] rounded-[16px]',
     header: 'flex items-center justify-between min-h-[42px] mb-[10px] gap-[10px] py-[5px]',
     heading: 'flex items-center min-w-0 gap-0',
-    title: 'text-[14px] font-semibold flex items-center gap-[7px] min-w-0 truncate text-[#485b3d] [@media(max-width:650px)]:max-w-[170px]',
+    title: 'text-[16px] font-semibold flex items-center gap-[7px] min-w-0 truncate text-[#485b3d] [@media(max-width:650px)]:max-w-[170px]',
     count: 'text-[10px] font-normal text-[#a7ad9e] ml-[3px]',
     tools: 'flex items-center gap-[1px]',
   },
 })
 const collectionStyles = collectionStyle()
-const cardGrid = 'card-grid grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-[12px] [@media(min-width:1700px)]:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] [@media(max-width:1200px)]:grid-cols-[repeat(auto-fill,minmax(190px,1fr))] [@media(max-width:650px)]:grid-cols-1'
+const cardGrid = 'card-grid grid gap-3 grid-cols-[repeat(auto-fill,minmax(clamp(175px,17vw,190px),1fr))]'
 const search = tv({
   slots: {
     field: 'shrink-0 flex items-center bg-[#fffffbc4] border border-solid border-[#ffffffd4] rounded-[12px] py-[7px] px-[16px] gap-[11px] text-[#92a27e] shadow-[0_6px_24px_#4c683409]',
