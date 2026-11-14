@@ -176,12 +176,12 @@ async function main() {
   writeFileSync(join(outputRoot, 'privacy-policy.html'),
     renderPolicy(readFileSync(join(repoRoot, 'docs/chrome-web-store/privacy-policy.md'), 'utf8')))
   const zip = `page-garden-${manifest.version}.zip`
-  writeFileSync(join(outputRoot, zip), archive)
+  writeFileSync(join(repoRoot, 'dist', zip), archive)
   const info = {
     name: manifest.name,
     version: manifest.version,
     generatedAtUtc: new Date().toISOString(),
-    zip,
+    zip: `../${zip}`,
     sha256: createHash('sha256').update(archive).digest('hex'),
     files: files.length,
     status: 'candidate; see docs/chrome-web-store/validation.md before submission',

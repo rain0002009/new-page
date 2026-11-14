@@ -57,6 +57,6 @@ pnpm exec playwright test tests/workbench.spec.ts --grep '首次连接后添加�
 
 ## 变更范围
 
-商店准备材料涉及 docs/chrome-web-store/、README 的材料入口及 tests/quark-requests.spec.ts 的一个目标目录夹具。打包脚本现为 scripts/prepare-chrome-store.mjs，附有同目录的脚本测试，并通过 package.json 提供 package:chrome 命令。打包脚本迁移未修改生产功能和权限配置。生成文件位于已被 Git 忽略的 dist/chrome-store，可用脚本重新生成。
+商店准备材料涉及 docs/chrome-web-store/、README 的材料入口及 tests/quark-requests.spec.ts 的一个目标目录夹具。打包脚本现为 scripts/prepare-chrome-store.mjs，附有同目录的脚本测试，并通过 package.json 提供 package:chrome 命令。打包脚本迁移未修改生产功能和权限配置。生成文件位于已被 Git 忽略的 dist：ZIP 输出到 dist 根目录，其他材料输出到 dist/chrome-store，可用脚本重新生成。
 
 独立审阅与截图核对已完成。visual-verdict 技能在当前列出的安装目录中不存在，本次使用直接图像检查并将结果保存在 .omx/state/chrome-store/ralph-progress.json，没有启动 OMX 或 Ralph 运行模式。

@@ -26,13 +26,13 @@ pnpm package:chrome
 
 脚本为 [scripts/prepare-chrome-store.mjs](../../scripts/prepare-chrome-store.mjs)，也可直接运行 `node scripts/prepare-chrome-store.mjs`，不受当前工作目录影响。需要 Node.js 22.2 或更新版本、已安装的项目依赖和 Google Chrome（通过已有 Playwright 将截图等比缩放）。ZIP 使用 Node.js 内置模块生成，无需 PowerShell 或新增依赖。
 
-脚本仅打包已有的生产构建，不重新构建。输出到 `dist/chrome-store/`：
+脚本仅打包已有的生产构建，不重新构建。ZIP 输出到 `dist/` 根目录，其余材料输出到 `dist/chrome-store/`：
 
-- `page-garden-1.0.0.zip`：扩展上传包，根目录直接包含 manifest.json。
-- `assets/icon-128.png`：商店图标。
-- `assets/01-overview.png` 至 `04-todo.png`：四张 1280×800 商店截图，使用现有 README 的示例内容，等比缩放并留边，不裁切功能界面。
-- `privacy-policy.html`：无需脚本或外部资源的隐私政策网页，部署到公开 HTTPS 地址后填写后台。
-- `package-info.json`：ZIP 的 SHA-256、版本和构建文件数量。
+- `dist/page-garden-1.0.0.zip`：扩展上传包，根目录直接包含 manifest.json。
+- `dist/chrome-store/assets/icon-128.png`：商店图标。
+- `dist/chrome-store/assets/01-overview.png` 至 `04-todo.png`：四张 1280×800 商店截图，使用现有 README 的示例内容，等比缩放并留边，不裁切功能界面。
+- `dist/chrome-store/privacy-policy.html`：无需脚本或外部资源的隐私政策网页，部署到公开 HTTPS 地址后填写后台。
+- `dist/chrome-store/package-info.json`：ZIP 的 SHA-256、版本和构建文件数量；`zip` 字段为相对此 JSON 的路径，例如 `../page-garden-1.0.0.zip`。
 
 脚本拒绝版本不一致、缺失入口、源码、凭据文件、符号链接和 HTML 中的远程脚本；ZIP 使用固定时间戳，相同构建内容生成相同 ZIP。脚本回归检查：`node --test scripts/prepare-chrome-store.test.mjs`。
 
