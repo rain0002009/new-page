@@ -7,6 +7,7 @@ import { active, children, type Action, type Collection, type Entity, type Link 
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import SettingsPanel from './SettingsPanel'
+import RecycleBin from './RecycleBin'
 import TabInbox, { useWindowTabs } from './TabInbox'
 import { DragBoard, useDragItem } from './drag'
 import TodoList from './TodoList'
@@ -197,7 +198,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
         <button aria-label={`Todo ${links.filter(l => l.todo).length}`} title="Todo" className={navigation({ selected: page === 'todo' }).button()} onClick={() => setPage('todo')}><Bookmark size={18} /><span className={nav.label()}>Todo</span><span className={nav.count()}>{links.filter(l => l.todo).length}</span></button>
         <button aria-label="搜索收藏" title="搜索收藏" className={navigation({ selected: searchOpen }).button()} onClick={() => setSearchOpen(true)}><Search size={18} /><span className={nav.label()}>搜索收藏</span><kbd className={nav.shortcut()}>/</kbd></button>
       </nav>
-      <div className="mt-auto"><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
+      <div className="mt-auto"><RecycleBin doc={doc} act={act} /><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
       <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Cloud, Download, Upload, RotateCcw, Trash2, AlertTriangle } from 'lucide-react'
+import { Cloud, Download, Upload, RotateCcw, AlertTriangle } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { type Entity, type Conflict, type Document } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
@@ -19,10 +19,6 @@ const styles = tv({
     backup: 'flex items-center gap-[16px]',
     importLabel: 'relative flex items-center gap-[8px] text-[12px] [font-weight:550] text-form-label m-0 cursor-pointer',
     file: 'absolute inset-0 w-full opacity-0 cursor-pointer p-0 m-0',
-    recycleRow: 'flex items-center justify-between gap-[12px] py-[15px] border-t border-t-solid border-ui-line [@media(max-width:650px)]:flex-wrap',
-    recycleTitle: 'text-[12px] [font-weight:550]',
-    recycleMeta: 'block text-[9px] text-[#a4ad97] mt-[4px]',
-    empty: 'p-[25px] text-center text-[11px] text-[#acb59f]',
   },
 })()
 const conflictStyles = tv({
@@ -43,7 +39,6 @@ const fields = formStyles()
 export default function SettingsPanel({ data, act, receive, onError }: { data: Snapshot & { document: Document }; act: Act; receive: (data: Snapshot) => void; onError: (error: string) => void }) {
   const [nickname, setNickname] = useState(data.document.entities.profile.title)
   const [pending, setPending] = useState<{ data: unknown; message: string } | null>(null)
-  const [recycleAction, setRecycleAction] = useState<{ type: 'purge'; entity: Entity } | { type: 'empty-trash' } | null>(null)
   const [repairOpen, setRepairOpen] = useState(false)
   const repairRunning = useRef(false)
   const [busy, setBusy] = useState(false)
@@ -70,7 +65,6 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
       })
     } finally { repairRunning.current = false }
   }
-  const deleted = Object.values(data.document.entities).filter(e => !e.purged && e.deletedAt !== null && e.deletedBy === e.id).sort((a, b) => b.deletedAt! - a.deletedAt!)
   const profile = data.document.entities.profile
 
   return <>
@@ -90,27 +84,11 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = `page-garden-${new Date().toISOString().slice(0, 10)}.json`; anchor.click()
       setTimeout(() => URL.revokeObjectURL(url), 10_000)
     })}><Download size={15} />导出备份</Button><label className={styles.importLabel()}><Upload size={15} />导入备份<input className={styles.file()} aria-label="导入备份" type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void execute(async () => { if (file.size > 15_000_000) throw new Error('备份文件过大'); let value: unknown; try { value = JSON.parse(await file.text()) } catch { throw new Error('备份格式错误，请选择有效 JSON 文件') } await importBackup(value, false) }) }} /></label></div></section>
-    <section className={styles.card()}>
-      <div className="flex items-start justify-between gap-[12px] mb-[9px]"><h2 className={styles.title()}><Trash2 size={16} />回收站 <span className={feedbackStyles.muted()}>{deleted.length}</span></h2><Button tone="danger" aria-label="清空回收站" disabled={busy || !deleted.length} onClick={() => setRecycleAction({ type: 'empty-trash' })}><Trash2 size={14} />清空</Button></div>
-      <p className={styles.description()}>保留 30 天。恢复父级时会一并恢复随它删除的内容和待办标记。</p>
-      {deleted.length ? <div>{deleted.map(entity => <div key={entity.id} className={styles.recycleRow()}>
-        <div className="min-w-0 [overflow-wrap:anywhere]"><strong className={styles.recycleTitle()}>{entity.title}</strong><span className={styles.recycleMeta()}>{entity.kind === 'space' ? '空间' : entity.kind === 'collection' ? '收藏块' : entity.kind === 'note' ? '笔记' : '链接'} · {Math.max(1, Math.ceil((30 * 86400_000 - Date.now() + entity.deletedAt!) / 86400_000))} 天后清理</span></div>
-        <div className="flex shrink-0 items-center gap-[8px]"><Button aria-label={`恢复 ${entity.title}`} disabled={busy} onClick={() => void execute(async () => { await act({ type: 'restore', id: entity.id }) })}><RotateCcw size={14} />恢复</Button><Button tone="danger" aria-label={`彻底删除 ${entity.title}`} disabled={busy} onClick={() => setRecycleAction({ type: 'purge', entity })}><Trash2 size={14} />删除</Button></div>
-      </div>)}</div> : <p className={styles.empty()}>回收站空空的</p>}
-    </section>
     <ModalPresence>{repairOpen && <Modal title="修复夸克同步" close={() => { if (!busy) setRepairOpen(false) }}>
       <p className="text-[14px] [overflow-wrap:anywhere]">将用当前本地收藏和完整笔记正文，重建夸克中缺失的「页墟收藏」文件夹、收藏.json 和笔记 Markdown 文件。</p>
       <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>云端已有完整收藏时会进行正常同步；遇到冲突需要选择保留的版本。</p>
       <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>修复无法找回本地已没有的内容。网络或登录失败时保留本地数据，可在恢复连接后重试。</p>
       <div className="flex justify-end gap-[8px] mt-[24px]"><Button data-autofocus disabled={busy} onClick={() => setRepairOpen(false)}>取消</Button><Button tone="primary" disabled={busy || data.status === 'syncing' || data.conflicts.length > 0} onClick={() => void repairQuark()}>{busy ? '正在修复…' : '确认修复'}</Button></div>
-    </Modal>}</ModalPresence>
-    <ModalPresence>{recycleAction && <Modal title={recycleAction.type === 'purge' ? '彻底删除' : '清空回收站'} close={() => { if (!busy) setRecycleAction(null) }}>
-      <p className="text-[14px] [overflow-wrap:anywhere]">{recycleAction.type === 'purge' ? `彻底删除「${recycleAction.entity.title}」及其包含的内容？` : '彻底删除回收站中的全部内容？'}</p>
-      <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>删除后无法从回收站恢复。</p>
-      <div className="flex justify-end gap-[8px] mt-[24px]"><Button data-autofocus disabled={busy} onClick={() => setRecycleAction(null)}>取消</Button><Button tone="danger" disabled={busy} onClick={() => void execute(async () => {
-        const action = recycleAction.type === 'purge' ? { type: 'purge' as const, id: recycleAction.entity.id } : { type: 'empty-trash' as const }
-        if (await act(action)) setRecycleAction(null)
-      })}>{recycleAction.type === 'purge' ? '删除' : '清空'}</Button></div>
     </Modal>}</ModalPresence>
     <ModalPresence>{pending && <Modal title="合并备份" close={() => setPending(null)}><p className={feedbackStyles.muted()}>{pending.message}</p><div className="flex justify-end gap-[8px] mt-[24px]"><Button onClick={() => setPending(null)}>取消</Button><Button tone="primary" disabled={busy} onClick={() => void execute(() => importBackup(pending.data, true))}>确认导入</Button></div></Modal>}</ModalPresence>
   </>

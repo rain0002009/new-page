@@ -12,8 +12,8 @@ import { moveTabsToSlot, moveWholeGroup, type TabSlot } from './tab-groups'
 import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
 
 type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string } | { kind: 'tab-group'; groupId: number; windowId: number; lastIndex: number; title: string }
-type DragTarget = DragItem | { kind: 'content' } | QuickCollectionTarget | ({ kind: 'tab-slot' } & TabSlot)
-type DropDestination = { kind: 'existing' } | { kind: 'new-link'; collectionId?: string }
+type DragTarget = DragItem | { kind: 'content' } | { kind: 'trash' } | QuickCollectionTarget | ({ kind: 'tab-slot' } & TabSlot)
+type DropDestination = { kind: 'existing' | 'trash' } | { kind: 'new-link'; collectionId?: string }
 type TabProjection = { tabs: OpenTab[]; height: number; width: number; slot?: TabSlot; target?: DragTarget }
 const TabProjectionContext = createContext<TabProjection | null>(null)
 export const useTabDragProjection = () => useContext(TabProjectionContext)
@@ -98,7 +98,7 @@ const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
     if (sourceTab && kind === 'tab-slot' && (container.data.current?.groupId === sourceTab.groupId || container.data.current?.beforeTabId === sourceTab.tabId)) continue
     if (inboxVertical && !['tab', 'tab-slot', 'tab-group'].includes(kind)) continue
     const tabTarget = sourceTab && ((kind === 'tab' && canSortTabs(sourceTab, container.data.current?.tab)) || kind === 'tab-slot' || kind === 'tab-group')
-    if (container.id === active?.id || !(savedItemSource ? tabTarget || ['saved-item', 'collection', 'new-collection'].includes(kind) : sourceKind === 'tab-group' ? kind === 'tab-group' || kind === 'tab-slot' && container.data.current?.groupId === -1 : kind === sourceKind)) continue
+    if (container.id === active?.id || !(savedItemSource ? tabTarget || ['saved-item', 'collection', 'new-collection', 'trash'].includes(kind) : sourceKind === 'tab-group' ? kind === 'tab-group' || kind === 'tab-slot' && container.data.current?.groupId === -1 : kind === sourceKind || kind === 'trash')) continue
     if (savedItemSource && kind === 'collection' && container.node.current?.querySelector('.link-card')) continue
     if (kind === 'new-collection' && ['ArrowLeft', 'ArrowRight'].includes(event.code)) continue
     const rect = droppableRects.get(container.id)
@@ -122,6 +122,7 @@ const collision: CollisionDetection = args => {
     const item = container.data.current as DragTarget | undefined
     const target = item?.kind
     if (source?.kind === 'tab-group') return target === 'tab-group' || target === 'tab-slot' && item?.kind === 'tab-slot' && item.groupId === -1
+    if (target === 'trash') return true
     if (source?.kind === 'tab' && item?.kind === 'tab-slot') return source.tab.windowId === item.windowId
     if (source?.kind === 'tab' && item?.kind === 'tab-group') return source.tab.windowId === item.windowId
     if (source?.kind === 'tab' && item?.kind === 'tab') return source.tab.windowId === item.tab.windowId && (item.tab.groupId !== -1 || canSortTabs(source.tab, item.tab))
@@ -176,10 +177,32 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
     const settle = async (success: boolean, target: DropDestination = { kind: 'existing' }) => {
       setProjection(null)
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-      const destination = target.kind === 'new-link' ? Array.from(document.querySelectorAll<HTMLElement>(target.collectionId ? `[data-drag-id="${window.CSS.escape(target.collectionId)}"] .card-grid > .link-card` : '.card-grid > .link-card')).find(node => !doc.entities[node.dataset.dragId!]) : document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(String(active.id))}"]`)
+      const destination = target.kind === 'trash' ? document.querySelector<HTMLElement>('[data-drop-bin]') : target.kind === 'new-link' ? Array.from(document.querySelectorAll<HTMLElement>(target.collectionId ? `[data-drag-id="${window.CSS.escape(target.collectionId)}"] .card-grid > .link-card` : '.card-grid > .link-card')).find(node => !doc.entities[node.dataset.dragId!]) : document.querySelector<HTMLElement>(`[data-drag-id="${window.CSS.escape(String(active.id))}"]`)
       resolve(success ? destination ?? original : original)
     }
     if (!source || !target || active.id === over?.id || target.kind === 'content') { resolve(original); return }
+    if (target.kind === 'trash') {
+      if (source.kind === 'tab') {
+        const failed: string[] = []
+        for (const tab of batch.current.tabs) {
+          try {
+            const current = await chrome.tabs.get(tab.tabId).catch(() => null)
+            if (!current) continue
+            if (current.windowId !== tab.windowId || (current.pendingUrl || current.url) !== tab.url) { failed.push(String(tab.tabId)); notify(`标签页已变化，已保留：${tab.title}`); continue }
+            await chrome.tabs.remove(tab.tabId)
+            selection.pendingClosures.delete(tab.tabId)
+          } catch { failed.push(String(tab.tabId)) }
+        }
+        selection.retain(failed)
+        if (failed.length) notify('部分标签页无法关闭，请重试')
+        await settle(failed.length < batch.current.tabs.length, { kind: 'trash' })
+      } else if (source.kind === 'saved-item' || source.kind === 'space' || source.kind === 'collection' || source.kind === 'todo') {
+        const success = await act(source.kind === 'saved-item' ? { type: 'delete-items', ids: batch.current.ids } : { type: 'delete', id: source.entityId })
+        if (success) selection.clear()
+        await settle(success, { kind: 'trash' })
+      } else resolve(original)
+      return
+    }
     if (source.kind === 'tab-group') {
       const members = await chrome.tabs.query({ windowId: source.windowId, groupId: source.groupId })
       let index: number
@@ -311,5 +334,5 @@ function DragFeedback({ element, source, doc, dropAnimation }: { element: HTMLEl
   const tab = source?.kind === 'tab' ? source.tab : undefined
   const card = !!tab && !!target && ['content', 'collection', 'saved-item', 'new-collection'].includes(target.kind)
   const collectionId = target?.kind === 'collection' ? target.entityId : target?.kind === 'saved-item' ? doc.entities[target.entityId]?.parentId ?? undefined : undefined
-  return <DragOverlay dropAnimation={dropAnimation} zIndex={50}>{element && <DragPreview element={element} tab={tab} card={card} collectionId={collectionId} />}</DragOverlay>
+  return <DragOverlay dropAnimation={dropAnimation} zIndex={50} style={{ opacity: target?.kind === 'trash' ? 0.25 : 1 }}>{element && <DragPreview element={element} tab={tab} card={card} collectionId={collectionId} />}</DragOverlay>
 }
