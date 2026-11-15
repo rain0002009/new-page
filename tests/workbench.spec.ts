@@ -2364,6 +2364,44 @@ test('空收藏块下边缘悬停和取消保持高度，下方收藏块不跳�
   expect(Math.abs((await next.boundingBox())!.y - before)).toBeLessThan(3)
 })
 
+test('收藏块展开和收起动画结束时高度连续', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '高度稳定的收藏')
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('名称').fill('下方收藏块')
+  await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click()
+  const collection = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
+  await expect(page.getByRole('region', { name: '收藏块 下方收藏块', exact: true })).toBeVisible()
+  for (const label of ['折叠 日常收藏', '展开 日常收藏']) {
+    const frames = await page.evaluate(async label => {
+      const region = document.querySelector<HTMLElement>('section[aria-label="收藏块 日常收藏"]')!
+      const next = document.querySelector<HTMLElement>('section[aria-label="收藏块 下方收藏块"]')!
+      region.querySelector<HTMLButtonElement>('button[aria-label="' + label + '"]')!.click()
+      const samples: { height: number; nextY: number; animating: boolean }[] = []
+      const start = performance.now()
+      while (performance.now() - start < 700) {
+        await new Promise(requestAnimationFrame)
+        samples.push({
+          height: region.getBoundingClientRect().height,
+          nextY: next.getBoundingClientRect().y,
+          animating: region.getAnimations({ subtree: true }).some(animation => animation.playState === 'running' &&
+            (animation.effect as KeyframeEffect | null)?.getKeyframes().some(frame => 'height' in frame)),
+        })
+      }
+      return samples
+    }, label)
+    const completed = frames.findIndex((frame, index) => index > 0 && frames[index - 1].animating && !frame.animating)
+    expect(completed, label + ' 应播放高度动画').toBeGreaterThan(0)
+    const jump = Math.abs(frames[completed].height - frames[completed - 1].height)
+    expect(jump, label + ' 动画结束时高度跳变 ' + jump.toFixed(1) + 'px').toBeLessThan(3)
+    const lateJump = Math.max(...frames.slice(completed + 1).map((frame, index) =>
+      Math.abs(frame.nextY - frames[completed + index].nextY)))
+    expect(lateJump, label + ' 完成后下方收藏块突然移动 ' + lateJump.toFixed(1) + 'px').toBeLessThan(3)
+    await expect(collection.getByRole('button', { name: label.startsWith('折叠') ? '展开 日常收藏' : '折叠 日常收藏', exact: true })).toBeVisible()
+  }
+})
+
 test('跨收藏块的落点占位稳定，折叠块取消拖动后保持原状', async () => {
   const { page } = await openClient()
   await page.emulateMedia({ reducedMotion: 'reduce' })

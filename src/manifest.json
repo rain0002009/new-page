@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/chrome-manifest.json",
   "manifest_version": 3,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "页墟 · Page Garden",
   "description": "以空间整理收藏，用 Todo 标记待办，自动保存到夸克网盘。",
   "permissions": [

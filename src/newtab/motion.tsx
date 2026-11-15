@@ -15,6 +15,24 @@ export function useLayoutMotion(ref: RefObject<HTMLElement>, selector: string) {
   useLayoutEffect(() => {
     const root = ref.current
     if (!root) return
+    // Height animations move later siblings without a React render; keep their
+    // layout baseline current so the next render does not replay that movement.
+    const observer = new ResizeObserver(() => {
+      const rootRect = root.getBoundingClientRect()
+      for (const entry of previous.current.values()) {
+        if (!entry.node.isConnected) continue
+        const rect = entry.node.getBoundingClientRect()
+        const transform = translation(getComputedStyle(entry.node).transform)
+        entry.x = rect.x - rootRect.x - transform.x
+        entry.y = rect.y - rootRect.y - transform.y
+      }
+    })
+    observer.observe(root)
+    return () => observer.disconnect()
+  }, [])
+  useLayoutEffect(() => {
+    const root = ref.current
+    if (!root) return
     const rootRect = root.getBoundingClientRect()
     const next = new Map<string, { x: number; y: number; node: HTMLElement; animation?: Animation }>()
     for (const node of root.querySelectorAll<HTMLElement>(selector)) {

@@ -19,3 +19,7 @@ Use single-context domain docs. Before codebase exploration, read `docs/agents/d
 ### UI styling
 
 Use UnoCSS utilities first and tailwind-variants for reusable variants. Before creating or changing UI, styles, or UnoCSS configuration, read `docs/agents/ui-styling.md`.
+
+### Versioning
+
+Before finalizing a shipped extension change, changing a version, or preparing a store submission, read `docs/agents/versioning.md`.
