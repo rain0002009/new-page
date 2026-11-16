@@ -33,10 +33,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const position = () => {
       const dialogs = [...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].filter(dialog => dialog.matches(':modal'))
       const parent = dialogs.at(-1) ?? document.body
-      const moved = portal.parentElement !== parent
+      const moved = portal.parentElement !== parent || !portal.isConnected
       if (moved) parent.appendChild(portal)
       const node = viewport.current
-      if (!node || !node.firstElementChild?.childElementCount) return
+      if (!node || !node.isConnected || !node.firstElementChild?.childElementCount) return
       if (moved && node.matches(':popover-open')) node.hidePopover()
       if (!node.matches(':popover-open')) node.showPopover()
     }
@@ -46,11 +46,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return () => { observer.disconnect(); portal.remove() }
   }, [portal])
   useLayoutEffect(() => {
+    const dialogs = [...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].filter(dialog => dialog.matches(':modal'))
+    const parent = dialogs.at(-1) ?? document.body
+    if (portal.parentElement !== parent || !portal.isConnected) parent.appendChild(portal)
     const node = viewport.current
-    if (!node) return
+    if (!node || !node.isConnected) return
     if (notices.length && !node.matches(':popover-open')) node.showPopover()
     else if (!notices.length && node.matches(':popover-open')) node.hidePopover()
-  }, [notices])
+  }, [notices, portal])
   const groups = new Map<string, Notice[]>()
   for (const notice of notices) {
     const key = `${notice.tone}:${notice.message}`

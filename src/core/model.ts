@@ -12,6 +12,17 @@ const entitySchema = z.discriminatedUnion('kind', [
   z.object({ ...base, kind: z.literal('collection'), collapsed: z.boolean() }),
   z.object({ ...base, kind: z.literal('note'), body: z.string() }),
   z.object({ ...base, kind: z.literal('link'), url: z.string().max(10_000), icon: z.string().max(250_000), note: z.string().max(20_000), todo: z.boolean(), todoPosition: z.number().finite().optional() }),
+  z.object({
+    ...base,
+    kind: z.literal('share'),
+    entityKind: z.literal('note'),
+    entityId: z.string(),
+    domain: z.string(),
+    slug: z.string(),
+    shortUrl: z.string(),
+    expireAt: z.number().finite().nullable().optional(),
+    hasPassword: z.boolean().optional(),
+  }),
 ])
 const documentSchema = z.object({
   format: z.literal('new-page'), version: z.literal(1),
@@ -20,6 +31,7 @@ const documentSchema = z.object({
 export type Entity = z.infer<typeof entitySchema>
 export type Link = Extract<Entity, { kind: 'link' }>
 export type Note = Extract<Entity, { kind: 'note' }>
+export type ShareRecord = Extract<Entity, { kind: 'share' }>
 export type SavedItem = Link | Note
 export type Collection = Extract<Entity, { kind: 'collection' }>
 export type Document = z.infer<typeof documentSchema>
@@ -48,6 +60,9 @@ export type Action =
   | { type: 'restore'; id: string }
   | { type: 'purge'; id: string }
   | { type: 'empty-trash' }
+  | { type: 'add-share'; id: string; entityKind: 'note'; entityId: string; domain: string; slug: string; shortUrl: string; title: string; expireAt?: number | null; hasPassword?: boolean }
+  | { type: 'update-share'; id: string; title: string; expireAt?: number | null }
+  | { type: 'delete-share'; id: string }
 
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -88,7 +103,7 @@ export function readDocument(value: unknown): Document {
     const parent = entity.parentId ? doc.entities[entity.parentId] : null
     if (((entity.kind === 'link' || entity.kind === 'note') && parent?.kind !== 'collection') ||
         (entity.kind === 'collection' && parent?.kind !== 'space') ||
-        (['profile', 'space'].includes(entity.kind) && entity.parentId !== null)) throw new Error('数据的空间与收藏块关系无效')
+        (['profile', 'space', 'share'].includes(entity.kind) && entity.parentId !== null)) throw new Error('数据的空间与收藏块关系无效')
   }
   if (!active(doc).some(e => e.kind === 'space')) throw new Error('数据必须至少包含一个空间')
   return doc
@@ -349,6 +364,42 @@ export function apply(doc: Document, action: Action): Document {
       }
       break
     }
+    case 'add-share': {
+      requireEntity(next, action.entityId, 'note')
+      const existing = Object.values(next.entities).find(e => e.kind === 'share' && !e.purged && e.entityId === action.entityId)
+      if (existing) throw new Error('此笔记已生成过分享，不能重复分享')
+      if (next.entities[action.id]) throw new Error('分享记录已存在')
+      const share: ShareRecord = {
+        ...common('share', action.title, null, 1024),
+        id: action.id,
+        kind: 'share',
+        entityKind: action.entityKind,
+        entityId: action.entityId,
+        domain: action.domain,
+        slug: action.slug,
+        shortUrl: action.shortUrl,
+        expireAt: action.expireAt ?? null,
+        hasPassword: action.hasPassword ?? false,
+      }
+      next.entities[share.id] = share
+      break
+    }
+    case 'update-share': {
+      const entity = next.entities[action.id]
+      if (!entity || entity.kind !== 'share' || entity.purged) throw new Error('分享记录不存在或已删除')
+      entity.title = action.title.trim() || entity.title
+      if (action.expireAt !== undefined) entity.expireAt = action.expireAt
+      entity.updatedAt = now
+      break
+    }
+    case 'delete-share': {
+      const entity = next.entities[action.id]
+      if (!entity || entity.kind !== 'share' || entity.purged) throw new Error('分享记录不存在或已删除')
+      entity.deletedAt = now
+      entity.deletedBy = entity.id
+      purgeEntity(entity, now)
+      break
+    }
   }
   return readDocument(next)
 }
@@ -356,6 +407,7 @@ function purgeEntity(entity: Entity, now: number) {
   entity.purged = true; entity.title = ''; entity.updatedAt = now
   if (entity.kind === 'link') { entity.url = ''; entity.icon = ''; entity.note = ''; entity.todo = false }
   if (entity.kind === 'note') entity.body = ''
+  if (entity.kind === 'share') { entity.shortUrl = ''; entity.slug = ''; entity.domain = ''; entity.entityId = '' }
 }
 export function prune(doc: Document, now = Date.now()): Document {
   const next = structuredClone(doc)

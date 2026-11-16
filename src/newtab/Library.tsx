@@ -1,8 +1,8 @@
 import { Fragment, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
-import { Bookmark, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Trash2 } from 'lucide-react'
+import { Bookmark, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Share2, Trash2 } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem } from '../core/model'
+import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { documentUrl, markdownDescription } from '../core/markdown'
 import { readLocalSnapshot } from '../core/local-workspace'
 import { Button, SiteIcon } from './ui'
@@ -16,7 +16,7 @@ import { SelectionIcon, useSelection } from './Selection'
 
 const cardAction = tv({
   base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
-  variants: { tone: { regular: 'text-action-ghost hover:text-action-ghost-hover opacity-0', todo: 'text-[#829466] hover:text-action-ghost-hover opacity-100', danger: 'text-action-danger hover:bg-action-danger-hover opacity-0' } },
+  variants: { tone: { regular: 'text-action-ghost hover:text-action-ghost-hover opacity-0', todo: 'text-[#829466] hover:text-action-ghost-hover opacity-100', share: 'text-[#587346] hover:text-action-ghost-hover opacity-100 bg-[#edf3e2]', danger: 'text-action-danger hover:bg-action-danger-hover opacity-0' } },
   defaultVariants: { tone: 'regular' },
 })
 const collectionTool = 'h-[32px] w-[32px] shrink-0 p-0 rounded-[6px] border border-solid border-transparent bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface [@media(max-width:650px)]:w-[20px]'
@@ -71,11 +71,14 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
   </article>
 }
 
-function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?: boolean }) {
+function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc: Document; act: Act; search?: boolean; onShare?: (note: Note, share?: ShareRecord) => void }) {
   const selection = useSelection()
   const styles = linkCard({ note: true, search })
   const drag = useDragItem(search ? `search:${note.id}` : note.id, { kind: 'saved-item', itemKind: 'note', entityId: note.id, title: note.title }, styles.base(), search)
   const [error, setError] = useState('')
+  const share = Object.values(doc.entities).find(
+    (e): e is ShareRecord => e.kind === 'share' && !e.purged && e.entityId === note.id
+  )
   async function open() {
     try { const data = await readLocalSnapshot(); await chrome.tabs.create({ url: documentUrl({ note: note.id, source: data.sourceId! }) }) }
     catch { setError('无法打开笔记，请重试') }
@@ -83,12 +86,27 @@ function NoteCard({ note, act, search = false }: { note: Note; act: Act; search?
   const noteIcon = <span className="grid place-items-center h-[20px] w-[20px] rounded-[5px] bg-[#eee5cb] text-[#9d8551]"><FileText size={16} /></span>
   return <article {...drag} data-selected={!search && selection.isSelected('saved', note.id) || undefined} aria-label={`笔记 ${note.title}`}>
     <div className={styles.top()}><span className={styles.icon()}>{search ? noteIcon : <SelectionIcon size="card" id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}</span><a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a></div>
-    <div className={styles.actions()}><Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button></div><span className={styles.domain()}>Markdown 笔记</span>
+    <div className={styles.actions()}>
+      {onShare && (
+        <Button
+          tone="custom"
+          size="custom"
+          className={cardAction({ tone: share ? 'share' : 'regular' })}
+          aria-label={share ? '查看已分享短链' : '分享笔记'}
+          title={share ? '已分享（点击查看/复制短链）' : '分享笔记'}
+          onClick={() => onShare(note, share)}
+        >
+          <Share2 size={13} className={share ? 'stroke-[2.2]' : ''} />
+        </Button>
+      )}
+      <Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button>
+    </div>
+    <span className={styles.domain()}>Markdown 笔记</span>
     <p className={styles.note()}>{markdownDescription(note.body)}</p><Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>
 }
 
-export function CollectionSection({ collection, doc, act, edit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void }) {
+export function CollectionSection({ collection, doc, act, edit, onShare }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void }) {
   const savedItems = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
@@ -114,7 +132,7 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>
     <MotionRegion>{(!collection.collapsed || placeholder) && (savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
-      <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} act={act} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
+      <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
     </SortableContext> : <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">
       <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
       <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
@@ -122,13 +140,13 @@ export function CollectionSection({ collection, doc, act, edit }: { collection: 
   </section>
 }
 
-export function SearchView({ doc, act, edit, locate }: { doc: Document; act: Act; edit: (state: EditorState) => void; locate: (link: Link) => void }) {
+export function SearchView({ doc, act, edit, locate, onShare }: { doc: Document; act: Act; edit: (state: EditorState) => void; locate: (link: Link) => void; onShare?: (note: Note, share?: ShareRecord) => void }) {
   const [term, setTerm] = useState('')
   const savedItems = active(doc).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
   const result = term.trim() ? savedItems.filter(item => `${item.title}\n${item.kind === 'note' ? item.body : item.url + '\n' + item.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
   return <><div className={searchStyles.field()}><Search size={19} /><input className={searchStyles.input()} aria-label="搜索全部收藏" type="search" placeholder="搜索标题、正文、网址或备注…" value={term} onChange={e => setTerm(e.target.value)} autoFocus data-autofocus /><kbd className={searchStyles.shortcut()}>全部空间</kbd></div>
     <p className={searchStyles.count()}>{term ? `找到 ${result.length} 个收藏` : `共 ${savedItems.length} 个收藏`}</p>
-    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(item => item.kind === 'note' ? <NoteCard key={item.id} note={item} act={act} search /> : <Card key={item.id} link={item} act={act} edit={edit} location={locationName(doc, item)} locate={() => locate(item)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
+    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(item => item.kind === 'note' ? <NoteCard key={item.id} note={item} doc={doc} act={act} search onShare={onShare} /> : <Card key={item.id} link={item} act={act} edit={edit} location={locationName(doc, item)} locate={() => locate(item)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
   </>
 }
 export function locationName(doc: Document, entity: Entity) {

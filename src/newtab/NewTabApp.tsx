@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, Edit3, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
+import { Bookmark, Edit3, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Share2, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, type Action, type Collection, type Entity, type Link } from '../core/model'
+import { active, children, type Action, type Collection, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import SettingsPanel from './SettingsPanel'
@@ -11,6 +11,8 @@ import RecycleBin from './RecycleBin'
 import TabInbox, { useWindowTabs } from './TabInbox'
 import { DragBoard, useDragItem } from './drag'
 import TodoList from './TodoList'
+import ShareManagementPanel from './ShareManagementPanel'
+import { ShareModal } from './ShareModal'
 import FluidBackground from './FluidBackground'
 import ContentPanel from './ContentPanel'
 import Editor, { type EditorState } from './Editor'
@@ -98,6 +100,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const [page, setPage] = useState('space')
   const [searchOpen, setSearchOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const [sharingNote, setSharingNote] = useState<{ note: Note; share?: ShareRecord } | null>(null)
   const [collecting, setCollecting] = useState(false)
   const [grouping, setGrouping] = useState(false)
   const groupingRef = useRef(false)
@@ -157,6 +160,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const nickname = doc.entities.profile.title
   const collections = space ? children(doc, space.id).filter((e): e is Collection => e.kind === 'collection') : []
   const links = all.filter((e): e is Link => e.kind === 'link')
+  const activeShares = Object.values(doc.entities).filter((e): e is ShareRecord => e.kind === 'share' && !e.purged)
   const status = syncStatusLabels[data.status]
   async function groupTabs() {
     if (groupingRef.current || !tabs.length || tabError) return
@@ -182,9 +186,10 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       if (notices.size) setMessage([...notices].join('；'))
     } finally { collectingRef.current = false; setCollecting(false); refreshTabs() }
   }
-  function locate(link: Link) {
+  function locate(item: SavedItem) {
     setSearchOpen(false)
-    const collection = doc.entities[link.parentId!]
+    const collection = doc.entities[item.parentId!]
+    if (!collection) return
     setSelected(collection.parentId!); setPage('space')
     if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
     setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
@@ -196,21 +201,24 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
       <div className={styles.section()}><span className={styles.sectionTitle()}>工作台</span></div><nav>
         <button aria-label={`Todo ${links.filter(l => l.todo).length}`} title="Todo" className={navigation({ selected: page === 'todo' }).button()} onClick={() => setPage('todo')}><Bookmark size={18} /><span className={nav.label()}>Todo</span><span className={nav.count()}>{links.filter(l => l.todo).length}</span></button>
+        <button aria-label={`分享管理 ${activeShares.length}`} title="分享管理" className={navigation({ selected: page === 'shares' }).button()} onClick={() => setPage('shares')}><Share2 size={18} /><span className={nav.label()}>分享管理</span>{!!activeShares.length && <span className={nav.count()}>{activeShares.length}</span>}</button>
         <button aria-label="搜索收藏" title="搜索收藏" className={navigation({ selected: searchOpen }).button()} onClick={() => setSearchOpen(true)}><Search size={18} /><span className={nav.label()}>搜索收藏</span><kbd className={nav.shortcut()}>/</kbd></button>
       </nav>
       <div className="mt-auto"><RecycleBin doc={doc} act={act} /><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
-      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
+      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} onShare={(note, share) => setSharingNote({ note, share })} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
+      {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateNote={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link')) locate(n) }} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
     <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} groups={groups} groupAll={() => void groupTabs()} grouping={grouping} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />
     <BatchActions key={data.sourceId} doc={doc} sourceId={data.sourceId!} spaceId={space?.id} tabs={tabs} act={act} notify={setMessage} refreshTabs={refreshTabs} reveal={reveal} />
-    <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} /></Modal>}</ModalPresence>
+    <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} onShare={(note, share) => setSharingNote({ note, share })} /></Modal>}</ModalPresence>
     <ModalPresence>{editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}</ModalPresence>
+    <ModalPresence>{sharingNote && <ShareModal note={sharingNote.note} share={sharingNote.share} doc={doc} act={act} close={() => setSharingNote(null)} onNavigateToShares={() => { setSharingNote(null); setPage('shares') }} onNavigateToSettings={() => { setSharingNote(null); setPage('settings') }} />}</ModalPresence>
   </div></DragBoard></SelectionProvider>
 }
 function Brand({ sidebar = false }: { sidebar?: boolean }) {

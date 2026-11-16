@@ -123,3 +123,200 @@ export async function deleteHostedImage(key: string, hash: string, signal?: Abor
   )
   if (!result.success) throw new Error('s.ee 删除图片失败：服务未确认删除成功')
 }
+
+export const MAX_TEXT_SHARE_LENGTH = 2_097_152
+
+export function validateTextShareLength(content: string): void {
+  const bytes = new TextEncoder().encode(content).length
+  if (content.length > MAX_TEXT_SHARE_LENGTH || bytes > MAX_TEXT_SHARE_LENGTH) {
+    throw new Error('笔记内容超过分享限制（最大 2MB），无法分享')
+  }
+}
+
+let domainCache: { key: string; domains: string[]; timestamp: number } | null = null
+
+export async function fetchSeeDomains(key: string, force = false, signal?: AbortSignal): Promise<string[]> {
+  if (!key.trim()) return ['s.ee']
+  if (!force && domainCache && domainCache.key === key && Date.now() - domainCache.timestamp < 3600_000) {
+    return domainCache.domains
+  }
+  let response: Response
+  try {
+    response = await fetch('https://s.ee/api/v1/domains', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${key}` },
+      credentials: 'omit',
+      redirect: 'error',
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]),
+    })
+  } catch {
+    if (domainCache && domainCache.key === key) return domainCache.domains
+    return ['s.ee']
+  }
+  if (!response.ok) {
+    if (domainCache && domainCache.key === key) return domainCache.domains
+    return ['s.ee']
+  }
+  const body: unknown = await response.json().catch(() => null)
+  const schema = z.object({
+    code: z.number().int().optional(),
+    success: z.boolean().optional(),
+    data: z.union([
+      z.object({ domains: z.array(z.string()) }),
+      z.array(z.string()),
+    ]),
+  })
+  const parsed = schema.safeParse(body)
+  let domains: string[] = []
+  if (parsed.success) {
+    const raw = Array.isArray(parsed.data.data) ? parsed.data.data : parsed.data.data.domains
+    domains = raw.map(d => d.trim()).filter(Boolean)
+  }
+  if (!domains.includes('s.ee')) domains.unshift('s.ee')
+  domainCache = { key, domains, timestamp: Date.now() }
+  return domains
+}
+
+export type CreateTextShareParams = {
+  title: string
+  content: string
+  domain: string
+  expire_at?: number | null
+  custom_slug?: string
+  password?: string
+}
+
+export async function createTextShare(key: string, params: CreateTextShareParams, signal?: AbortSignal): Promise<{ slug: string; shortUrl: string }> {
+  if (!key.trim()) throw new Error('请先在设置页保存 s.ee API Key，再分享笔记')
+  validateTextShareLength(params.content)
+  const payload: Record<string, unknown> = {
+    title: params.title.trim() || '未命名笔记',
+    content: params.content,
+    domain: params.domain.trim() || 's.ee',
+    text_type: 'markdown',
+  }
+  if (params.expire_at) payload.expire_at = params.expire_at
+  if (params.custom_slug?.trim()) payload.custom_slug = params.custom_slug.trim()
+  if (params.password?.trim()) payload.password = params.password.trim()
+
+  let response: Response
+  try {
+    response = await fetch('https://s.ee/api/v1/text', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      credentials: 'omit',
+      redirect: 'error',
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]),
+    })
+  } catch {
+    throw new Error(signal?.aborted ? '分享已取消' : '创建分享失败，请检查网络或稍后重试')
+  }
+
+  const body: unknown = await response.json().catch(() => null)
+  const status = responseStatus.safeParse(body)
+  const failedCode = status.success && status.data.code !== undefined && ![0, 200].includes(status.data.code)
+  const failedResult = status.success && status.data.success === false
+  if (!response.ok || failedCode || failedResult) {
+    const message = z.object({ message: z.string() }).safeParse(body)
+    const detail = message.success && !/^success$/i.test(message.data.message.trim()) ? message.data.message.replaceAll(key, '[已隐藏]').slice(0, 300) : ''
+    const reason = !response.ok ? `HTTP ${response.status}` : failedCode && status.success ? `业务码 ${status.data.code}` : '服务返回创建失败'
+    throw new Error(`s.ee 创建分享失败${detail ? `：${detail}` : `（${reason}）`}`)
+  }
+
+  const resultSchema = z.object({
+    slug: z.string().optional(),
+    custom_slug: z.string().optional(),
+    short_url: z.string().optional(),
+  })
+  const parsedData = resultSchema.safeParse(status.success ? status.data.data : undefined)
+  const slug = parsedData.success ? parsedData.data.slug || parsedData.data.custom_slug || params.custom_slug || '' : ''
+  const shortUrl = parsedData.success && parsedData.data.short_url ? parsedData.data.short_url : (slug ? `https://${params.domain}/${slug}` : '')
+  if (!slug || !shortUrl) throw new Error('s.ee 创建分享失败：返回的短链信息不完整')
+  return { slug, shortUrl }
+}
+
+export type UpdateTextShareParams = {
+  domain: string
+  slug: string
+  title: string
+  content: string
+}
+
+export async function updateTextShare(key: string, params: UpdateTextShareParams, signal?: AbortSignal): Promise<void> {
+  if (!key.trim()) throw new Error('请先在设置页保存 s.ee API Key，再更新分享')
+  validateTextShareLength(params.content)
+  const payload = {
+    domain: params.domain.trim(),
+    slug: params.slug.trim(),
+    title: params.title.trim() || '未命名笔记',
+    content: params.content,
+  }
+
+  let response: Response
+  try {
+    response = await fetch('https://s.ee/api/v1/text', {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      credentials: 'omit',
+      redirect: 'error',
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]),
+    })
+  } catch {
+    throw new Error(signal?.aborted ? '更新已取消' : '更新分享失败，请检查网络或稍后重试')
+  }
+
+  const body: unknown = await response.json().catch(() => null)
+  const status = responseStatus.safeParse(body)
+  const failedCode = status.success && status.data.code !== undefined && ![0, 200].includes(status.data.code)
+  const failedResult = status.success && status.data.success === false
+  if (!response.ok || failedCode || failedResult) {
+    const message = z.object({ message: z.string() }).safeParse(body)
+    const detail = message.success && !/^success$/i.test(message.data.message.trim()) ? message.data.message.replaceAll(key, '[已隐藏]').slice(0, 300) : ''
+    const reason = !response.ok ? `HTTP ${response.status}` : failedCode && status.success ? `业务码 ${status.data.code}` : '服务返回更新失败'
+    throw new Error(`s.ee 更新分享失败${detail ? `：${detail}` : `（${reason}）`}`)
+  }
+}
+
+export type DeleteTextShareParams = {
+  domain: string
+  slug: string
+}
+
+export async function deleteTextShare(key: string, params: DeleteTextShareParams, signal?: AbortSignal): Promise<void> {
+  if (!key.trim()) throw new Error('请先在设置页保存 s.ee API Key，再删除分享')
+  let response: Response
+  try {
+    response = await fetch('https://s.ee/api/v1/text', {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ domain: params.domain.trim(), slug: params.slug.trim() }),
+      credentials: 'omit',
+      redirect: 'error',
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]),
+    })
+  } catch {
+    throw new Error(signal?.aborted ? '删除已取消' : '删除分享失败，请检查网络或稍后重试')
+  }
+
+  const body: unknown = await response.json().catch(() => null)
+  const status = responseStatus.safeParse(body)
+  const failedCode = status.success && status.data.code !== undefined && ![0, 200].includes(status.data.code)
+  const failedResult = status.success && status.data.success === false
+  if (!response.ok || failedCode || failedResult) {
+    const message = z.object({ message: z.string() }).safeParse(body)
+    const detail = message.success && !/^success$/i.test(message.data.message.trim()) ? message.data.message.replaceAll(key, '[已隐藏]').slice(0, 300) : ''
+    const reason = !response.ok ? `HTTP ${response.status}` : failedCode && status.success ? `业务码 ${status.data.code}` : '服务返回删除失败'
+    throw new Error(`s.ee 删除分享失败${detail ? `：${detail}` : `（${reason}）`}`)
+  }
+}

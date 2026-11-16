@@ -4882,3 +4882,257 @@ test('批量分组：新开收藏页重定向后失败重试仍分组且不重�
   await expect(page.getByRole('region', { name: '收藏块 日常收藏', exact: true }).getByRole('link', { name: '会重定向的收藏', exact: true })).toHaveAttribute('href', `${origin}/web/react`)
   expect(existing.isClosed()).toBe(false)
 })
+
+test('笔记分享、防重复分享、管理修改与彻底删除', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+
+  // Configure s.ee API key in Settings
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('s.ee API Key', { exact: true }).fill('see-share-key')
+  await page.getByRole('button', { name: '保存 s.ee API Key', exact: true }).click()
+  await expect(page.getByText('s.ee API Key 已保存', { exact: true })).toBeVisible()
+
+  // Intercept s.ee domains and text APIs
+  let createdPayload: any = null
+  let updatedPayload: any = null
+  let deletedPayload: any = null
+
+  await context.route('https://s.ee/api/v1/domains', route => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: { domains: ['s.ee', 'fs.to'] } }),
+    })
+  })
+
+  await context.route('https://s.ee/api/v1/text', async route => {
+    const method = route.request().method()
+    if (method === 'POST') {
+      createdPayload = JSON.parse(route.request().postData() || '{}')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 0,
+          data: { slug: 'note-slug-1', short_url: `https://${createdPayload.domain}/note-slug-1` },
+        }),
+      })
+    }
+    if (method === 'PUT') {
+      updatedPayload = JSON.parse(route.request().postData() || '{}')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 0, message: 'success' }),
+      })
+    }
+    if (method === 'DELETE') {
+      deletedPayload = JSON.parse(route.request().postData() || '{}')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 0, message: 'success' }),
+      })
+    }
+    return route.fallback()
+  })
+
+  // Go to space
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+
+  // Create a note
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  const noteCard = page.getByRole('article', { name: '笔记 新笔记', exact: true })
+  await expect(noteCard).toBeVisible()
+
+  // Click share icon on note card
+  await noteCard.getByRole('button', { name: '分享笔记', exact: true }).click()
+  const shareDialog = page.getByRole('dialog', { name: '分享笔记', exact: true })
+  await expect(shareDialog).toBeVisible()
+
+  // Fill title, select domain, pick expiration preset
+  await shareDialog.getByLabel('分享标题').fill('公开发布的测试笔记')
+  await shareDialog.getByLabel('分享域名').selectOption('fs.to')
+  await shareDialog.getByRole('button', { name: '7天后', exact: true }).click()
+
+  // Submit
+  await shareDialog.getByRole('button', { name: '确认分享', exact: true }).click()
+  await expect(shareDialog).not.toBeVisible()
+
+  // Verify createdPayload
+  expect(createdPayload).toMatchObject({
+    title: '公开发布的测试笔记',
+    domain: 'fs.to',
+    text_type: 'markdown',
+  })
+  expect(createdPayload.tag_ids).toBeUndefined()
+  expect(createdPayload.expire_at).toBeGreaterThan(0)
+
+  // Card now shows active shared state (aria-label: 查看已分享短链)
+  const sharedBtn = noteCard.getByRole('button', { name: '查看已分享短链', exact: true })
+  await expect(sharedBtn).toBeVisible()
+
+  // Clicking it opens already shared modal
+  await sharedBtn.click()
+  const alreadyDialog = page.getByRole('dialog', { name: '笔记已分享', exact: true })
+  await expect(alreadyDialog).toBeVisible()
+  await expect(alreadyDialog.getByRole('textbox')).toHaveValue('https://fs.to/note-slug-1')
+
+  // Click "前往分享管理" in modal
+  await alreadyDialog.getByRole('button', { name: '前往分享管理', exact: true }).click()
+  await expect(alreadyDialog).not.toBeVisible()
+
+  // Verify in Share Management page
+  await expect(page.getByRole('heading', { name: '分享管理', exact: true })).toBeVisible()
+  await expect(page.getByText('公开发布的测试笔记')).toBeVisible()
+  await expect(page.getByText('https://fs.to/note-slug-1')).toBeVisible()
+
+  // Edit share
+  await page.getByRole('button', { name: '修改分享 公开发布的测试笔记', exact: true }).click()
+  const editDialog = page.getByRole('dialog', { name: '修改分享内容', exact: true })
+  await expect(editDialog).toBeVisible()
+  await editDialog.getByLabel('分享标题').fill('修改后的测试笔记')
+  await editDialog.getByRole('button', { name: '确认更新', exact: true }).click()
+  await expect(editDialog).not.toBeVisible()
+
+  expect(updatedPayload).toMatchObject({
+    domain: 'fs.to',
+    slug: 'note-slug-1',
+    title: '修改后的测试笔记',
+  })
+
+  // Delete share
+  await page.getByRole('button', { name: '删除分享 修改后的测试笔记', exact: true }).click()
+  const deleteDialog = page.getByRole('dialog', { name: '删除分享', exact: true })
+  await expect(deleteDialog).toBeVisible()
+  await deleteDialog.getByRole('button', { name: '永久下线并删除', exact: true }).click()
+  await expect(deleteDialog).not.toBeVisible()
+
+  expect(deletedPayload).toEqual({
+    domain: 'fs.to',
+    slug: 'note-slug-1',
+  })
+
+  // Verify empty in share management
+  await expect(page.getByText('暂无分享记录')).toBeVisible()
+
+  // Return to space, note card restored to unshared
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(noteCard.getByRole('button', { name: '分享笔记', exact: true })).toBeVisible()
+})
+
+test('笔记分享：自定义短链与密码、原笔记删除后状态、远程下线失败本地容灾', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('s.ee API Key', { exact: true }).fill('see-share-key')
+  await page.getByRole('button', { name: '保存 s.ee API Key', exact: true }).click()
+  await expect(page.getByText('s.ee API Key 已保存', { exact: true })).toBeVisible()
+
+  let postPayload: any = null
+  let deleteAttempts = 0
+
+  await context.route('https://s.ee/api/v1/domains', route => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: { domains: ['s.ee', 'fs.to'] } }),
+    })
+  })
+
+  await context.route('https://s.ee/api/v1/text', async route => {
+    const method = route.request().method()
+    if (method === 'POST') {
+      postPayload = JSON.parse(route.request().postData() || '{}')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 0,
+          data: {
+            slug: postPayload.custom_slug || 'auto-slug',
+            short_url: `https://${postPayload.domain}/${postPayload.custom_slug || 'auto-slug'}`,
+          },
+        }),
+      })
+    }
+    if (method === 'DELETE') {
+      deleteAttempts++
+      if (deleteAttempts === 1) {
+        return route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 's.ee server error' }),
+        })
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0 }) })
+    }
+    return route.fallback()
+  })
+
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+
+  // Create a note
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  const normalCard = page.getByRole('article', { name: '笔记 新笔记', exact: true })
+  await expect(normalCard).toBeVisible()
+
+  await normalCard.getByRole('button', { name: '分享笔记', exact: true }).click()
+  const shareDialog = page.getByRole('dialog', { name: '分享笔记', exact: true })
+  await expect(shareDialog).toBeVisible()
+
+  // Fill custom slug and password
+  await shareDialog.getByLabel('分享标题').fill('高级配置分享')
+  await shareDialog.getByRole('button', { name: '高级选项（自定义后缀与密码）', exact: true }).click()
+  await shareDialog.getByLabel('自定义短链后缀（选填）').fill('my-secret-note')
+  await shareDialog.getByLabel('访问密码（选填，3~32 位）').fill('pwd888888')
+  await shareDialog.getByRole('button', { name: '确认分享', exact: true }).click()
+  await expect(shareDialog).not.toBeVisible()
+
+  expect(postPayload).toMatchObject({
+    title: '高级配置分享',
+    domain: 's.ee',
+    custom_slug: 'my-secret-note',
+    password: 'pwd888888',
+  })
+
+  // Delete the original note from space
+  await normalCard.getByRole('button', { name: '删除笔记', exact: true }).click()
+  await expect(normalCard).not.toBeVisible()
+
+  // Navigate to share management
+  await page.getByRole('button', { name: /分享管理/, exact: false }).click()
+  await expect(page.getByRole('heading', { name: '分享管理', exact: true })).toBeVisible()
+
+  // Verify badge "原笔记已删除"
+  await expect(page.getByText('原笔记已删除')).toBeVisible()
+
+  // Try edit
+  await page.getByRole('button', { name: '修改分享 高级配置分享', exact: true }).click()
+  const editDialog = page.getByRole('dialog', { name: '修改分享内容', exact: true })
+  await expect(editDialog).toBeVisible()
+  await expect(editDialog.getByText('原笔记已在收藏中被删除，无法获取最新正文更新远程分享。建议直接删除该失效分享。')).toBeVisible()
+  await expect(editDialog.getByRole('button', { name: '确认更新', exact: true })).toBeDisabled()
+  await editDialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(editDialog).not.toBeVisible()
+
+  // Delete share: first attempt fails on remote
+  await page.getByRole('button', { name: '删除分享 高级配置分享', exact: true }).click()
+  const deleteDialog = page.getByRole('dialog', { name: '删除分享', exact: true })
+  await expect(deleteDialog).toBeVisible()
+  await deleteDialog.getByRole('button', { name: '永久下线并删除', exact: true }).click()
+
+  // Error shown, fallback button appeared
+  await expect(deleteDialog.getByText('s.ee server error')).toBeVisible()
+  const localRemoveBtn = deleteDialog.getByRole('button', { name: '仅从本地移除', exact: true })
+  await expect(localRemoveBtn).toBeVisible()
+
+  // Click local remove
+  await localRemoveBtn.click()
+  await expect(deleteDialog).not.toBeVisible()
+
+  // Verify empty in share management
+  await expect(page.getByText('暂无分享记录')).toBeVisible()
+})

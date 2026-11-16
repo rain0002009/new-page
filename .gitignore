@@ -39,6 +39,7 @@ extension-env.d.ts
 
 # OMX local runtime state
 /.omx/
+.scratch/
 
 # local env files
 .env*
