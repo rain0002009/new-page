@@ -30,8 +30,7 @@ const workbench = tv({
   slots: {
     shell: 'workbench relative z-1 grid grid-cols-[226px_minmax(0,1fr)_288px] items-start h-[100dvh] overflow-hidden [@media(min-width:1700px)]:grid-cols-[245px_minmax(0,1fr)_320px] [@media(min-width:1000.01px)_and_(max-width:1200px)]:grid-cols-[205px_minmax(0,1fr)_250px] [@media(min-width:650.01px)_and_(max-width:1000px)]:grid-cols-[190px_minmax(0,1fr)] [@media(max-width:650px)]:grid-cols-[69px_minmax(0,1fr)]',
     sidebar: 'sidebar sticky top-0 z-1 h-[100dvh] flex flex-col pt-[34px] px-[20px] pb-[22px] border-r border-r-solid border-transparent [@media(max-width:1200px)]:pt-[28px] [@media(max-width:1200px)]:px-[14px] [@media(max-width:1200px)]:pb-[20px] [@media(max-width:650px)]:pt-[24px] [@media(max-width:650px)]:px-[9px] [@media(max-width:650px)]:pb-[18px]',
-    profile: 'flex items-center gap-[11px] px-[10px] mb-[24px] text-[13px] [@media(max-width:650px)]:hidden',
-    avatar: 'w-[36px] h-[36px] grid place-items-center bg-[linear-gradient(135deg,#faffef,#d9e6c8)] text-[#6e7c5e] border-[3px] border-solid border-[#fafbf5] rounded-full text-[15px] [font-weight:650] shadow-[0_4px_12px_#71865b12]',
+    profile: 'px-[10px] mb-[24px] h-[36px] [@media(max-width:650px)]:hidden',
     section: 'flex items-center justify-between px-[11px] mt-[11px] mb-[9px] min-h-[29px] [@media(max-width:650px)]:hidden',
     createSection: 'flex items-center justify-between px-[11px] mt-[11px] mb-[9px] min-h-[29px] [@media(max-width:650px)]:justify-center [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mt-0 [@media(max-width:650px)]:mb-[10px]',
     sectionTitle: 'block text-[10px] [font-weight:650] tracking-[1px] text-[#989e90] [@media(max-width:650px)]:hidden',
@@ -87,7 +86,8 @@ export default function NewTabApp() {
   const { data, error } = useQuery({ queryKey: stateKey, queryFn: async () => (await rpc({ type: 'snapshot' })).snapshot!, refetchInterval: 5000 })
   const profile = data?.document?.entities.profile
   const fluidAnimation = profile?.kind !== 'profile' || profile.fluidAnimation !== false
-  return <><FluidBackground fluidEnabled={fluidAnimation} /><Workbench data={data} error={error} /></>
+  const nickname = profile?.kind === 'profile' ? profile.title : ''
+  return <><FluidBackground fluidEnabled={fluidAnimation} nickname={nickname} /><Workbench data={data} error={error} /></>
 }
 function Workbench({ data, error }: { data: Snapshot | undefined; error: Error | null }) {
   const client = useQueryClient()
@@ -191,7 +191,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   }
   return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(item => item.kind === 'link' || item.kind === 'note').map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     {notices}
-    <aside className={styles.sidebar()}><div role="img" aria-label="页墟 Page Garden" className="pl-[9px] mb-[30px] h-[40px] [@media(max-width:1200px)]:mb-[28px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mb-[28px] [@media(max-width:650px)]:h-[36px]" /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
+    <aside className={styles.sidebar()}><div role="img" aria-label="页墟 Page Garden" className="pl-[9px] mb-[30px] h-[40px] [@media(max-width:1200px)]:mb-[28px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mb-[28px] [@media(max-width:650px)]:h-[36px]" /><div role="img" aria-label={`用户 ${nickname}`} className={styles.profile()} />
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
       <div className={styles.section()}><span className={styles.sectionTitle()}>工作台</span></div><nav>
