@@ -25,7 +25,6 @@ function drawLeaf(ctx: CanvasRenderingContext2D, x: number, y: number, size: num
   ctx.strokeStyle = '#657b52'
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  ctx.fillStyle = 'none'
   for (const d of LEAF_PATHS) {
     const path = new Path2D(d)
     ctx.stroke(path)
@@ -34,6 +33,10 @@ function drawLeaf(ctx: CanvasRenderingContext2D, x: number, y: number, size: num
 }
 
 function drawBrand(ctx: CanvasRenderingContext2D, width: number, height: number, dpr: number) {
+  // Fill the base scene background with #f7f8ef so fluid-prism has the full canvas filled
+  ctx.fillStyle = '#f7f8ef'
+  ctx.fillRect(0, 0, width, height)
+
   const viewW = width / dpr
   const m = sidebarMetrics(viewW)
 
@@ -158,9 +161,6 @@ export default function FluidBackground({ fluidEnabled }: FluidBackgroundProps) 
       canvas!.style.height = `${window.innerHeight}px`
       const ctx = canvas!.getContext('2d')
       if (!ctx) return
-      // Fill with the same background as the fluid effect
-      ctx.fillStyle = '#f7f8ef'
-      ctx.fillRect(0, 0, canvas!.width, canvas!.height)
       drawBrand(ctx, canvas!.width, canvas!.height, dpr)
       staticDrawnRef.current = true
     }
