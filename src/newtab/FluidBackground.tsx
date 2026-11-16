@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { webgl, type WebGLFluidPrism } from 'fluid-prism'
 
 /** Lucide Leaf paths (24×24 viewBox) */
@@ -221,63 +221,88 @@ function drawRoundedRect(
   ctx.closePath()
 }
 
-interface FluidBackgroundProps {
-  /** Whether the fluid animation loop runs. When false, the canvas draws statically. */
-  fluidEnabled: boolean
-  nickname?: string
-}
-
-export default function FluidBackground({ fluidEnabled, nickname = '' }: FluidBackgroundProps) {
+function StaticCanvas({ nickname }: { nickname: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const effectRef = useRef<WebGLFluidPrism | null>(null)
-  const nicknameRef = useRef(nickname)
-  nicknameRef.current = nickname
 
-  const renderScene = useCallback((ctx: CanvasRenderingContext2D, size: { width: number; height: number; dpr: number }) => {
-    drawScene(ctx, size.width, size.height, size.dpr, nicknameRef.current)
-  }, [])
-
-  // Static canvas fallback when fluid is off
   useEffect(() => {
-    if (fluidEnabled) return
     const canvas = canvasRef.current
     if (!canvas) return
 
     function draw() {
+      if (!canvas) return
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas!.width = window.innerWidth * dpr
-      canvas!.height = window.innerHeight * dpr
-      canvas!.style.width = `${window.innerWidth}px`
-      canvas!.style.height = `${window.innerHeight}px`
-      const ctx = canvas!.getContext('2d')
+      canvas.width = window.innerWidth * dpr
+      canvas.height = window.innerHeight * dpr
+      canvas.style.width = `${window.innerWidth}px`
+      canvas.style.height = `${window.innerHeight}px`
+      const ctx = canvas.getContext('2d')
       if (!ctx) return
-      drawScene(ctx, canvas!.width, canvas!.height, dpr, nickname)
+      drawScene(ctx, canvas.width, canvas.height, dpr, nickname)
     }
 
     draw()
     window.addEventListener('resize', draw)
     return () => window.removeEventListener('resize', draw)
-  }, [fluidEnabled, nickname])
+  }, [nickname])
 
-  // Fluid effect when enabled
+  return (
+    <canvas
+      ref={canvasRef}
+      data-fluid="idle"
+      className="fixed inset-0 w-full h-full pointer-events-none z-0"
+      aria-hidden="true"
+    />
+  )
+}
+
+function FluidCanvas({ nickname }: { nickname: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [webglFailed, setWebglFailed] = useState(false)
+  const nicknameRef = useRef(nickname)
+  nicknameRef.current = nickname
+
+  const renderScene = useCallback(
+    (ctx: CanvasRenderingContext2D, size: { width: number; height: number; dpr: number }) => {
+      drawScene(ctx, size.width, size.height, size.dpr, nicknameRef.current)
+    },
+    [],
+  )
+
   useEffect(() => {
-    if (!fluidEnabled) return
-    const canvas = canvasRef.current!
+    const canvas = canvasRef.current
+    if (!canvas) return
     let effect: WebGLFluidPrism
     try {
       effect = webgl.createFluidPrism({
-        canvas, fullscreen: true, zIndex: 0, dpr: 1.25, paintScale: 0.2, lowScale: 0.1,
-        backgroundColor: '#f7f8ef', amount: 3.2, multiplier: 6, colorMultiplier: 5,
-        rgbShift: 0.65, shade: 1.05, pastelFilm: true,
+        canvas,
+        fullscreen: true,
+        zIndex: 0,
+        dpr: 1.25,
+        paintScale: 0.2,
+        lowScale: 0.1,
+        backgroundColor: '#f7f8ef',
+        amount: 3.2,
+        multiplier: 6,
+        colorMultiplier: 5,
+        rgbShift: 0.65,
+        shade: 1.05,
+        pastelFilm: true,
         contentRenderer: renderScene,
       })
     } catch {
-      canvas.hidden = true
+      setWebglFailed(true)
       return
     }
-    effectRef.current = effect
-    const visibility = () => { if (document.hidden || canvas.hidden) effect.stop(); else effect.start() }
-    const lost = (event: Event) => { event.preventDefault(); effect.stop(); canvas.hidden = true }
+
+    const visibility = () => {
+      if (document.hidden || canvas.hidden) effect.stop()
+      else effect.start()
+    }
+    const lost = (event: Event) => {
+      event.preventDefault()
+      effect.stop()
+      setWebglFailed(true)
+    }
     document.addEventListener('visibilitychange', visibility)
     canvas.addEventListener('webglcontextlost', lost)
     visibility()
@@ -285,9 +310,32 @@ export default function FluidBackground({ fluidEnabled, nickname = '' }: FluidBa
       document.removeEventListener('visibilitychange', visibility)
       canvas.removeEventListener('webglcontextlost', lost)
       effect.destroy()
-      effectRef.current = null
     }
-  }, [fluidEnabled, renderScene])
+  }, [renderScene])
 
-  return <canvas ref={canvasRef} data-fluid={fluidEnabled ? 'active' : 'idle'} className="fixed inset-0 w-full h-full pointer-events-none z-0" aria-hidden="true" />
+  if (webglFailed) {
+    return <StaticCanvas nickname={nickname} />
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      data-fluid="active"
+      className="fixed inset-0 w-full h-full pointer-events-none z-0"
+      aria-hidden="true"
+    />
+  )
+}
+
+interface FluidBackgroundProps {
+  /** Whether the fluid animation loop runs. When false, the canvas draws statically. */
+  fluidEnabled: boolean
+  nickname?: string
+}
+
+export default function FluidBackground({ fluidEnabled, nickname = '' }: FluidBackgroundProps) {
+  if (!fluidEnabled) {
+    return <StaticCanvas nickname={nickname} />
+  }
+  return <FluidCanvas nickname={nickname} />
 }
