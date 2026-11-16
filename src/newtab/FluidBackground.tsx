@@ -6,6 +6,11 @@ const LEAF_PATHS = [
   'M11 20a10 10 0 0010-10 25.9 25.9 0 00-1.04-7.281 1 1 0 00-1.755-.325C15.833 5.5 13 5.5 9.8 6.1A7 7 0 0011 20',
   'M2 21a5 5 0 012.911-4.544C7.613 15.212 8.351 15.24 11 13',
 ]
+const LEAF_PATH_OBJECTS = LEAF_PATHS.map(d => new Path2D(d))
+
+function getTargetDpr() {
+  return window.devicePixelRatio || 1
+}
 
 /** Sidebar width and padding at each breakpoint (mirrors the grid-cols in NewTabApp) */
 function sidebarMetrics(viewW: number) {
@@ -25,28 +30,27 @@ function drawLeaf(ctx: CanvasRenderingContext2D, x: number, y: number, size: num
   ctx.strokeStyle = '#657b52'
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  for (const d of LEAF_PATHS) {
-    const path = new Path2D(d)
+  for (const path of LEAF_PATH_OBJECTS) {
     ctx.stroke(path)
   }
   ctx.restore()
 }
 
 function drawBrand(ctx: CanvasRenderingContext2D, width: number, height: number, dpr: number) {
-  const viewW = width / dpr
+  const viewW = Math.round(width / dpr)
   const m = sidebarMetrics(viewW)
 
   // Icon box dimensions (scaled to canvas pixels)
-  const boxW = m.iconSize * dpr
-  const boxH = (m.iconSize + 3) * dpr // slightly taller like DOM version (40px height for 37px width)
-  const leafSize = 22 * dpr
-  const brandPl = m.showText ? 9 * dpr : 0 // pl-[9px] only on wide sidebar
+  const boxW = Math.round(m.iconSize * dpr)
+  const boxH = Math.round((m.iconSize + 3) * dpr) // slightly taller like DOM version (40px height for 37px width)
+  const leafSize = Math.round(22 * dpr)
+  const brandPl = m.showText ? 9 : 0 // pl-[9px] only on wide sidebar
 
   // Position: sidebar padding + brand padding
   const ox = m.showText
-    ? (m.px + brandPl) * dpr
-    : ((m.width - m.iconSize) / 2) * dpr // centered in compact sidebar
-  const oy = m.pt * dpr
+    ? Math.round((m.px + brandPl) * dpr)
+    : Math.round(((m.width - m.iconSize) / 2) * dpr) // centered in compact sidebar
+  const oy = Math.round(m.pt * dpr)
 
   // --- Glow behind the icon box (canvas-specific enhancement) ---
   const glowCx = ox + boxW / 2
@@ -60,8 +64,8 @@ function drawBrand(ctx: CanvasRenderingContext2D, width: number, height: number,
   ctx.fillRect(ox - glowR, oy - glowR, glowR * 2 + boxW, glowR * 2 + boxH)
 
   // --- Icon rounded-rect background ---
-  const r1 = 12 * dpr
-  const r2 = 3 * dpr // bottom-left is 3px
+  const r1 = Math.round(12 * dpr)
+  const r2 = Math.round(3 * dpr) // bottom-left is 3px
   drawRoundedRect(ctx, ox, oy, boxW, boxH, [r1, r1, r1, r2])
   const grad = ctx.createLinearGradient(ox, oy, ox + boxW, oy + boxH)
   grad.addColorStop(0, '#f7ffec')
@@ -73,36 +77,36 @@ function drawBrand(ctx: CanvasRenderingContext2D, width: number, height: number,
   ctx.save()
   ctx.globalCompositeOperation = 'source-atop'
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'
-  ctx.lineWidth = 1 * dpr
+  ctx.lineWidth = Math.max(1, Math.round(1 * dpr))
   drawRoundedRect(ctx, ox + 0.5 * dpr, oy + 0.5 * dpr, boxW - 1 * dpr, boxH - 1 * dpr, [r1, r1, r1, r2])
   ctx.stroke()
   ctx.restore()
 
   // --- Leaf icon ---
-  const leafOx = ox + (boxW - leafSize) / 2
-  const leafOy = oy + (boxH - leafSize) / 2
+  const leafOx = Math.round(ox + (boxW - leafSize) / 2)
+  const leafOy = Math.round(oy + (boxH - leafSize) / 2)
   drawLeaf(ctx, leafOx, leafOy, leafSize)
 
   if (!m.showText) return
 
   // --- Text ---
-  const textX = ox + boxW + 10 * dpr
+  const textX = Math.round(ox + boxW + 10 * dpr)
   const textY = oy
 
   // "页墟"
   ctx.save()
   ctx.fillStyle = '#303b2c'
-  ctx.font = `bold ${23 * dpr}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
+  ctx.font = `bold ${Math.round(23 * dpr)}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
   ctx.textBaseline = 'top'
   ctx.textAlign = 'left'
-  ctx.letterSpacing = `${2 * dpr}px`
-  ctx.fillText('页墟', textX, textY + 3 * dpr)
+  ctx.letterSpacing = `${Math.round(2 * dpr)}px`
+  ctx.fillText('页墟', textX, Math.round(textY + 3 * dpr))
 
   // "PAGE GARDEN"
   ctx.fillStyle = '#98a18d'
-  ctx.font = `500 ${7 * dpr}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
+  ctx.font = `500 ${Math.round(7 * dpr)}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
   ctx.letterSpacing = `${2.3 * dpr}px`
-  ctx.fillText('PAGE GARDEN', textX, textY + 29 * dpr)
+  ctx.fillText('PAGE GARDEN', textX, Math.round(textY + 29 * dpr))
   ctx.restore()
 }
 
@@ -114,19 +118,19 @@ function drawProfile(
   nickname: string,
 ) {
   if (!nickname) return
-  const viewW = width / dpr
+  const viewW = Math.round(width / dpr)
   // Profile is hidden on compact screens (<= 650px)
   if (viewW <= 650) return
 
   const m = sidebarMetrics(viewW)
   const brandH = 40
   const brandMb = viewW > 1200 ? 30 : 28
-  const profileY = (m.pt + brandH + brandMb) * dpr
-  const profileX = (m.px + 10) * dpr
+  const profileY = Math.round((m.pt + brandH + brandMb) * dpr)
+  const profileX = Math.round((m.px + 10) * dpr)
 
-  const avatarSize = 36 * dpr
-  const avatarCx = profileX + avatarSize / 2
-  const avatarCy = profileY + avatarSize / 2
+  const avatarSize = Math.round(36 * dpr)
+  const avatarCx = Math.round(profileX + avatarSize / 2)
+  const avatarCy = Math.round(profileY + avatarSize / 2)
   const avatarR = avatarSize / 2
 
   // --- Glow behind avatar (canvas enhancement) ---
@@ -157,7 +161,7 @@ function drawProfile(
 
   // 3px white border (#fafbf5)
   ctx.strokeStyle = '#fafbf5'
-  ctx.lineWidth = 3 * dpr
+  ctx.lineWidth = Math.round(3 * dpr)
   ctx.stroke()
   ctx.restore()
 
@@ -165,17 +169,17 @@ function drawProfile(
   const initial = nickname.slice(0, 1)
   ctx.save()
   ctx.fillStyle = '#6e7c5e'
-  ctx.font = `650 ${15 * dpr}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
+  ctx.font = `650 ${Math.round(15 * dpr)}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(initial, avatarCx, avatarCy + 0.5 * dpr)
+  ctx.fillText(initial, avatarCx, avatarCy + Math.round(0.5 * dpr))
   ctx.restore()
 
   // --- User Name / Nickname ---
-  const textX = profileX + avatarSize + 11 * dpr
+  const textX = Math.round(profileX + avatarSize + 11 * dpr)
   ctx.save()
   ctx.fillStyle = '#303b2c'
-  ctx.font = `600 ${13 * dpr}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
+  ctx.font = `600 ${Math.round(13 * dpr)}px "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
   ctx.letterSpacing = '0px'
@@ -230,14 +234,21 @@ function StaticCanvas({ nickname }: { nickname: string }) {
 
     function draw() {
       if (!canvas) return
-      const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = window.innerWidth * dpr
-      canvas.height = window.innerHeight * dpr
-      canvas.style.width = `${window.innerWidth}px`
-      canvas.style.height = `${window.innerHeight}px`
+      const dpr = getTargetDpr()
+      const w = Math.max(2, Math.floor(window.innerWidth * dpr))
+      const h = Math.max(2, Math.floor(window.innerHeight * dpr))
+      canvas.width = w
+      canvas.height = h
+      canvas.style.position = 'fixed'
+      canvas.style.inset = '0'
+      canvas.style.width = '100vw'
+      canvas.style.height = '100vh'
+      canvas.style.display = 'block'
+      canvas.style.pointerEvents = 'none'
+      canvas.style.zIndex = '0'
       const ctx = canvas.getContext('2d')
       if (!ctx) return
-      drawScene(ctx, canvas.width, canvas.height, dpr, nickname)
+      drawScene(ctx, w, h, dpr, nickname)
     }
 
     draw()
@@ -277,7 +288,7 @@ function FluidCanvas({ nickname }: { nickname: string }) {
         canvas,
         fullscreen: true,
         zIndex: 0,
-        dpr: 1.25,
+        dpr: Math.max(3, getTargetDpr()),
         paintScale: 0.2,
         lowScale: 0.1,
         backgroundColor: '#f7f8ef',
