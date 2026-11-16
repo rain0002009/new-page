@@ -87,7 +87,7 @@ export default function NewTabApp() {
   const { data, error } = useQuery({ queryKey: stateKey, queryFn: async () => (await rpc({ type: 'snapshot' })).snapshot!, refetchInterval: 5000 })
   const profile = data?.document?.entities.profile
   const fluidAnimation = profile?.kind !== 'profile' || profile.fluidAnimation !== false
-  return <>{fluidAnimation && <FluidBackground />}<Workbench data={data} error={error} /></>
+  return <><FluidBackground fluidEnabled={fluidAnimation} /><Workbench data={data} error={error} /></>
 }
 function Workbench({ data, error }: { data: Snapshot | undefined; error: Error | null }) {
   const client = useQueryClient()
@@ -191,7 +191,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   }
   return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(item => item.kind === 'link' || item.kind === 'note').map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     {notices}
-    <aside className={styles.sidebar()}><Brand sidebar /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
+    <aside className={styles.sidebar()}><div role="img" aria-label="页墟 Page Garden" className="pl-[9px] mb-[30px] h-[40px] [@media(max-width:1200px)]:mb-[28px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mb-[28px] [@media(max-width:650px)]:h-[36px]" /><div className={styles.profile()}><span className={styles.avatar()}>{nickname.slice(0, 1)}</span><strong className="font-semibold">{nickname}</strong></div>
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
       <div className={styles.section()}><span className={styles.sectionTitle()}>工作台</span></div><nav>
