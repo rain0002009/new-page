@@ -186,7 +186,9 @@ function CreateShareModal({
     void fetchSeeDomains(seeApiKey).then(list => {
       if (!active) return
       setDomains(list)
-      if (list.length && !list.includes(domain)) setDomain(list[0])
+      if (list.length) {
+        setDomain(prev => list.includes(prev) ? prev : list[0])
+      }
     }).catch(() => {})
     return () => { active = false }
   }, [seeApiKey])

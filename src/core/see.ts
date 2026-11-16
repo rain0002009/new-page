@@ -142,7 +142,7 @@ export async function fetchSeeDomains(key: string, force = false, signal?: Abort
   }
   let response: Response
   try {
-    response = await fetch('https://s.ee/api/v1/domains', {
+    response = await fetch('https://s.ee/api/v1/text/domains', {
       method: 'GET',
       headers: { Authorization: `Bearer ${key}` },
       credentials: 'omit',
@@ -172,7 +172,7 @@ export async function fetchSeeDomains(key: string, force = false, signal?: Abort
     const raw = Array.isArray(parsed.data.data) ? parsed.data.data : parsed.data.data.domains
     domains = raw.map(d => d.trim()).filter(Boolean)
   }
-  if (!domains.includes('s.ee')) domains.unshift('s.ee')
+  if (!domains.length) domains = ['s.ee']
   domainCache = { key, domains, timestamp: Date.now() }
   return domains
 }

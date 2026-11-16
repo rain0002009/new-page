@@ -29,7 +29,7 @@ test('fetchSeeDomains 调用域名接口并进行缓存', async () => {
   let calls = 0
   globalThis.fetch = async (input, init) => {
     calls++
-    expect(String(input)).toBe('https://s.ee/api/v1/domains')
+    expect(String(input)).toBe('https://s.ee/api/v1/text/domains')
     expect(init?.headers).toEqual({ Authorization: 'Bearer test-key' })
     return Response.json({
       code: 0,

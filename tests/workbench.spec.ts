@@ -4898,7 +4898,7 @@ test('笔记分享、防重复分享、管理修改与彻底删除', async () =>
   let updatedPayload: any = null
   let deletedPayload: any = null
 
-  await context.route('https://s.ee/api/v1/domains', route => {
+  await context.route('https://s.ee/api/v1/text/domains', route => {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -5034,7 +5034,7 @@ test('笔记分享：自定义短链与密码、原笔记删除后状态、远�
   let postPayload: any = null
   let deleteAttempts = 0
 
-  await context.route('https://s.ee/api/v1/domains', route => {
+  await context.route('https://s.ee/api/v1/text/domains', route => {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
