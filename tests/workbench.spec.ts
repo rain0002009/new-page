@@ -5136,3 +5136,78 @@ test('笔记分享：自定义短链与密码、原笔记删除后状态、远�
   // Verify empty in share management
   await expect(page.getByText('暂无分享记录')).toBeVisible()
 })
+
+test('日期选择组件：点击任意位置弹出日历、不支持键盘输入、左右箭头与年月独立下拉、清除与日期图标互斥', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  const noteCard = page.getByRole('article', { name: '笔记 新笔记', exact: true })
+  await expect(noteCard).toBeVisible()
+
+  await noteCard.getByRole('button', { name: '分享笔记', exact: true }).click()
+  const shareDialog = page.getByRole('dialog', { name: '分享笔记', exact: true })
+  await expect(shareDialog).toBeVisible()
+
+  // 1. 点击指定日期 preset，展开自定义日期触发器与日历弹窗
+  await shareDialog.getByRole('button', { name: '指定日期', exact: true }).click()
+
+  const dateTrigger = shareDialog.getByRole('button', { name: '选择具体过期日期', exact: true })
+  await expect(dateTrigger).toBeVisible()
+
+  // 2. 确认不支持键盘手动输入：内部无 input 输入框
+  await expect(dateTrigger.locator('input')).toHaveCount(0)
+
+  // 3. 验证日历弹窗结构：左右尖括号箭头、年和月两个独立下拉框
+  const calendarPopup = shareDialog.getByRole('dialog', { name: '日期选择日历', exact: true })
+  await expect(calendarPopup).toBeVisible()
+
+  const prevMonthBtn = calendarPopup.getByRole('button', { name: '上个月', exact: true })
+  const nextMonthBtn = calendarPopup.getByRole('button', { name: '下个月', exact: true })
+  const yearSelect = calendarPopup.getByRole('combobox', { name: '选择年份', exact: true })
+  const monthSelect = calendarPopup.getByRole('combobox', { name: '选择月份', exact: true })
+
+  await expect(prevMonthBtn).toBeVisible()
+  await expect(nextMonthBtn).toBeVisible()
+  await expect(yearSelect).toBeVisible()
+  await expect(monthSelect).toBeVisible()
+
+  // 点击触发器任意位置可收起日历
+  await dateTrigger.click()
+  await expect(calendarPopup).not.toBeVisible()
+
+  // 再次点击触发器任意位置可重新弹出日历
+  await dateTrigger.click()
+  await expect(calendarPopup).toBeVisible()
+
+  // 选定一个未来的日期（例如下个月的 15 号）
+  await nextMonthBtn.click()
+  const day15 = calendarPopup.getByRole('button', { name: /15日/, exact: false })
+  await day15.click()
+
+  // 选定后弹窗自动关闭
+  await expect(calendarPopup).not.toBeVisible()
+
+  // 触发器中显示选中的日期格式，且提示将在该日失效
+  await expect(dateTrigger).toContainText('-15')
+  await expect(shareDialog.getByText(/自动失效/)).toBeVisible()
+
+  // 4. 清除图标与日期图标互斥显示：
+  // 鼠标未 hover 时：无清除按钮，只有日历图标
+  const clearBtn = dateTrigger.getByRole('button', { name: '清除日期', exact: true })
+  await expect(clearBtn).not.toBeVisible()
+
+  // 鼠标 hover 到日期选择框上：显示清除按钮
+  await dateTrigger.hover()
+  await expect(clearBtn).toBeVisible()
+
+  // 点击清除按钮：重置为永久有效
+  await clearBtn.click()
+  await expect(shareDialog.getByRole('button', { name: '永久有效', exact: true })).toBeVisible()
+  await expect(shareDialog.getByText(/自动失效/)).toHaveCount(0)
+
+  // 清除后即使 hover 也不显示清除按钮
+  await dateTrigger.hover()
+  await expect(clearBtn).not.toBeVisible()
+})

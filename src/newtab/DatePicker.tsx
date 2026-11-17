@@ -1,9 +1,7 @@
-import { useState, useId } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import { tv } from 'tailwind-variants/lite'
-import { X, Calendar } from 'lucide-react'
-import { Button } from './ui'
-import { formStyles } from './form-styles'
+import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 const pillStyles = tv({
   base: 'px-[10px] py-[5px] text-[11px] rounded-[6px] border border-solid transition-colors cursor-pointer',
@@ -16,8 +14,6 @@ const pillStyles = tv({
   defaultVariants: { active: false },
 })
 
-const fields = formStyles()
-
 export function DatePicker({
   value,
   onChange,
@@ -27,34 +23,85 @@ export function DatePicker({
   onChange: (value: number | null) => void
   disabled?: boolean
 }) {
-  const inputId = useId()
-  const [customMode, setCustomMode] = useState(() => {
-    if (!value) return false
-    // If not matching 1, 7, or 30 days roughly, open custom mode
-    return true
-  })
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [customMode, setCustomMode] = useState(() => Boolean(value))
+  const [isOpen, setIsOpen] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
 
-  const todayStr = dayjs().format('YYYY-MM-DD')
+  // Calendar view year and month (0-indexed)
+  const initialDate = value ? dayjs.unix(value) : dayjs()
+  const [viewYear, setViewYear] = useState(() => initialDate.year())
+  const [viewMonth, setViewMonth] = useState(() => initialDate.month())
+
+  // Keep view aligned when value changes externally or dropdown opens
+  useEffect(() => {
+    if (value) {
+      const d = dayjs.unix(value)
+      setViewYear(d.year())
+      setViewMonth(d.month())
+    } else {
+      const now = dayjs()
+      setViewYear(now.year())
+      setViewMonth(now.month())
+    }
+  }, [value, isOpen])
+
+  // Close calendar on click outside or Escape
+  useEffect(() => {
+    if (!isOpen) return
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
+
   const currentDateStr = value ? dayjs.unix(value).format('YYYY-MM-DD') : ''
+
+  function clearCustomDate() {
+    onChange(null)
+    setIsOpen(false)
+  }
 
   function selectPreset(days: number | null) {
     if (days === null) {
       setCustomMode(false)
+      setIsOpen(false)
       onChange(null)
     } else {
       setCustomMode(false)
+      setIsOpen(false)
       const timestamp = dayjs().add(days, 'day').endOf('day').unix()
       onChange(timestamp)
     }
   }
 
-  function handleDateInput(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = e.target.value
-    if (!val) {
-      onChange(null)
+  function prevMonth() {
+    if (viewMonth === 0) {
+      setViewYear(y => y - 1)
+      setViewMonth(11)
     } else {
-      const timestamp = dayjs(val).endOf('day').unix()
-      onChange(timestamp)
+      setViewMonth(m => m - 1)
+    }
+  }
+
+  function nextMonth() {
+    if (viewMonth === 11) {
+      setViewYear(y => y + 1)
+      setViewMonth(0)
+    } else {
+      setViewMonth(m => m + 1)
     }
   }
 
@@ -66,8 +113,23 @@ export function DatePicker({
   const is30Days = !customMode && (diffDays === 30 || diffDays === 29)
   const isCustom = !isPermanent && !is1Day && !is7Days && !is30Days
 
+  // Year & Month options
+  const currentYear = dayjs().year()
+  const years = Array.from({ length: 12 }, (_, i) => currentYear - 1 + i)
+  const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+
+  // Days in month calculation
+  const firstDayOfMonth = dayjs(new Date(viewYear, viewMonth, 1))
+  const daysInMonth = firstDayOfMonth.daysInMonth()
+  const startDayOfWeek = (firstDayOfMonth.day() + 6) % 7 // Monday = 0, Sunday = 6
+  const today = dayjs()
+  const selectedDayjs = value ? dayjs.unix(value) : null
+
+  // Requirement 4: Mutual exclusion between clear icon and calendar icon
+  const showClear = Boolean(value && !disabled && isHovered)
+
   return (
-    <div className="space-y-[8px]">
+    <div ref={containerRef} className="relative space-y-[8px]">
       <div className="flex flex-wrap items-center gap-[6px]">
         <button
           type="button"
@@ -105,7 +167,10 @@ export function DatePicker({
           type="button"
           disabled={disabled}
           className={pillStyles({ active: isCustom || customMode })}
-          onClick={() => setCustomMode(true)}
+          onClick={() => {
+            setCustomMode(true)
+            setIsOpen(true)
+          }}
         >
           <Calendar size={12} className="inline mr-[4px]" />
           指定日期
@@ -113,27 +178,167 @@ export function DatePicker({
       </div>
 
       {(customMode || isCustom || !!value) && (
-        <div className="flex items-center gap-[8px] pt-[2px]">
-          <input
-            id={inputId}
-            type="date"
-            min={todayStr}
-            value={currentDateStr}
-            disabled={disabled}
+        <div className="relative pt-[2px]">
+          {/* Trigger Box: Clicking anywhere opens dropdown, no manual keyboard editing */}
+          <div
+            role="button"
+            tabIndex={disabled ? -1 : 0}
             aria-label="选择具体过期日期"
-            className={fields.control({ className: 'mt-0 py-[7px] px-[10px] text-[12px]' })}
-            onChange={handleDateInput}
-          />
-          {value && (
-            <Button
-              size="icon"
-              disabled={disabled}
-              aria-label="清除过期时间"
-              title="清除为永久有效"
-              onClick={() => selectPreset(null)}
+            aria-haspopup="dialog"
+            aria-expanded={isOpen}
+            className={`flex items-center justify-between w-full rounded-[9px] border border-solid bg-form-surface px-[10px] py-[7px] text-[12px] transition-colors select-none ${
+              disabled
+                ? 'opacity-50 cursor-not-allowed border-form-line'
+                : 'cursor-pointer hover:border-[#96ab80] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus'
+            } ${isOpen ? 'border-[#82996a] shadow-[0_0_0_2px_#82996a22]' : 'border-form-line'}`}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+            onClick={() => {
+              if (!disabled) setIsOpen(open => !open)
+            }}
+            onKeyDown={e => {
+              if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault()
+                setIsOpen(open => !open)
+              }
+            }}
+          >
+            <span className={currentDateStr ? 'font-mono text-ui-ink font-medium' : 'text-[#9aa490]'}>
+              {currentDateStr || '点击选择过期日期…'}
+            </span>
+
+            {/* Mutually exclusive icon */}
+            <div className="flex items-center text-[#788869]">
+              {showClear ? (
+                <button
+                  type="button"
+                  aria-label="清除日期"
+                  title="清除为永久有效"
+                  className="flex items-center justify-center p-[2px] rounded-[4px] hover:bg-[#e4ebd7] hover:text-[#4a5e38] text-[#788869] border-0 bg-transparent cursor-pointer transition-colors"
+                  onClick={e => {
+                    e.stopPropagation()
+                    clearCustomDate()
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              ) : (
+                <Calendar size={14} />
+              )}
+            </div>
+          </div>
+
+          {/* Calendar Dropdown Popup */}
+          {isOpen && (
+            <div
+              role="dialog"
+              aria-label="日期选择日历"
+              className="absolute left-0 top-[calc(100%+6px)] z-50 w-[274px] p-[12px] bg-white rounded-[14px] border border-solid border-[#d7e2cc] shadow-[0_12px_36px_#334c2b26] select-none"
             >
-              <X size={15} />
-            </Button>
+              {/* Header: ChevronLeft, Year select, Month select, ChevronRight */}
+              <div className="flex items-center justify-between mb-[10px]">
+                <button
+                  type="button"
+                  aria-label="上个月"
+                  title="上个月"
+                  className="w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-[#687a57] hover:bg-[#edf3e4] hover:text-[#425530] border-0 bg-transparent cursor-pointer transition-colors"
+                  onClick={prevMonth}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+
+                <div className="flex items-center gap-[6px]">
+                  <select
+                    aria-label="选择年份"
+                    value={viewYear}
+                    className="text-[12px] font-semibold text-ui-ink bg-[#f5f8ef] border border-solid border-[#dce4d2] rounded-[6px] px-[6px] py-[3px] cursor-pointer hover:border-[#a8bc94] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus"
+                    onChange={e => setViewYear(Number(e.target.value))}
+                  >
+                    {years.map(y => (
+                      <option key={y} value={y}>
+                        {y}年
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    aria-label="选择月份"
+                    value={viewMonth}
+                    className="text-[12px] font-semibold text-ui-ink bg-[#f5f8ef] border border-solid border-[#dce4d2] rounded-[6px] px-[6px] py-[3px] cursor-pointer hover:border-[#a8bc94] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus"
+                    onChange={e => setViewMonth(Number(e.target.value))}
+                  >
+                    {months.map((m, idx) => (
+                      <option key={idx} value={idx}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  aria-label="下个月"
+                  title="下个月"
+                  className="w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-[#687a57] hover:bg-[#edf3e4] hover:text-[#425530] border-0 bg-transparent cursor-pointer transition-colors"
+                  onClick={nextMonth}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+
+              {/* Weekdays header */}
+              <div className="grid grid-cols-7 text-center mb-[4px]">
+                {['一', '二', '三', '四', '五', '六', '日'].map(weekday => (
+                  <span key={weekday} className="text-[11px] font-medium text-[#8c997e] py-[2px]">
+                    {weekday}
+                  </span>
+                ))}
+              </div>
+
+              {/* Days grid */}
+              <div className="grid grid-cols-7 gap-y-[3px] gap-x-[2px]">
+                {Array.from({ length: startDayOfWeek }).map((_, i) => (
+                  <div key={`empty-${i}`} className="w-[34px] h-[30px]" />
+                ))}
+
+                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
+                  const date = dayjs(new Date(viewYear, viewMonth, day))
+                  const isPast = date.isBefore(today, 'day')
+                  const isSelected = selectedDayjs ? date.isSame(selectedDayjs, 'day') : false
+                  const isToday = date.isSame(today, 'day')
+
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      disabled={isPast || disabled}
+                      aria-label={`${date.format('YYYY年M月D日')}${isSelected ? '（已选）' : isToday ? '（今天）' : ''}`}
+                      aria-selected={isSelected}
+                      className={`w-[34px] h-[30px] mx-auto text-[12px] flex items-center justify-center rounded-[8px] border-0 transition-colors relative ${
+                        isSelected
+                          ? 'bg-[#65814e] text-white font-semibold shadow-[0_2px_6px_#4b633633] cursor-pointer'
+                          : isPast
+                          ? 'text-[#cdd6c3] cursor-not-allowed bg-transparent'
+                          : isToday
+                          ? 'text-[#4c6736] font-semibold hover:bg-[#edf3e4] cursor-pointer bg-transparent'
+                          : 'text-ui-ink hover:bg-[#edf3e4] hover:text-[#435930] cursor-pointer bg-transparent'
+                      }`}
+                      onClick={() => {
+                        if (!isPast && !disabled) {
+                          onChange(date.endOf('day').unix())
+                          setIsOpen(false)
+                        }
+                      }}
+                    >
+                      <span>{day}</span>
+                      {isToday && !isSelected && (
+                        <span className="absolute bottom-[2px] left-1/2 -translate-x-1/2 w-[3px] h-[3px] rounded-full bg-[#65814e]" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           )}
         </div>
       )}
