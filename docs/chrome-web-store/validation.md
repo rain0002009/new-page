@@ -1,6 +1,19 @@
 # 发布材料验证与剩余事项
 
-记录日期：2026-11-14，打包脚本与隐私政策发布验证更新于 2026-11-15（Asia/Shanghai）。目标：Chrome Manifest V3，页墟 · Page Garden 1.0.0。
+记录日期：2026-11-14；首版 1.0.0 已发布，1.2.0 版本准备更新于 2026-11-17（Asia/Shanghai）。目标：Chrome Manifest V3，页墟 · Page Garden 1.2.0。
+
+## 1.2.0 版本准备与发布验证（2026-11-17）
+
+- 首版 1.0.0 已成功通过 Chrome 应用商店审核并正式发布：https://chromewebstore.google.com/detail/fonjkepbgbaijaghboomgbkpohhopomm 。
+- `package.json` 与 `src/manifest.json` 保持一致，版本均为 1.2.0。
+- `pnpm typecheck` 通过。
+- `node --test scripts/prepare-chrome-store.test.mjs` 6 项测试全部通过。
+- `pnpm build:chrome` 成功完成 1.2.0 生产构建（构建环境：Node 22.23.1、pnpm 12.16.1、Extension.js 4.1.39）。
+- `pnpm package:chrome` 成功生成 `dist/page-garden-1.2.0.zip` 及商店材料：
+  - 文件数：166
+  - 上传包 SHA-256：`79cfee625a88de560b706f553c1f4a26c7551b87de945e04c636a94c82924328`
+  - 重新渲染包含 1.2.0 文本分享隐私说明的 `dist/chrome-store/privacy-policy.html`。
+- 商店文案（`listing.md`）、权限填报（`permissions.md`）、隐私政策（`privacy-policy.md`）及审核说明（`reviewer-instructions.md`）均已按 1.2.0 新增的 Markdown 笔记文本分享、废纸篓拖拽删除、流体动画等能力全面更新。
 
 ## 隐私政策发布（2026-11-15）
 

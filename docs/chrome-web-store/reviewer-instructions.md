@@ -21,6 +21,8 @@ Initial workspace creation requires Quark QR sign-in or a compatible HTTPS WebDA
 5. Create a note using the document icon on a collection. Edit its title and Markdown body in the separate editor tab. Changes save automatically; export with “导出”. Return to the workspace and use “搜索收藏” or / to find the note text.
 6. After a successful connection, go offline and edit existing data. Reopen the extension: local changes remain. Reconnect and check synchronization in “设置”. Test data can be written to and deleted from the dedicated test account.
 7. In settings, export a JSON backup and import that backup. Recycle-bin restoration applies to links, collections and spaces. Separately deleting a single note is immediately permanent; use sample notes only.
+8. Drag-to-trash deletion: Drag an item from the right-side tab inbox or a collection card directly onto the open trash can icon at the bottom of the sidebar to immediately close/delete it. Click the trash can to inspect the recycle bin; double click to confirm emptying.
+9. Note text sharing: With a valid s.ee key configured, click the share icon on any note card to generate a public shortlink with optional password or expiry. View and manage existing shares in the sidebar '分享管理' (Share Management) panel.
 
 Quark-specific path: select “夸克网盘”, click “扫码登录夸克”, and use the Quark mobile app to scan and confirm the displayed QR code. Expired codes can be refreshed. Quark data is stored under “页墟收藏”, with the current 收藏.json and per-note Markdown copies. The extension directly uses the user's account; it has no developer-hosted proxy.
 
@@ -28,11 +30,11 @@ Local Markdown: open/drop a sample .md file. Writing back requires Chrome's file
 
 Remote Markdown: navigate to a public raw .md or .markdown URL served with a supported text/Markdown Content-Type. The extension opens its reader; an HTML file-viewer page with an .md suffix remains on its original website. Automatic takeover can be disabled in settings. Remote Markdown is read-only.
 
-s.ee image upload is optional and requires a user's own valid s.ee API key. Without a key the upload controls are hidden. A key is synchronized and included in JSON backups. Uploaded images use public URLs; removing references may trigger delayed deletion after synchronization and reference checks. A dedicated s.ee test key would be required to verify live upload; no live key has been fabricated or embedded.
+s.ee image upload and note text sharing are optional and require a user's own valid s.ee API key. Without a key the upload and share controls are hidden. A key is synchronized and included in JSON backups. Uploaded images use public URLs; removing references may trigger delayed deletion after synchronization and reference checks. Note text shares generate public shortlinks with optional password/expiry; deleting local notes does not revoke shortlinks unless removed via Share Management. A dedicated s.ee test key would be required to verify live upload/share; no live key has been fabricated or embedded.
 
 ## Build and permission notes
 
-Source: https://github.com/rain0002009/new-page . Build with pnpm install --frozen-lockfile, pnpm typecheck and pnpm build:chrome. The prepared build used Node 24.22.1, pnpm 11.25.0 and Extension.js 4.1.39. package.json declares pnpm 12.16.1; byte-identical reproducibility across different tool versions has not been established. The actual packaged files and SHA-256 are recorded in package-info.json.
+Source: https://github.com/rain0002009/new-page . Build with pnpm install --frozen-lockfile, pnpm typecheck and pnpm build:chrome. The prepared build used Node 22.23.1, pnpm 12.16.1 and Extension.js 4.1.39. package.json declares pnpm 12.16.1; byte-identical reproducibility across different tool versions has not been established. The actual packaged files and SHA-256 are recorded in package-info.json.
 
 All executable JavaScript is bundled locally, including editor/language chunks. Network services supply user data and images, not executable extension code. Permissions support the tab inbox and Chrome tab groups, local persistence, background retry, Markdown navigation, and authenticated Quark requests. The broad host permission supports arbitrary user-selected Markdown/WebDAV hosts and local file URLs; the manifest also explicitly lists Quark/upload domains. See the permission justifications submitted separately.
 

@@ -1,6 +1,6 @@
 # 权限与隐私后台填报
 
-适用：src/manifest.json 与当前 1.0.0 生产构建。本文件是填报依据，不是最小权限审查已通过的承诺。
+适用：src/manifest.json 与当前 1.2.0 生产构建。本文件是填报依据，不是最小权限审查已通过的承诺。
 
 ## 每项 API 权限的用途（可复制相应段落）
 
@@ -36,7 +36,7 @@
 
 ### <all_urls>
 
-用户可以打开任意 HTTP/HTTPS 站点上的在线 Markdown、配置自己的 HTTPS WebDAV 数据源，以及在授权后读取本地 file: Markdown 文件与目录。自动 Markdown 接管还需要检查 HTTP/HTTPS 主页面的响应类型。此权限也覆盖用户连接的夸克服务、云上传地址及可选 s.ee 图片服务。文件网址仍须用户在 Chrome 扩展详情中单独允许，本地文件写入还需要文件系统授权。
+用户可以打开任意 HTTP/HTTPS 站点上的在线 Markdown、配置自己的 HTTPS WebDAV 数据源，以及在授权后读取本地 file: Markdown 文件与目录。自动 Markdown 接管还需要检查 HTTP/HTTPS 主页面的响应类型。此权限也覆盖用户连接的夸克服务、云上传地址及可选 s.ee 图片与文本分享服务。文件网址仍须用户在 Chrome 扩展详情中单独允许，本地文件写入还需要文件系统授权。
 
 该权限范围广；仅凭上述文字不能保证通过最小权限审核。当前没有改为按需主机授权，提交前应确认各入口的用途与实际分发需求。
 
@@ -67,7 +67,7 @@
 | 身份验证信息 | 夸克会话 Cookie、WebDAV 认证信息、s.ee API Key；Key 还进入同步和备份 |
 | 个人身份信息 | 用户填写或夸克返回的昵称、所配置的 WebDAV 用户名/账号标识 |
 | 网页记录（Web history） | 当前窗口标签页的 URL、标题和用户保存的收藏地址；没有读取 chrome.history 完整历史记录 |
-| 网站内容（Website content） | 用户打开的 Markdown 正文、笔记、备注和所上传的图片 |
+| 网站内容（Website content） | 用户打开的 Markdown 正文、笔记、备注、所上传的图片，以及主动发起 s.ee 文本分享的笔记正文与访问密码 |
 
 没有发现广告跟踪、分析遥测或开发者业务后端。仅凭访问文档的动作，不应额外声明键盘记录、点击监控或全站行为分析。用户可能主动在笔记里写入敏感信息，应在政策中说明其将随所选同步服务保存。
 
@@ -79,5 +79,5 @@
 - src/core/quark/transport.ts：Cookie 响应、请求头会话规则及目标白名单。
 - src/core/quark/auth.ts、src/core/local-workspace.ts：本机凭据与工作副本。
 - src/core/workspace.ts：同步、导出、图片清理和所有数据源的后台重试。
-- src/core/see.ts、src/core/hosted-images.ts：图床接口与清理队列。
+- src/core/see.ts、src/core/hosted-images.ts：图床接口、文本分享接口与清理队列。
 - src/document/local-files.ts：IndexedDB 中的完整正文、草稿及文件句柄。

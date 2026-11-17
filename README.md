@@ -6,7 +6,13 @@
 
 <p align="center">把打开的网页收好，把想法留下。<br>用空间、收藏块和 Markdown 笔记，整理你的 Chrome 新标签页。</p>
 
-<p align="center">Google Chrome · 本地安装 · 夸克网盘同步</p>
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/fonjkepbgbaijaghboomgbkpohhopomm">
+    <img src="https://img.shields.io/badge/Chrome_Web_Store-Page_Garden-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Web Store">
+  </a>
+</p>
+
+<p align="center">Google Chrome · Chrome 应用商店 · 夸克网盘同步</p>
 
 ![页墟新标签页：左侧切换空间，中间整理收藏与笔记，右侧收集打开的网页](docs/images/overview.png)
 
@@ -45,7 +51,15 @@
 
 ## 安装
 
-当前仅支持 **Google Chrome**，尚未上架 Chrome 应用商店。可从源码构建后本地安装，需要 Node.js 与 pnpm，pnpm 版本见 [package.json](package.json)。
+### 推荐：从 Chrome 应用商店安装
+
+支持 **Google Chrome**，推荐直接在官方商店中一键安装：
+
+👉 **[前往 Chrome 应用商店安装「页墟 · Page Garden」](https://chromewebstore.google.com/detail/fonjkepbgbaijaghboomgbkpohhopomm)**
+
+### 开发者：从源码构建安装
+
+如果需要本地调试或参与开发，可从源码构建并本地安装。需要 Node.js 与 pnpm，pnpm 版本见 [package.json](package.json)。
 
 ```powershell
 git clone https://github.com/rain0002009/new-page.git

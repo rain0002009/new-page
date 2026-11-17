@@ -1,6 +1,6 @@
-# Store metadata (unpublished)
+# Store metadata (published)
 
-Last updated: 2026-11-14
+Last updated: 2026-11-17
 
 ## Listing
 
@@ -8,7 +8,9 @@ Last updated: 2026-11-14
 - Summary: 用空间和收藏块整理网页，用书签标记 Todo，通过自己的 WebDAV 同步收藏。
 - Language: zh-CN
 - License: MIT
-- Status: Chrome 本地开发版本，未提交商店。
+- Status: 已在 Chrome 应用商店正式发布 (1.0.0)。
+- Store URL: https://chromewebstore.google.com/detail/fonjkepbgbaijaghboomgbkpohhopomm
+- Extension ID: `fonjkepbgbaijaghboomgbkpohhopomm`
 
 ## Purpose and permissions
 
