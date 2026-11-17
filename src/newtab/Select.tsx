@@ -1,6 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
+import { usePopover } from './popover'
 
 export interface SelectOption<T = string | number> {
   value: T
@@ -22,7 +23,7 @@ const selectStyles = tv({
     container: 'relative inline-block',
     trigger:
       'flex items-center justify-between gap-[5px] px-[8px] py-[3px] text-[12px] font-semibold text-ui-ink bg-[#f5f8ef] border border-solid border-[#dce4d2] rounded-[6px] cursor-pointer hover:border-[#a8bc94] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus transition-colors select-none',
-    menu: 'absolute left-0 top-[calc(100%+4px)] z-30 min-w-full max-h-[160px] overflow-y-auto bg-white rounded-[8px] border border-solid border-[#d7e2cc] shadow-[0_6px_20px_#334c2b22] p-[3px] space-y-[1px] select-none',
+    menu: 'z-30 min-w-full max-h-[160px] overflow-y-auto bg-white rounded-[8px] border border-solid border-[#d7e2cc] shadow-[0_6px_20px_#334c2b22] p-[3px] space-y-[1px] select-none',
     option:
       'w-full text-left px-[8px] py-[4px] text-[12px] rounded-[5px] border-0 transition-colors cursor-pointer block',
   },
@@ -47,33 +48,20 @@ export function Select<T extends string | number>({
   const generatedId = useId()
   const selectId = id || generatedId
   const listboxId = `${selectId}-listbox`
-  const containerRef = useRef<HTMLDivElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  const popover = usePopover({
+    open: isOpen,
+    onOpenChange: setIsOpen,
+    placement: 'bottom-start',
+    offset: 4,
+    role: 'listbox',
+    enabled: !disabled,
+  })
 
   const selectedOption = options.find(opt => opt.value === value)
   const styles = selectStyles({ isOpen })
-
-  // Close on outside click
-  useEffect(() => {
-    if (!isOpen) return
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setIsOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen])
 
   // Scroll active option into view when opened
   useLayoutEffect(() => {
@@ -85,7 +73,7 @@ export function Select<T extends string | number>({
   }, [isOpen])
 
   return (
-    <div ref={containerRef} className={`${styles.container()} ${className || ''}`}>
+    <div className={`${styles.container()} ${className || ''}`}>
       <button
         id={selectId}
         type="button"
@@ -95,6 +83,7 @@ export function Select<T extends string | number>({
         aria-haspopup="listbox"
         aria-controls={listboxId}
         disabled={disabled}
+        ref={popover.refs.setReference}
         className={styles.trigger()}
         onClick={() => {
           if (!disabled) setIsOpen(open => !open)
@@ -106,6 +95,7 @@ export function Select<T extends string | number>({
             setIsOpen(true)
           }
         }}
+        {...popover.getReferenceProps()}
       >
         <span>{selectedOption ? selectedOption.label : ''}</span>
         <ChevronDown
@@ -115,7 +105,18 @@ export function Select<T extends string | number>({
       </button>
 
       {isOpen && (
-        <div id={listboxId} ref={menuRef} role="listbox" aria-label={label} className={styles.menu()}>
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-label={label}
+          ref={node => {
+            popover.refs.setFloating(node)
+            menuRef.current = node
+          }}
+          style={popover.floatingStyles}
+          className={styles.menu()}
+          {...popover.getFloatingProps()}
+        >
           {options.map(option => {
             const isSelected = option.value === value
             return (

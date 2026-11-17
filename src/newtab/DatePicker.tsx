@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import { tv } from 'tailwind-variants/lite'
 import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { Select } from './Select'
+import { usePopover } from './popover'
 
 const pillStyles = tv({
   base: 'px-[10px] py-[5px] text-[11px] rounded-[6px] border border-solid transition-colors cursor-pointer',
@@ -24,10 +25,18 @@ export function DatePicker({
   onChange: (value: number | null) => void
   disabled?: boolean
 }) {
-  const containerRef = useRef<HTMLDivElement>(null)
   const [customMode, setCustomMode] = useState(() => Boolean(value))
   const [isOpen, setIsOpen] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+
+  const popover = usePopover({
+    open: isOpen,
+    onOpenChange: setIsOpen,
+    placement: 'bottom-start',
+    offset: 6,
+    role: 'dialog',
+    enabled: !disabled,
+  })
 
   // Calendar view year and month (0-indexed)
   const initialDate = value ? dayjs.unix(value) : dayjs()
@@ -46,27 +55,6 @@ export function DatePicker({
       setViewMonth(now.month())
     }
   }, [value, isOpen])
-
-  // Close calendar on click outside or Escape
-  useEffect(() => {
-    if (!isOpen) return
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setIsOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen])
 
   const currentDateStr = value ? dayjs.unix(value).format('YYYY-MM-DD') : ''
 
@@ -134,7 +122,7 @@ export function DatePicker({
   const showClear = Boolean(value && !disabled && isHovered)
 
   return (
-    <div ref={containerRef} className="relative space-y-[8px]">
+    <div className="relative space-y-[8px]">
       <div className="flex flex-wrap items-center gap-[6px]">
         <button
           type="button"
@@ -187,6 +175,7 @@ export function DatePicker({
           {/* Trigger Box: Clicking anywhere opens dropdown, no manual keyboard editing */}
           <div
             role="button"
+            ref={popover.refs.setReference}
             tabIndex={disabled ? -1 : 0}
             aria-label="选择具体过期日期"
             aria-haspopup="dialog"
@@ -207,6 +196,7 @@ export function DatePicker({
                 setIsOpen(open => !open)
               }
             }}
+            {...popover.getReferenceProps()}
           >
             <span className={currentDateStr ? 'font-mono text-ui-ink font-medium' : 'text-[#9aa490]'}>
               {currentDateStr || '点击选择过期日期…'}
@@ -237,8 +227,11 @@ export function DatePicker({
           {isOpen && (
             <div
               role="dialog"
+              ref={popover.refs.setFloating}
+              style={popover.floatingStyles}
               aria-label="日期选择日历"
-              className="absolute left-0 top-[calc(100%+6px)] z-50 w-[274px] p-[12px] bg-white rounded-[14px] border border-solid border-[#d7e2cc] shadow-[0_12px_36px_#334c2b26] select-none"
+              className="z-50 w-[274px] p-[12px] bg-white rounded-[14px] border border-solid border-[#d7e2cc] shadow-[0_12px_36px_#334c2b26] select-none"
+              {...popover.getFloatingProps()}
             >
               {/* Header: ChevronLeft, Year select, Month select, ChevronRight */}
               <div className="flex items-center justify-between mb-[10px]">

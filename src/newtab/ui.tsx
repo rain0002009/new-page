@@ -104,3 +104,5 @@ export function SiteIcon({ url = '', title, size, className }: { url?: string; t
   const styles = siteIcon({ size })
   return <span className={styles.icon({ className })} aria-hidden="true" title={title}>{url && url !== failedUrl ? <img className={styles.image()} src={url} alt="" draggable={false} referrerPolicy="no-referrer" onError={() => setFailedUrl(url)} /> : null}<Globe2 size={20} /></span>
 }
+
+export { Popover, usePopover, type PopoverProps, type UsePopoverOptions } from './popover'
