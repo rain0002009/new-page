@@ -5173,13 +5173,24 @@ test('日期选择组件：点击任意位置弹出日历、不支持键盘输�
   await expect(yearSelect).toBeVisible()
   await expect(monthSelect).toBeVisible()
 
-  // 点击触发器任意位置可收起日历
+  // 验证下拉日历使用浮动定位，展开和收起不会撑高父容器
+  const dialogBoxOpen = (await shareDialog.boundingBox())!
   await dateTrigger.click()
   await expect(calendarPopup).not.toBeVisible()
+  const dialogBoxClosed = (await shareDialog.boundingBox())!
+  expect(dialogBoxOpen.height).toBe(dialogBoxClosed.height)
 
   // 再次点击触发器任意位置可重新弹出日历
   await dateTrigger.click()
   await expect(calendarPopup).toBeVisible()
+
+  // 验证年份和月份使用自定义下拉组件而非原生 select
+  await yearSelect.click()
+  const yearListbox = calendarPopup.getByRole('listbox', { name: '选择年份' })
+  await expect(yearListbox).toBeVisible()
+  const currentYear = new Date().getFullYear()
+  await yearListbox.getByRole('option', { name: `${currentYear}年` }).click()
+  await expect(yearListbox).not.toBeVisible()
 
   // 选定一个未来的日期（例如下个月的 15 号）
   await nextMonthBtn.click()

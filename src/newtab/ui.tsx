@@ -27,12 +27,17 @@ const modal = tv({
   },
   variants: {
     size: {
-      regular: { dialog: 'w-[min(470px,calc(100vw-32px))] overflow-y-auto', header: 'mb-[24px]' },
-      wide: { dialog: 'w-[min(720px,calc(100vw-32px))] overflow-y-auto', header: 'mb-[24px]' },
-      search: { dialog: 'w-[min(860px,calc(100vw-32px))] h-[min(720px,85vh)] open:flex flex-col overflow-hidden', header: 'mb-[18px] shrink-0' },
+      regular: { dialog: 'w-[min(470px,calc(100vw-32px))]', header: 'mb-[24px]' },
+      wide: { dialog: 'w-[min(720px,calc(100vw-32px))]', header: 'mb-[24px]' },
+      search: { dialog: 'w-[min(860px,calc(100vw-32px))] h-[min(720px,85vh)] open:flex flex-col', header: 'mb-[18px] shrink-0' },
+    },
+    overflow: {
+      auto: { dialog: 'overflow-y-auto' },
+      hidden: { dialog: 'overflow-hidden' },
+      visible: { dialog: 'overflow-visible' },
     },
   },
-  defaultVariants: { size: 'regular' },
+  defaultVariants: { size: 'regular', overflow: 'auto' },
 })
 
 const modalPresence = createContext({ present: true, finished: () => {} })
@@ -48,11 +53,11 @@ export function ModalPresence({ children }: { children: ReactNode }) {
   return <modalPresence.Provider value={{ present: !!children, finished }}>{children || (!exited && retained.current)}</modalPresence.Provider>
 }
 
-export function Modal({ title, children, close, size, className }: { title: string; children: ReactNode; close: () => void; className?: string } & VariantProps<typeof modal>) {
+export function Modal({ title, children, close, size, overflow, className }: { title: string; children: ReactNode; close: () => void; className?: string } & VariantProps<typeof modal>) {
   const ref = useRef<HTMLDialogElement>(null)
   const interrupted = useRef<{ opacity: string; transform: string; backdrop: string }>()
   const { present, finished } = useContext(modalPresence)
-  const styles = modal({ size })
+  const styles = modal({ size, overflow })
   useLayoutEffect(() => {
     const node = ref.current!
     const focus = document.activeElement as HTMLElement | null

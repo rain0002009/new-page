@@ -242,7 +242,7 @@ function CreateShareModal({
   }
 
   return (
-    <Modal title="分享笔记" close={close} size="regular">
+    <Modal title="分享笔记" close={close} size="regular" overflow="visible">
       <form onSubmit={submit} className="space-y-[16px]">
         {!seeApiKey && (
           <div className="p-[12px] rounded-[8px] bg-[#fff5ea] text-[#9b5837] text-[12px] border border-solid border-[#edd5c0]">

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import { tv } from 'tailwind-variants/lite'
 import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Select } from './Select'
 
 const pillStyles = tv({
   base: 'px-[10px] py-[5px] text-[11px] rounded-[6px] border border-solid transition-colors cursor-pointer',
@@ -115,8 +116,12 @@ export function DatePicker({
 
   // Year & Month options
   const currentYear = dayjs().year()
-  const years = Array.from({ length: 12 }, (_, i) => currentYear - 1 + i)
-  const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+  const yearOptions = Array.from({ length: 12 }, (_, i) => {
+    const y = currentYear - 1 + i
+    return { value: y, label: `${y}年` }
+  })
+  const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+  const monthOptions = monthNames.map((m, idx) => ({ value: idx, label: m }))
 
   // Days in month calculation
   const firstDayOfMonth = dayjs(new Date(viewYear, viewMonth, 1))
@@ -248,31 +253,18 @@ export function DatePicker({
                 </button>
 
                 <div className="flex items-center gap-[6px]">
-                  <select
-                    aria-label="选择年份"
+                  <Select
+                    label="选择年份"
                     value={viewYear}
-                    className="text-[12px] font-semibold text-ui-ink bg-[#f5f8ef] border border-solid border-[#dce4d2] rounded-[6px] px-[6px] py-[3px] cursor-pointer hover:border-[#a8bc94] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus"
-                    onChange={e => setViewYear(Number(e.target.value))}
-                  >
-                    {years.map(y => (
-                      <option key={y} value={y}>
-                        {y}年
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    aria-label="选择月份"
+                    options={yearOptions}
+                    onChange={setViewYear}
+                  />
+                  <Select
+                    label="选择月份"
                     value={viewMonth}
-                    className="text-[12px] font-semibold text-ui-ink bg-[#f5f8ef] border border-solid border-[#dce4d2] rounded-[6px] px-[6px] py-[3px] cursor-pointer hover:border-[#a8bc94] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ui-focus"
-                    onChange={e => setViewMonth(Number(e.target.value))}
-                  >
-                    {months.map((m, idx) => (
-                      <option key={idx} value={idx}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                    options={monthOptions}
+                    onChange={setViewMonth}
+                  />
                 </div>
 
                 <button

@@ -321,7 +321,7 @@ function EditShareModal({
   }
 
   return (
-    <Modal title="修改分享内容" close={close} size="regular">
+    <Modal title="修改分享内容" close={close} size="regular" overflow="visible">
       <form onSubmit={submit} className="space-y-[16px]">
         {!noteAlive ? (
           <div className="p-[12px] bg-[#fff1ed] text-[#b14a38] text-[12px] rounded-[8px] border border-solid border-[#ecc9bf]">
