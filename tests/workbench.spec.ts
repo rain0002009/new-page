@@ -1243,6 +1243,24 @@ for (const mode of ['未连接收藏库', '已连接收藏库', '关闭自动接
   expect(await readFile(path, 'utf8')).toBe('# 原生拖放标题\n\n来自本地文件夹的正文')
 })
 
+test('拖入非 md 文件不拦截报错，放行给浏览器或页面触发原有逻辑', async () => {
+  const { page } = await openClient(undefined, true)
+  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+
+  // 模拟拖入非 Markdown 文件（如 txt、png 等）
+  await page.evaluate(() => {
+    const transfer = new DataTransfer()
+    transfer.items.add(new File(['hello world'], 'demo.txt', { type: 'text/plain' }))
+    document.querySelector('main, .workbench')!.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+  })
+
+  // 不应触发 "请拖入 .md 或 .markdown 文件" 错误提示
+  await page.waitForTimeout(300)
+  await expect(page.getByRole('status').filter({ hasText: /请拖入/ })).toHaveCount(0)
+  await expect(page.getByText('请拖入 .md 或 .markdown 文件')).toHaveCount(0)
+  await expect(page.getByText('文件打开失败')).toHaveCount(0)
+})
+
 test('首次拖入主动申请写入权限，随后直接编辑写回并处理磁盘冲突', async () => {
   const { page, context } = await openClient(undefined, true)
   await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()

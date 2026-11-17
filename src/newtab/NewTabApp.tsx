@@ -116,9 +116,23 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     }
     const drop = (event: DragEvent) => {
       if (!event.dataTransfer?.types.includes('Files')) return
+      const files = Array.from(event.dataTransfer.files || [])
+      const items = Array.from(event.dataTransfer.items || [])
+      const hasMarkdown =
+        files.some(file => markdownName(file.name)) ||
+        items.some(item => item.kind === 'file' && markdownName(item.getAsFile()?.name ?? ''))
+
+      // 不是 md 文件时，不拦截也不报错，放行给浏览器或页面触发原有逻辑（如原生拖放打开）
+      if (!hasMarkdown) {
+        if (event.isTrusted) {
+          event.stopPropagation()
+        }
+        return
+      }
+
       // Native Chrome drops know the file URL; File/handle APIs hide that path.
       // Stop page handlers from cancelling Chrome's default open-in-new-tab.
-      if (event.isTrusted && event.dataTransfer.files.length === 1 && markdownName(event.dataTransfer.files[0].name)) {
+      if (event.isTrusted && files.length === 1 && markdownName(files[0].name)) {
         event.stopPropagation()
         return
       }
