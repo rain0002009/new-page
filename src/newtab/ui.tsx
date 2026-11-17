@@ -121,3 +121,4 @@ export function SiteIcon({ url = '', title, size, className }: { url?: string; t
 }
 
 export { Popover, usePopover, type PopoverProps, type UsePopoverOptions } from './popover'
+export { Select, type SelectOption, type SelectProps } from './Select'

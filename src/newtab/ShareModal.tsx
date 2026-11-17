@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, Lock, Share2 } from 'lucide-react'
 import type { Document, Note, ShareRecord } from '../core/model'
 import type { Act } from './Editor'
-import { Button, Modal } from './ui'
+import { Button, Modal, Select } from './ui'
 import { formStyles } from './form-styles'
 import { Toast } from '../shared/Toast'
 import { DatePicker } from './DatePicker'
@@ -282,19 +282,17 @@ function CreateShareModal({
 
         <div className={fields.label()}>
           <label htmlFor={domainId}>分享域名</label>
-          <select
-            id={domainId}
-            className={fields.control()}
-            value={domain}
-            disabled={busy || !domains.length}
-            onChange={e => setDomain(e.target.value)}
-          >
-            {domains.map(d => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
+          <div className="mt-[7px]">
+            <Select
+              id={domainId}
+              label="分享域名"
+              value={domain}
+              options={domains.map(d => ({ value: d, label: d }))}
+              onChange={setDomain}
+              disabled={busy || !domains.length}
+              size="control"
+            />
+          </div>
         </div>
 
         <div className={fields.label()}>

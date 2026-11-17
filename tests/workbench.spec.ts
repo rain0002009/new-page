@@ -4953,7 +4953,13 @@ test('笔记分享、防重复分享、管理修改与彻底删除', async () =>
 
   // Fill title, select domain, pick expiration preset
   await shareDialog.getByLabel('分享标题').fill('公开发布的测试笔记')
-  await shareDialog.getByLabel('分享域名').selectOption('fs.to')
+  const domainSelect = shareDialog.getByRole('combobox', { name: '分享域名', exact: true })
+  await expect(domainSelect).toBeVisible()
+  await domainSelect.click()
+  const domainListbox = page.getByRole('listbox', { name: '分享域名' })
+  await expect(domainListbox).toBeVisible()
+  await domainListbox.getByRole('option', { name: 'fs.to', exact: true }).click()
+  await expect(domainSelect).toContainText('fs.to')
   await shareDialog.getByRole('button', { name: '7天后', exact: true }).click()
 
   // Submit

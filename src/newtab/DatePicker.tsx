@@ -234,29 +234,31 @@ export function DatePicker({
               {...popover.getFloatingProps()}
             >
               {/* Header: ChevronLeft, Year select, Month select, ChevronRight */}
-              <div className="flex items-center justify-between mb-[10px]">
+              <div className="flex items-center justify-between mb-[10px] shrink-0 whitespace-nowrap">
                 <button
                   type="button"
                   aria-label="上个月"
                   title="上个月"
-                  className="w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-[#687a57] hover:bg-[#edf3e4] hover:text-[#425530] border-0 bg-transparent cursor-pointer transition-colors"
+                  className="w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-[#687a57] hover:bg-[#edf3e4] hover:text-[#425530] border-0 bg-transparent cursor-pointer transition-colors shrink-0"
                   onClick={prevMonth}
                 >
                   <ChevronLeft size={16} />
                 </button>
 
-                <div className="flex items-center gap-[6px]">
+                <div className="flex items-center gap-[6px] shrink-0 whitespace-nowrap">
                   <Select
                     label="选择年份"
                     value={viewYear}
                     options={yearOptions}
                     onChange={setViewYear}
+                    className="min-w-[80px]"
                   />
                   <Select
                     label="选择月份"
                     value={viewMonth}
                     options={monthOptions}
                     onChange={setViewMonth}
+                    className="min-w-[64px]"
                   />
                 </div>
 
@@ -264,7 +266,7 @@ export function DatePicker({
                   type="button"
                   aria-label="下个月"
                   title="下个月"
-                  className="w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-[#687a57] hover:bg-[#edf3e4] hover:text-[#425530] border-0 bg-transparent cursor-pointer transition-colors"
+                  className="w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-[#687a57] hover:bg-[#edf3e4] hover:text-[#425530] border-0 bg-transparent cursor-pointer transition-colors shrink-0"
                   onClick={nextMonth}
                 >
                   <ChevronRight size={16} />

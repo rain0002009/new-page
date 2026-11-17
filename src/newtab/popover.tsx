@@ -11,6 +11,7 @@ import {
   flip as floatingFlip,
   offset as floatingOffset,
   shift as floatingShift,
+  size as floatingSize,
   useDismiss,
   useFloating,
   useInteractions,
@@ -25,6 +26,7 @@ export interface UsePopoverOptions {
   offset?: number
   role?: 'dialog' | 'listbox' | 'menu' | 'tooltip'
   enabled?: boolean
+  matchReferenceWidth?: boolean
 }
 
 export function usePopover({
@@ -34,19 +36,31 @@ export function usePopover({
   offset: offsetPx = 6,
   role: roleName = 'dialog',
   enabled = true,
+  matchReferenceWidth = false,
 }: UsePopoverOptions = {}) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const open = controlledOpen ?? uncontrolledOpen
   const setOpen = setControlledOpen ?? setUncontrolledOpen
 
-  const middleware = useMemo(
-    () => [
+  const middleware = useMemo(() => {
+    const list = [
       floatingOffset(offsetPx),
       floatingFlip({ fallbackAxisSideDirection: 'start', padding: 8 }),
       floatingShift({ padding: 8 }),
-    ],
-    [offsetPx]
-  )
+    ]
+    if (matchReferenceWidth) {
+      list.push(
+        floatingSize({
+          apply({ rects, elements }) {
+            Object.assign(elements.floating.style, {
+              minWidth: `${rects.reference.width}px`,
+            })
+          },
+        })
+      )
+    }
+    return list
+  }, [offsetPx, matchReferenceWidth])
 
   const data = useFloating({
     open,
