@@ -5221,4 +5221,12 @@ test('日期选择组件：点击任意位置弹出日历、不支持键盘输�
   // 清除后即使 hover 也不显示清除按钮
   await dateTrigger.hover()
   await expect(clearBtn).not.toBeVisible()
+
+  // 验证点击弹窗内部空白区域（如 padding 内边距）不会误触发关闭
+  await shareDialog.click({ position: { x: 10, y: 10 } })
+  await expect(shareDialog).toBeVisible()
+
+  // 点击外部遮罩区域则会正常关闭弹窗
+  await page.mouse.click(5, 5)
+  await expect(shareDialog).not.toBeVisible()
 })

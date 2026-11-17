@@ -85,7 +85,22 @@ export function Modal({ title, children, close, size, overflow, className }: { t
       cancelled = true; animation.cancel(); backdrop.cancel()
     }
   }, [present, finished])
-  return <dialog ref={ref} aria-label={title} className={styles.dialog({ className })} onCancel={event => { event.preventDefault(); close() }} onClick={event => { if (event.target === event.currentTarget) close() }}>
+  return <dialog
+    ref={ref}
+    aria-label={title}
+    className={styles.dialog({ className })}
+    onCancel={event => { event.preventDefault(); close() }}
+    onClick={event => {
+      if (event.target !== event.currentTarget) return
+      const rect = event.currentTarget.getBoundingClientRect()
+      const isInside =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom
+      if (!isInside) close()
+    }}
+  >
     <div className={styles.header()}><h2 className={styles.title()}>{title}</h2><Button size="icon" aria-label="关闭弹窗" onClick={close}><X size={19} /></Button></div>
     {children}
   </dialog>
