@@ -4,9 +4,24 @@ import { editorViewCtx, serializerCtx } from '@milkdown/kit/core'
 import { replaceAll, $prose } from '@milkdown/kit/utils'
 import { Plugin } from '@milkdown/kit/prose/state'
 import { uploadConfig } from '@milkdown/kit/plugin/upload'
+import { CodeMirrorBlock } from '@milkdown/kit/component/code-block'
 import { readSeeApiKey, uploadImage } from '../core/see'
 import { storageKey } from '../core/local-workspace'
 import { preserveStandardImages } from './image-markdown'
+
+// Prevent code blocks from lazy-swapping placeholders and tearing down off-screen,
+// which causes massive layout jumps when scrolling long documents.
+const proto = CodeMirrorBlock.prototype as unknown as {
+  renderPlaceholder: () => void
+  initializeCodeMirror: () => void
+  scheduleTeardown: () => void
+  teardownCodeMirror: () => void
+}
+proto.renderPlaceholder = function (this: { initializeCodeMirror: () => void }) {
+  this.initializeCodeMirror()
+}
+proto.scheduleTeardown = function () {}
+proto.teardownCodeMirror = function () {}
 
 export default function MarkdownEditor({ value, readonly, onChange, onError, resource, documentId }: { value: string; readonly: boolean; onChange: (value: string) => void; onError: (message: string) => void; resource?: (url: string, image: boolean) => Promise<string>; documentId?: string }) {
   const host = useRef<HTMLDivElement>(null)
