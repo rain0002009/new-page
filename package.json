@@ -2,7 +2,7 @@
   "private": true,
   "name": "new-page",
   "description": "以空间整理网页、用书签标记 Todo，并自动保存到夸克网盘的 Chrome 新标签页。",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "license": "MIT",
   "type": "module",
   "dependencies": {
