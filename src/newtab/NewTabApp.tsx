@@ -14,6 +14,7 @@ import TodoList from './TodoList'
 import ShareManagementPanel from './ShareManagementPanel'
 import { ShareModal } from './ShareModal'
 import FluidBackground from './FluidBackground'
+import { Brand, SidebarIdentity } from './SidebarIdentity'
 import ContentPanel from './ContentPanel'
 import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
@@ -32,7 +33,6 @@ const workbench = tv({
   slots: {
     shell: 'workbench relative z-1 grid grid-cols-[226px_minmax(0,1fr)_288px] items-start h-[100dvh] overflow-hidden [@media(min-width:1700px)]:grid-cols-[245px_minmax(0,1fr)_320px] [@media(min-width:1000.01px)_and_(max-width:1200px)]:grid-cols-[205px_minmax(0,1fr)_250px] [@media(min-width:650.01px)_and_(max-width:1000px)]:grid-cols-[190px_minmax(0,1fr)] [@media(max-width:650px)]:grid-cols-[69px_minmax(0,1fr)]',
     sidebar: 'sidebar sticky top-0 z-1 h-[100dvh] flex flex-col pt-[34px] px-[20px] pb-[22px] border-r border-r-solid border-transparent [@media(max-width:1200px)]:pt-[28px] [@media(max-width:1200px)]:px-[14px] [@media(max-width:1200px)]:pb-[20px] [@media(max-width:650px)]:pt-[24px] [@media(max-width:650px)]:px-[9px] [@media(max-width:650px)]:pb-[18px]',
-    profile: 'px-[10px] mb-[24px] h-[36px] [@media(max-width:650px)]:hidden',
     section: 'flex items-center justify-between px-[11px] mt-[11px] mb-[9px] min-h-[29px] [@media(max-width:650px)]:hidden',
     createSection: 'flex items-center justify-between px-[11px] mt-[11px] mb-[9px] min-h-[29px] [@media(max-width:650px)]:justify-center [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mt-0 [@media(max-width:650px)]:mb-[10px]',
     sectionTitle: 'block text-[10px] [font-weight:650] tracking-[1px] text-[#989e90] [@media(max-width:650px)]:hidden',
@@ -66,18 +66,6 @@ const navigation = tv({
   defaultVariants: { selected: false },
 })
 const nav = navigation()
-const brand = tv({
-  slots: {
-    base: 'brand flex items-center gap-[10px] text-[23px] font-bold tracking-[2px]',
-    icon: 'h-[40px] text-[#657b52] rounded-[12px_12px_12px_3px] grid place-items-center bg-[linear-gradient(140deg,#f7ffec,#d4e4bf)] shadow-[inset_0_1px_1px_#fff,0_6px_16px_#768e4f18]',
-    caption: 'block tracking-[2.3px] text-[7px] font-medium text-[#98a18d] mt-0',
-  },
-  variants: { sidebar: {
-    true: { base: 'pl-[9px] mb-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mb-[28px]', icon: 'w-[37px] [@media(max-width:650px)]:w-[36px] [@media(max-width:650px)]:m-auto' },
-    false: { base: 'mb-[12px]', icon: 'w-[37px]' },
-  } },
-  defaultVariants: { sidebar: false },
-})
 const statusDot = tv({
   base: 'w-[5px] h-[5px] rounded-full shrink-0 inline-block',
   variants: { status: { synced: 'bg-[#9eb18b]', pending: 'bg-[#b2ad71]', syncing: 'bg-[#b2ad71]', error: 'bg-[#c99260]', conflict: 'bg-[#c99260]' } },
@@ -88,7 +76,7 @@ export default function NewTabApp() {
   const { data, error } = useQuery({ queryKey: stateKey, queryFn: async () => (await rpc({ type: 'snapshot' })).snapshot!, refetchInterval: 5000 })
   const profile = data?.document?.entities.profile
   const fluidAnimation = profile?.kind !== 'profile' || profile.fluidAnimation !== false
-  const nickname = profile?.kind === 'profile' ? profile.title : ''
+  const nickname = profile?.kind === 'profile' ? profile.title : undefined
   return <><FluidBackground fluidEnabled={fluidAnimation} nickname={nickname} /><Workbench data={data} error={error} /></>
 }
 function Workbench({ data, error }: { data: Snapshot | undefined; error: Error | null }) {
@@ -100,7 +88,11 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const [page, setPage] = useState('space')
   const [searchOpen, setSearchOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
-  const [sharingNote, setSharingNote] = useState<{ note: Note; share?: ShareRecord } | null>(null)
+  const [sharingTarget, setSharingTarget] = useState<
+    | { kind: 'note'; note: Note; share?: ShareRecord }
+    | { kind: 'collection'; collection: Collection; share?: ShareRecord }
+    | null
+  >(null)
   const [collecting, setCollecting] = useState(false)
   const [grouping, setGrouping] = useState(false)
   const groupingRef = useRef(false)
@@ -210,7 +202,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   }
   return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(item => item.kind === 'link' || item.kind === 'note').map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     {notices}
-    <aside className={styles.sidebar()}><div role="img" aria-label="页墟 Page Garden" className="pl-[9px] mb-[30px] h-[40px] [@media(max-width:1200px)]:mb-[28px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:mb-[28px] [@media(max-width:650px)]:h-[36px]" /><div role="img" aria-label={`用户 ${nickname}`} className={styles.profile()} />
+    <aside className={styles.sidebar()}><SidebarIdentity nickname={nickname} reserve />
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
       <div className={styles.section()}><span className={styles.sectionTitle()}>工作台</span></div><nav>
@@ -223,21 +215,17 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
       <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} onShare={(note, share) => setSharingNote({ note, share })} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateNote={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link')) locate(n) }} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
     <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} groups={groups} groupAll={() => void groupTabs()} grouping={grouping} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />
     <BatchActions key={data.sourceId} doc={doc} sourceId={data.sourceId!} spaceId={space?.id} tabs={tabs} act={act} notify={setMessage} refreshTabs={refreshTabs} reveal={reveal} />
-    <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} onShare={(note, share) => setSharingNote({ note, share })} /></Modal>}</ModalPresence>
+    <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} /></Modal>}</ModalPresence>
     <ModalPresence>{editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}</ModalPresence>
-    <ModalPresence>{sharingNote && <ShareModal note={sharingNote.note} share={sharingNote.share} doc={doc} act={act} close={() => setSharingNote(null)} onNavigateToShares={() => { setSharingNote(null); setPage('shares') }} onNavigateToSettings={() => { setSharingNote(null); setPage('settings') }} />}</ModalPresence>
+    <ModalPresence>{sharingTarget && <ShareModal target={sharingTarget} share={sharingTarget.share} doc={doc} act={act} close={() => setSharingTarget(null)} onNavigateToShares={() => { setSharingTarget(null); setPage('shares') }} onNavigateToSettings={() => { setSharingTarget(null); setPage('settings') }} />}</ModalPresence>
   </div></DragBoard></SelectionProvider>
-}
-function Brand({ sidebar = false }: { sidebar?: boolean }) {
-  const styles = brand({ sidebar })
-  return <div className={styles.base()}><span className={styles.icon()}><Leaf size={22} strokeWidth={1.8} /></span><div className={sidebar ? '[@media(max-width:650px)]:hidden' : undefined}>页墟<small className={styles.caption()}>PAGE GARDEN</small></div></div>
 }
 function SpaceRow({ item, selected, select, rename, remove }: { item: Entity; selected: boolean; select: () => void; rename: () => void; remove: () => void }) {
   const drag = useDragItem(item.id, { kind: 'space', entityId: item.id, title: item.title }, styles.space())

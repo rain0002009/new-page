@@ -15,13 +15,14 @@ const entitySchema = z.discriminatedUnion('kind', [
   z.object({
     ...base,
     kind: z.literal('share'),
-    entityKind: z.literal('note'),
+    entityKind: z.enum(['note', 'collection']),
     entityId: z.string(),
     domain: z.string(),
     slug: z.string(),
     shortUrl: z.string(),
     expireAt: z.number().finite().nullable().optional(),
     hasPassword: z.boolean().optional(),
+    includeNotes: z.boolean().optional(),
   }),
 ])
 const documentSchema = z.object({
@@ -60,7 +61,7 @@ export type Action =
   | { type: 'restore'; id: string }
   | { type: 'purge'; id: string }
   | { type: 'empty-trash' }
-  | { type: 'add-share'; id: string; entityKind: 'note'; entityId: string; domain: string; slug: string; shortUrl: string; title: string; expireAt?: number | null; hasPassword?: boolean }
+  | { type: 'add-share'; id: string; entityKind: 'note' | 'collection'; entityId: string; domain: string; slug: string; shortUrl: string; title: string; expireAt?: number | null; hasPassword?: boolean; includeNotes?: boolean }
   | { type: 'update-share'; id: string; title: string; expireAt?: number | null }
   | { type: 'delete-share'; id: string }
 
@@ -365,9 +366,9 @@ export function apply(doc: Document, action: Action): Document {
       break
     }
     case 'add-share': {
-      requireEntity(next, action.entityId, 'note')
+      requireEntity(next, action.entityId, action.entityKind)
       const existing = Object.values(next.entities).find(e => e.kind === 'share' && !e.purged && e.entityId === action.entityId)
-      if (existing) throw new Error('此笔记已生成过分享，不能重复分享')
+      if (existing) throw new Error(action.entityKind === 'collection' ? '此收藏块已生成过分享，不能重复分享' : '此笔记已生成过分享，不能重复分享')
       if (next.entities[action.id]) throw new Error('分享记录已存在')
       const share: ShareRecord = {
         ...common('share', action.title, null, 1024),
@@ -380,6 +381,7 @@ export function apply(doc: Document, action: Action): Document {
         shortUrl: action.shortUrl,
         expireAt: action.expireAt ?? null,
         hasPassword: action.hasPassword ?? false,
+        includeNotes: action.includeNotes,
       }
       next.entities[share.id] = share
       break

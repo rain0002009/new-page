@@ -106,8 +106,11 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
   </article>
 }
 
-export function CollectionSection({ collection, doc, act, edit, onShare }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void }) {
+export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void }) {
   const savedItems = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const collectionShare = Object.values(doc.entities).find(
+    (e): e is ShareRecord => e.kind === 'share' && !e.purged && e.entityKind === 'collection' && e.entityId === collection.id
+  )
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
   async function createNote() {
@@ -128,6 +131,18 @@ export function CollectionSection({ collection, doc, act, edit, onShare }: { col
       <h2 className={collectionStyles.title()}>{collection.title}<span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span></h2>
     </div><div className={collectionStyles.tools()}>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
+      {onShareCollection && (
+        <Button
+          tone="custom"
+          size="custom"
+          className={collectionTool}
+          aria-label={collectionShare ? `查看已分享短链 ${collection.title}` : `分享 ${collection.title}`}
+          aria-pressed={!!collectionShare}
+          onClick={() => onShareCollection(collection, collectionShare)}
+        >
+          <Share2 size={13} className={collectionShare ? 'text-[#627d49]' : ''} />
+        </Button>
+      )}
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`重命名 ${collection.title}`} onClick={() => edit({ kind: 'rename', entity: collection })}><Edit3 size={13} /></Button>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>

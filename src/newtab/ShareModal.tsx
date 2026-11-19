@@ -1,18 +1,24 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
-import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, Lock, Share2 } from 'lucide-react'
-import type { Document, Note, ShareRecord } from '../core/model'
+import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, Lock, RefreshCw, Share2 } from 'lucide-react'
+import type { Collection, Document, Note, ShareRecord } from '../core/model'
 import type { Act } from './Editor'
 import { Button, Modal, Select } from './ui'
 import { formStyles } from './form-styles'
 import { Toast } from '../shared/Toast'
 import { DatePicker } from './DatePicker'
-import { createTextShare, fetchSeeDomains, validateTextShareLength } from '../core/see'
+import { collectionToMarkdown, createTextShare, fetchSeeDomains, updateTextShare, validateTextShareLength } from '../core/see'
 
 const fields = formStyles()
 
+export type ShareTarget =
+  | { kind: 'note'; note: Note }
+  | { kind: 'collection'; collection: Collection }
+
 export function ShareModal({
+  target,
   note,
+  collection,
   share,
   doc,
   act,
@@ -20,7 +26,9 @@ export function ShareModal({
   onNavigateToShares,
   onNavigateToSettings,
 }: {
-  note: Note
+  target?: ShareTarget
+  note?: Note
+  collection?: Collection
   share?: ShareRecord
   doc: Document
   act: Act
@@ -31,11 +39,18 @@ export function ShareModal({
   const profile = doc.entities.profile
   const seeApiKey = profile?.kind === 'profile' ? profile.seeApiKey?.trim() ?? '' : ''
 
+  const resolvedTarget: ShareTarget | undefined = target ??
+    (note ? { kind: 'note', note } : collection ? { kind: 'collection', collection } : undefined)
+
+  if (!resolvedTarget) return null
+
   if (share && !share.purged) {
     return (
       <AlreadySharedModal
-        note={note}
+        target={resolvedTarget}
         share={share}
+        doc={doc}
+        seeApiKey={seeApiKey}
         close={close}
         onNavigateToShares={onNavigateToShares}
       />
@@ -44,7 +59,8 @@ export function ShareModal({
 
   return (
     <CreateShareModal
-      note={note}
+      target={resolvedTarget}
+      doc={doc}
       seeApiKey={seeApiKey}
       act={act}
       close={close}
@@ -54,17 +70,24 @@ export function ShareModal({
 }
 
 function AlreadySharedModal({
-  note,
+  target,
   share,
+  doc,
+  seeApiKey,
   close,
   onNavigateToShares,
 }: {
-  note: Note
+  target: ShareTarget
   share: ShareRecord
+  doc: Document
+  seeApiKey: string
   close: () => void
   onNavigateToShares?: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
 
   async function copyLink() {
     try {
@@ -76,13 +99,53 @@ function AlreadySharedModal({
     }
   }
 
+  async function syncLatest() {
+    if (!seeApiKey) {
+      setError('请先在设置中保存 s.ee API Key')
+      return
+    }
+    setSyncing(true)
+    setError('')
+    try {
+      let content = ''
+      if (target.kind === 'note') {
+        const latest = doc.entities[target.note.id] as Note | undefined
+        if (!latest || latest.purged) throw new Error('原笔记已删除，无法同步')
+        validateTextShareLength(latest.body)
+        content = latest.body
+      } else {
+        const latest = doc.entities[target.collection.id] as Collection | undefined
+        if (!latest || latest.purged) throw new Error('原收藏块已删除，无法同步')
+        const md = collectionToMarkdown(doc, latest.id, { includeNotes: share.includeNotes })
+        if (md.itemCount === 0) throw new Error('当前收藏块没有可导出的有效卡片')
+        validateTextShareLength(md.content)
+        content = md.content
+      }
+
+      await updateTextShare(seeApiKey, {
+        domain: share.domain,
+        slug: share.slug,
+        title: share.title,
+        content,
+      })
+      setMessage('分享内容已同步更新')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '同步更新失败，请重试')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const isExpired = share.expireAt ? dayjs().unix() > share.expireAt : false
+  const isCollection = target.kind === 'collection'
 
   return (
-    <Modal title="笔记已分享" close={close} size="regular">
+    <Modal title={isCollection ? '收藏块已分享' : '笔记已分享'} close={close} size="regular">
       <div className="space-y-[18px]">
         <div className="p-[14px] bg-[#f5f8ee] rounded-[10px] border border-solid border-[#e2e8d8]">
-          <p className="text-[11px] text-[#718260] font-medium mb-[6px]">当前笔记已生成公开短链，相同笔记不允许再次分享：</p>
+          <p className="text-[11px] text-[#718260] font-medium mb-[6px]">
+            {isCollection ? '当前收藏块已生成公开短链，相同收藏块不允许再次分享：' : '当前笔记已生成公开短链，相同笔记不允许再次分享：'}
+          </p>
           <h3 className="text-[14px] font-semibold text-ui-ink mb-[12px]">{share.title}</h3>
           <div className="flex items-center gap-[8px]">
             <input
@@ -120,18 +183,32 @@ function AlreadySharedModal({
             <span className="text-[#5f7a4d]">永久有效</span>
           )}</div>
           {share.hasPassword && <div className="text-[#a1783e] flex items-center gap-[4px]"><Lock size={12} /> 已配置访问密码</div>}
+          {isCollection && share.includeNotes && <div className="text-[#556947]">已包含当时已公开的笔记链接</div>}
         </div>
 
+        {error && <Toast message={error} onClose={() => setError('')} />}
+        {message && <Toast message={message} onClose={() => setMessage('')} />}
+
         <div className="flex items-center justify-between pt-[10px] border-t border-t-solid border-ui-line">
-          <Button
-            tone="primary"
-            onClick={() => {
-              close()
-              onNavigateToShares?.()
-            }}
-          >
-            前往分享管理
-          </Button>
+          <div className="flex items-center gap-[8px]">
+            <Button
+              tone="primary"
+              onClick={() => {
+                close()
+                onNavigateToShares?.()
+              }}
+            >
+              前往分享管理
+            </Button>
+            <Button
+              disabled={syncing}
+              aria-label="同步最新内容"
+              onClick={() => void syncLatest()}
+            >
+              <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? '正在同步…' : '同步最新内容'}
+            </Button>
+          </div>
           <Button onClick={close}>关闭</Button>
         </div>
       </div>
@@ -140,24 +217,30 @@ function AlreadySharedModal({
 }
 
 function CreateShareModal({
-  note,
+  target,
+  doc,
   seeApiKey,
   act,
   close,
   onNavigateToSettings,
 }: {
-  note: Note
+  target: ShareTarget
+  doc: Document
   seeApiKey: string
   act: Act
   close: () => void
   onNavigateToSettings?: () => void
 }) {
+  const isCollection = target.kind === 'collection'
   const titleId = useId()
   const domainId = useId()
   const slugId = useId()
   const pwdId = useId()
+  const includeNotesId = useId()
 
-  const [title, setTitle] = useState(note.title)
+  const defaultTitle = isCollection ? target.collection.title : target.note.title
+  const [title, setTitle] = useState(defaultTitle)
+  const [includeNotes, setIncludeNotes] = useState(false)
   const [domain, setDomain] = useState('s.ee')
   const [domains, setDomains] = useState<string[]>(['s.ee'])
   const [expireAt, setExpireAt] = useState<number | null>(null)
@@ -169,15 +252,24 @@ function CreateShareModal({
   const [error, setError] = useState('')
   const [lengthError, setLengthError] = useState('')
 
+  // Calculate markdown for collection
+  const collectionMd = useMemo(() => {
+    if (!isCollection) return null
+    return collectionToMarkdown(doc, target.collection.id, { includeNotes })
+  }, [doc, isCollection, target, includeNotes])
+
+  const contentToShare = isCollection ? (collectionMd?.content ?? '') : target.note.body
+  const isEmptyCollection = isCollection && (collectionMd?.itemCount === 0)
+
   // Check length limit <= 2097152 bytes
   useEffect(() => {
     try {
-      validateTextShareLength(note.body)
+      validateTextShareLength(contentToShare)
       setLengthError('')
     } catch (cause) {
-      setLengthError(cause instanceof Error ? cause.message : '笔记内容超过 2MB 限制')
+      setLengthError(cause instanceof Error ? cause.message : '内容超过 2MB 限制')
     }
-  }, [note.body])
+  }, [contentToShare])
 
   // Fetch domains
   useEffect(() => {
@@ -196,7 +288,11 @@ function CreateShareModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!seeApiKey) {
-      setError('请先在设置页保存 s.ee API Key，再分享笔记')
+      setError(`请先在设置页保存 s.ee API Key，再分享${isCollection ? '收藏块' : '笔记'}`)
+      return
+    }
+    if (isEmptyCollection) {
+      setError('当前收藏块没有可导出的有效卡片')
       return
     }
     if (lengthError) {
@@ -207,8 +303,8 @@ function CreateShareModal({
     setError('')
     try {
       const result = await createTextShare(seeApiKey, {
-        title: title.trim() || note.title,
-        content: note.body,
+        title: title.trim() || defaultTitle,
+        content: contentToShare,
         domain,
         expire_at: expireAt,
         custom_slug: customSlug.trim() || undefined,
@@ -219,14 +315,15 @@ function CreateShareModal({
       const saved = await act({
         type: 'add-share',
         id: shareId,
-        entityKind: 'note',
-        entityId: note.id,
+        entityKind: isCollection ? 'collection' : 'note',
+        entityId: isCollection ? target.collection.id : target.note.id,
         domain,
         slug: result.slug,
         shortUrl: result.shortUrl,
-        title: title.trim() || note.title,
+        title: title.trim() || defaultTitle,
         expireAt,
         hasPassword: !!password.trim(),
+        includeNotes: isCollection ? includeNotes : undefined,
       })
 
       if (saved) {
@@ -242,7 +339,7 @@ function CreateShareModal({
   }
 
   return (
-    <Modal title="分享笔记" close={close} size="regular" overflow="visible">
+    <Modal title={isCollection ? '分享收藏块' : '分享笔记'} close={close} size="regular" overflow="visible">
       <form onSubmit={submit} className="space-y-[16px]">
         {!seeApiKey && (
           <div className="p-[12px] rounded-[8px] bg-[#fff5ea] text-[#9b5837] text-[12px] border border-solid border-[#edd5c0]">
@@ -260,9 +357,40 @@ function CreateShareModal({
           </div>
         )}
 
+        {isEmptyCollection && (
+          <div className="p-[12px] rounded-[8px] bg-[#fff5ea] text-[#9b5837] text-[12px] border border-solid border-[#edd5c0]">
+            当前收藏块没有可导出的有效卡片（未分享的笔记不会被导出）。
+          </div>
+        )}
+
         {lengthError && (
           <div className="p-[12px] rounded-[8px] bg-[#fff0ea] text-[#ad483b] text-[12px] border border-solid border-[#eccbc2]">
             {lengthError}
+          </div>
+        )}
+
+        {isCollection && (
+          <div className={fields.label()}>
+            <div className="flex items-center justify-between">
+              <label htmlFor={includeNotesId} className="cursor-pointer font-medium text-ui-ink">
+                是否分享笔记
+              </label>
+              <input
+                id={includeNotesId}
+                type="checkbox"
+                role="switch"
+                aria-label="是否分享笔记"
+                className="w-[18px] h-[18px] cursor-pointer accent-[#657b52]"
+                checked={includeNotes}
+                disabled={busy}
+                onChange={e => setIncludeNotes(e.target.checked)}
+              />
+            </div>
+            <p className="mt-[6px] text-[11px] text-[#718260] leading-relaxed">
+              {collectionMd && collectionMd.noteCount.shared > 0
+                ? `已检测到 ${collectionMd.noteCount.shared} 篇已分享笔记（开启后将转为公开链接并入文档）；${collectionMd.noteCount.unshared > 0 ? `${collectionMd.noteCount.unshared} 篇未分享笔记将自动忽略。` : '无未分享笔记。'}`
+                : `当前收藏块无已分享笔记，${collectionMd && collectionMd.noteCount.unshared > 0 ? `${collectionMd.noteCount.unshared} 篇未分享笔记将被自动忽略。` : '暂无笔记卡片。'}`}
+            </p>
           </div>
         )}
 
@@ -323,7 +451,7 @@ function CreateShareModal({
                   value={customSlug}
                   disabled={busy}
                   onChange={e => setCustomSlug(e.target.value)}
-                  placeholder="例如 my-note-slug"
+                  placeholder="例如 my-share-slug"
                   pattern="[a-zA-Z0-9_-]*"
                 />
               </div>
@@ -354,7 +482,7 @@ function CreateShareModal({
           <Button
             type="submit"
             tone="primary"
-            disabled={busy || !seeApiKey || !!lengthError}
+            disabled={busy || !seeApiKey || !!lengthError || isEmptyCollection}
           >
             <Share2 size={15} />
             {busy ? '正在发布…' : '确认分享'}

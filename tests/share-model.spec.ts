@@ -141,3 +141,70 @@ test('删除原笔记不级联删除分享记录（生命周期解耦）', () =>
   expect(share.purged).toBe(false)
   expect(share.deletedAt).toBeNull()
 })
+
+test('创建收藏块分享记录并检验相同收藏块不可重复分享', () => {
+  const { doc, collectionId } = createDocWithNote()
+  const shareId = 'share-col-1'
+  const next = apply(doc, {
+    type: 'add-share',
+    id: shareId,
+    entityKind: 'collection',
+    entityId: collectionId,
+    domain: 's.ee',
+    slug: 'col123',
+    shortUrl: 'https://s.ee/col123',
+    title: '分享测试收藏块',
+    expireAt: 1775000000,
+    hasPassword: false,
+    includeNotes: true,
+  })
+
+  const share = next.entities[shareId] as ShareRecord
+  expect(share).toBeDefined()
+  expect(share.kind).toBe('share')
+  expect(share.entityKind).toBe('collection')
+  expect(share.entityId).toBe(collectionId)
+  expect(share.title).toBe('分享测试收藏块')
+  expect(share.includeNotes).toBe(true)
+  expect(share.purged).toBe(false)
+
+  // 相同收藏块不能重复分享
+  expect(() => apply(next, {
+    type: 'add-share',
+    id: 'share-col-2',
+    entityKind: 'collection',
+    entityId: collectionId,
+    domain: 's.ee',
+    slug: 'col456',
+    shortUrl: 'https://s.ee/col456',
+    title: '重复分享收藏块',
+  })).toThrow('此收藏块已生成过分享，不能重复分享')
+})
+
+test('删除原收藏块不级联删除收藏块分享记录（生命周期解耦）', () => {
+  const { doc, collectionId } = createDocWithNote()
+  const shareId = 'share-col-1'
+  let current = apply(doc, {
+    type: 'add-share',
+    id: shareId,
+    entityKind: 'collection',
+    entityId: collectionId,
+    domain: 's.ee',
+    slug: 'col123',
+    shortUrl: 'https://s.ee/col123',
+    title: '收藏块分享测试',
+    includeNotes: false,
+  })
+
+  current = apply(current, { type: 'delete', id: collectionId })
+  expect(current.entities[collectionId].deletedAt).not.toBeNull()
+
+  // 即使彻底清除回收站，分享记录依然存活
+  current = apply(current, { type: 'purge', id: collectionId })
+  expect(current.entities[collectionId].purged).toBe(true)
+
+  const share = current.entities[shareId] as ShareRecord
+  expect(share).toBeDefined()
+  expect(share.purged).toBe(false)
+  expect(share.includeNotes).toBe(false)
+})

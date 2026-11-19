@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import {
   AlertTriangle,
@@ -7,17 +7,18 @@ import {
   Edit3,
   ExternalLink,
   FileText,
+  Folder,
   Lock,
   Share2,
   Trash2,
 } from 'lucide-react'
-import type { Document, Note, ShareRecord } from '../core/model'
+import type { Collection, Document, Note, ShareRecord } from '../core/model'
 import type { Act } from './Editor'
 import { Button, Modal, ModalPresence } from './ui'
 import { formStyles } from './form-styles'
 import { Toast } from '../shared/Toast'
 import { DatePicker } from './DatePicker'
-import { deleteTextShare, updateTextShare, validateTextShareLength } from '../core/see'
+import { collectionToMarkdown, deleteTextShare, updateTextShare, validateTextShareLength } from '../core/see'
 
 const fields = formStyles()
 
@@ -30,7 +31,7 @@ export default function ShareManagementPanel({
   act: Act
   onLocateNote?: (noteId: string) => void
 }) {
-  const [activeTab, setActiveTab] = useState<'all' | 'note'>('all')
+  const [activeTab, setActiveTab] = useState<'all' | 'collection' | 'note'>('all')
   const [editingShare, setEditingShare] = useState<ShareRecord | null>(null)
   const [deletingShare, setDeletingShare] = useState<ShareRecord | null>(null)
   const [message, setMessage] = useState('')
@@ -61,6 +62,7 @@ export default function ShareManagementPanel({
 
   const categoryTabs = [
     { id: 'all', label: '全部', count: allShares.length },
+    { id: 'collection', label: '收藏块', count: allShares.filter(s => s.entityKind === 'collection').length },
     { id: 'note', label: '笔记', count: allShares.filter(s => s.entityKind === 'note').length },
   ] as const
 
@@ -99,8 +101,9 @@ export default function ShareManagementPanel({
       ) : (
         <div className="space-y-[12px]">
           {filteredShares.map(share => {
-            const sourceNote = doc.entities[share.entityId] as Note | undefined
-            const noteAlive = sourceNote && !sourceNote.purged
+            const isCollection = share.entityKind === 'collection'
+            const sourceEntity = doc.entities[share.entityId]
+            const entityAlive = sourceEntity && !sourceEntity.purged
             const isExpired = share.expireAt ? dayjs().unix() > share.expireAt : false
 
             return (
@@ -111,8 +114,8 @@ export default function ShareManagementPanel({
                 <div className="space-y-[6px] min-w-0 flex-1">
                   <div className="flex items-center gap-[8px] flex-wrap">
                     <span className="inline-flex items-center gap-[4px] px-[6px] py-[2px] rounded-[4px] bg-[#eef3e5] text-[#596d49] text-[10px] font-semibold">
-                      <FileText size={12} />
-                      笔记
+                      {isCollection ? <Folder size={12} /> : <FileText size={12} />}
+                      {isCollection ? '收藏块' : '笔记'}
                     </span>
                     <h4 className="text-[14px] font-semibold text-ui-ink truncate m-0" title={share.title}>
                       {share.title}
@@ -131,6 +134,11 @@ export default function ShareManagementPanel({
                     {share.hasPassword && (
                       <span className="inline-flex items-center gap-[3px] text-[10px] text-[#9b7639]" title="已设置密码">
                         <Lock size={11} /> 密码保护
+                      </span>
+                    )}
+                    {isCollection && share.includeNotes && (
+                      <span className="text-[10px] text-[#556947] bg-[#eff5e6] px-[5px] py-[2px] rounded-[4px]">
+                        含公开笔记
                       </span>
                     )}
                   </div>
@@ -164,20 +172,20 @@ export default function ShareManagementPanel({
                   </div>
 
                   <div className="text-[10px] text-[#919a86] flex items-center gap-[10px]">
-                    {noteAlive ? (
+                    {entityAlive ? (
                       <span>
-                        来源笔记：
+                        来源{isCollection ? '收藏块' : '笔记'}：
                         <button
                           type="button"
                           className="text-[#556b43] underline bg-transparent border-0 p-0 cursor-pointer ml-[2px]"
-                          onClick={() => onLocateNote?.(sourceNote.id)}
+                          onClick={() => onLocateNote?.(sourceEntity.id)}
                         >
-                          {sourceNote.title}
+                          {sourceEntity.title}
                         </button>
                       </span>
                     ) : (
                       <span className="text-[#a55243] flex items-center gap-[3px]">
-                        <AlertTriangle size={11} /> 原笔记已删除
+                        <AlertTriangle size={11} /> 原{isCollection ? '收藏块' : '笔记'}已删除
                       </span>
                     )}
                     <span>更新于 {dayjs(share.updatedAt).format('YYYY-MM-DD HH:mm')}</span>
@@ -262,9 +270,10 @@ function EditShareModal({
   close: () => void
   onSuccess: () => void
 }) {
+  const isCollection = share.entityKind === 'collection'
   const titleId = useId()
-  const sourceNote = doc.entities[share.entityId] as Note | undefined
-  const noteAlive = sourceNote && !sourceNote.purged
+  const sourceEntity = doc.entities[share.entityId]
+  const entityAlive = sourceEntity && !sourceEntity.purged
 
   const [title, setTitle] = useState(share.title)
   const [expireAt, setExpireAt] = useState<number | null>(share.expireAt ?? null)
@@ -272,21 +281,36 @@ function EditShareModal({
   const [error, setError] = useState('')
   const [lengthError, setLengthError] = useState('')
 
+  const collectionMd = useMemo(() => {
+    if (!isCollection || !entityAlive) return null
+    return collectionToMarkdown(doc, share.entityId, { includeNotes: share.includeNotes })
+  }, [doc, isCollection, entityAlive, share.entityId, share.includeNotes])
+
+  const contentToSync = isCollection
+    ? (collectionMd?.content ?? '')
+    : (entityAlive && sourceEntity.kind === 'note' ? sourceEntity.body : '')
+
+  const isEmptyCollection = isCollection && collectionMd?.itemCount === 0
+
   useEffect(() => {
-    if (noteAlive) {
+    if (entityAlive && contentToSync) {
       try {
-        validateTextShareLength(sourceNote.body)
+        validateTextShareLength(contentToSync)
         setLengthError('')
       } catch (cause) {
-        setLengthError(cause instanceof Error ? cause.message : '笔记内容超过 2MB 限制')
+        setLengthError(cause instanceof Error ? cause.message : '内容超过 2MB 限制')
       }
     }
-  }, [noteAlive, sourceNote?.body])
+  }, [entityAlive, contentToSync])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!noteAlive) {
-      setError('原笔记已被彻底删除，无法抓取最新正文更新外链')
+    if (!entityAlive) {
+      setError(`原${isCollection ? '收藏块' : '笔记'}已被彻底删除，无法抓取最新内容更新外链`)
+      return
+    }
+    if (isEmptyCollection) {
+      setError('当前收藏块没有可导出的有效卡片')
       return
     }
     if (lengthError) {
@@ -296,12 +320,11 @@ function EditShareModal({
     setBusy(true)
     setError('')
     try {
-      // Send PUT request to s.ee with latest note body
       await updateTextShare(seeApiKey, {
         domain: share.domain,
         slug: share.slug,
         title: title.trim() || share.title,
-        content: sourceNote.body,
+        content: contentToSync,
       })
 
       // Update local entity
@@ -323,13 +346,19 @@ function EditShareModal({
   return (
     <Modal title="修改分享内容" close={close} size="regular" overflow="visible">
       <form onSubmit={submit} className="space-y-[16px]">
-        {!noteAlive ? (
+        {!entityAlive ? (
           <div className="p-[12px] bg-[#fff1ed] text-[#b14a38] text-[12px] rounded-[8px] border border-solid border-[#ecc9bf]">
-            原笔记已在收藏中被删除，无法获取最新正文更新远程分享。建议直接删除该失效分享。
+            原{isCollection ? '收藏块' : '笔记'}已在收藏中被删除，无法获取最新内容更新远程分享。建议直接删除该失效分享。
           </div>
         ) : (
           <div className="p-[12px] bg-[#f5f8ed] text-[#556947] text-[11px] rounded-[8px] border border-solid border-[#dbe4cd]">
-            确认更新将自动抓取原笔记当前的最新正文同步至 s.ee 公开短链。
+            确认更新将自动抓取原{isCollection ? '收藏块当前的最新卡片' : '笔记当前的最新正文'}同步至 s.ee 公开短链。
+          </div>
+        )}
+
+        {isEmptyCollection && (
+          <div className="p-[12px] bg-[#fff1ed] text-[#b14a38] text-[12px] rounded-[8px] border border-solid border-[#ecc9bf]">
+            当前收藏块没有可导出的有效卡片，无法更新分享内容。
           </div>
         )}
 
@@ -346,7 +375,7 @@ function EditShareModal({
             type="text"
             className={fields.control()}
             value={title}
-            disabled={busy || !noteAlive}
+            disabled={busy || !entityAlive}
             onChange={e => setTitle(e.target.value)}
             maxLength={255}
           />
@@ -355,7 +384,7 @@ function EditShareModal({
         <div className={fields.label()}>
           <label>有效期</label>
           <div className="mt-[7px]">
-            <DatePicker value={expireAt} onChange={setExpireAt} disabled={busy || !noteAlive} />
+            <DatePicker value={expireAt} onChange={setExpireAt} disabled={busy || !entityAlive} />
           </div>
         </div>
 
@@ -366,7 +395,7 @@ function EditShareModal({
           <Button
             type="submit"
             tone="primary"
-            disabled={busy || !noteAlive || !!lengthError}
+            disabled={busy || !entityAlive || !!lengthError || isEmptyCollection}
           >
             {busy ? '正在更新…' : '确认更新'}
           </Button>
@@ -426,7 +455,7 @@ function DeleteShareModal({
             确定要删除此分享记录吗？
           </p>
           <p className="text-[11px] text-[#7c5b55] leading-[1.6] m-0">
-            该操作将向 s.ee 发送下线请求并永久释放该短链，同时从本地记录彻底抹除（不进入回收站）。原笔记内容不受影响。
+            该操作将向 s.ee 发送下线请求并永久释放该短链，同时从本地记录彻底抹除（不进入回收站）。原{share.entityKind === 'collection' ? '收藏块' : '笔记'}内容不受影响。
           </p>
         </div>
 

@@ -2706,7 +2706,7 @@ test('切换隔离数据源，迁移到空目标直接保留内容和昵称', as
   await expect(page.getByRole('link', { name: '源 B 的收藏', exact: true })).toHaveCount(0)
   await changeSource(page, '/source-c/', 'migrate')
   await expect(page.getByRole('heading', { name: '选择要保留的版本', exact: true })).toHaveCount(0)
-  await expect(page.locator('aside [aria-label="用户 Rain"]')).toBeVisible()
+  await expect(page.locator('[data-fluid-scene] [aria-label="用户 Rain"]')).toBeVisible()
   await sync(page)
   await page.getByRole('button', { name: '我的空间', exact: true }).click()
   await expect(page.getByRole('link', { name: '源 A 的收藏', exact: true })).toBeVisible()
@@ -3200,6 +3200,130 @@ test('中央内容独立滚动，顶部操作固定且滚动条不占宽度，�
   await page.screenshot({ path: 'test-results/frosted-panel-mobile.png' })
 })
 
+for (const mode of ['animated', 'disabled', 'reduced-motion']) test(`画布首次绘制延迟时品牌和昵称始终可见，完成后无重复内容（${mode}）`, async () => {
+  const { page } = await openClient()
+  await connect(page)
+  if (mode === 'disabled') {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await page.getByRole('switch', { name: '流体背景动画', exact: true }).click()
+  }
+  if (mode === 'reduced-motion') await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.addInitScript(() => {
+    let held = true
+    const pending = new Map<EventListenerOrEventListenerObject, { target: EventTarget; event: Event }>()
+    const original = EventTarget.prototype.addEventListener
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+      if (type !== 'paint' || !listener || !(this instanceof HTMLCanvasElement)) return original.call(this, type, listener, options)
+      const invoke = (target: EventTarget, event: Event) => {
+        if (typeof listener === 'function') listener.call(target, event)
+        else listener.handleEvent(event)
+      }
+      return original.call(this, type, function(this: EventTarget, event: Event) {
+        if (held) pending.set(listener, { target: this, event })
+        else invoke(this, event)
+      }, options)
+    }
+    Object.assign(window, { releaseFluidPaint() {
+      held = false
+      for (const [listener, { target, event }] of pending) {
+        if (typeof listener === 'function') listener.call(target, event)
+        else listener.handleEvent(event)
+      }
+      pending.clear()
+    } })
+  })
+  await page.reload()
+  await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'native')
+  async function ink(clip: { x: number; y: number; width: number; height: number }) {
+    const data = (await page.screenshot({ clip })).toString('base64')
+    return page.evaluate(async data => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${data}`)).blob())
+      const ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!
+      ctx.drawImage(bitmap, 0, 0)
+      const pixels = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data
+      let count = 0
+      for (let i = 0; i < pixels.length; i += 4) if (pixels[i] < 120 && pixels[i + 1] < 140 && pixels[i + 2] < 120) count++
+      bitmap.close()
+      return count
+    }, data)
+  }
+  const brand = { x: 20, y: 34, width: 185, height: 40 }
+  const profile = { x: 30, y: 104, width: 170, height: 36 }
+  await page.screenshot({ path: `test-results/fluid-first-paint-${mode}-held.png` })
+  expect(await ink(brand), '品牌在首次画布帧之前仍有可见文字').toBeGreaterThan(150)
+  expect(await ink(profile), '昵称在首次画布帧之前仍有可见文字').toBeGreaterThan(40)
+  await page.evaluate(() => (window as unknown as { releaseFluidPaint(): void }).releaseFluidPaint())
+  await expect(page.locator('[data-fluid-placeholder]')).toHaveCount(0)
+  await expect.poll(() => ink(brand)).toBeGreaterThan(150)
+  await expect.poll(() => ink(profile)).toBeGreaterThan(40)
+  await expect(page.getByRole('img', { name: '页墟 Page Garden', exact: true })).toHaveCount(1)
+  await expect(page.getByRole('img', { name: '用户 Rain', exact: true })).toHaveCount(1)
+  await page.screenshot({ path: `test-results/fluid-first-paint-${mode}-ready.png` })
+})
+
+test('品牌和昵称使用 HTML 场景，动态更新、长昵称和窄窗口布局保持正常', async () => {
+  const { page } = await openClient()
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await connect(page)
+  const scene = page.locator('[data-fluid-scene]')
+  const brand = scene.getByRole('img', { name: '页墟 Page Garden', exact: true })
+  const profile = scene.getByRole('img', { name: '用户 Rain', exact: true })
+  await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'native')
+  expect(await scene.evaluate(node => node.parentElement instanceof HTMLCanvasElement)).toBe(true)
+  await expect(brand).toBeVisible()
+  await expect(profile).toContainText('Rain')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const nickname = '🌱很长的用户昵称'.repeat(6)
+  await page.getByLabel('显示昵称', { exact: true }).fill(nickname)
+  const updatedProfile = scene.getByRole('img', { name: `用户 ${nickname}`, exact: true })
+  await expect(updatedProfile).toContainText(nickname)
+  await expect(updatedProfile.locator('span').first()).toHaveText('🌱')
+  expect(await updatedProfile.locator('span').last().evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true)
+  await page.getByRole('switch', { name: '流体背景动画', exact: true }).click()
+  await page.getByLabel('显示昵称', { exact: true }).fill('静态昵称')
+  await expect(scene.getByRole('img', { name: '用户 静态昵称', exact: true })).toBeVisible()
+  for (const width of [1800, 1500, 1200, 1000, 651, 650, 390]) {
+    await page.setViewportSize({ width, height: 960 })
+    const sidebar = await page.locator('.sidebar').boundingBox()
+    const box = (await brand.boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(sidebar!.x)
+    expect(box.x + box.width).toBeLessThanOrEqual(sidebar!.x + sidebar!.width)
+    const user = scene.getByRole('img', { name: '用户 静态昵称', exact: true })
+    if (width <= 650) await expect(user).toBeHidden()
+    else {
+      await expect(user).toBeVisible()
+      const userBox = (await user.boundingBox())!
+      expect(userBox.y).toBeCloseTo(box.y + box.height + (width <= 1200 ? 28 : 30), 0)
+    }
+  }
+  await page.screenshot({ path: 'test-results/fluid-html-mobile.png' })
+  await page.setViewportSize({ width: 1500, height: 960 })
+  await page.getByRole('switch', { name: '流体背景动画', exact: true }).click()
+  await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'native')
+  await page.screenshot({ path: 'test-results/fluid-html-desktop.png' })
+  expect(errors).toEqual([])
+})
+
+test('Chrome 缺少 HTML in Canvas 能力时保留品牌与昵称 HTML', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await page.addInitScript(() => {
+    Object.defineProperty(HTMLCanvasElement.prototype, 'updateElementGeometry', { configurable: true, value: undefined })
+  })
+  await page.reload()
+  await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'fallback')
+  const scene = page.locator('[data-fluid-scene]')
+  expect(await scene.evaluate(node => node.parentElement instanceof HTMLCanvasElement)).toBe(false)
+  await expect(scene.getByRole('img', { name: '页墟 Page Garden', exact: true })).toBeVisible()
+  await expect(scene.getByRole('img', { name: '用户 Rain', exact: true })).toContainText('Rain')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('显示昵称', { exact: true }).fill('HTML 降级昵称')
+  await expect(scene.getByRole('img', { name: '用户 HTML 降级昵称', exact: true })).toContainText('HTML 降级昵称')
+  await page.getByRole('switch', { name: '流体背景动画', exact: true }).click()
+  await expect(scene.getByRole('img', { name: '用户 HTML 降级昵称', exact: true })).toBeVisible()
+})
+
 test('个人偏好 Switch 支持键盘操作，流体动画可立即关闭、重开及同步', async () => {
   const { page, context, url } = await openClient()
   await connect(page)
@@ -3209,15 +3333,15 @@ test('个人偏好 Switch 支持键盘操作，流体动画可立即关闭、重
   await expect(takeover).toBeChecked()
   await expect(animation).toBeChecked()
   await expect(page.locator('canvas[data-fluid="active"]')).toHaveCount(1)
-  await expect(page.locator('aside [aria-label="页墟 Page Garden"]')).toBeVisible()
-  await expect(page.locator('aside [aria-label^="用户 "]')).toBeVisible()
+  await expect(page.locator('[data-fluid-scene] [aria-label="页墟 Page Garden"]')).toBeVisible()
+  await expect(page.locator('[data-fluid-scene] [aria-label^="用户 "]')).toBeVisible()
   await animation.click()
   await expect(animation).not.toBeChecked()
   await expect(animation).toBeEnabled()
   await expect(page.locator('canvas[data-fluid="active"]')).toHaveCount(0)
   await expect(page.locator('canvas[data-fluid="idle"]')).toHaveCount(1)
-  await expect(page.locator('aside [aria-label="页墟 Page Garden"]')).toBeVisible()
-  await expect(page.locator('aside [aria-label^="用户 "]')).toBeVisible()
+  await expect(page.locator('[data-fluid-scene] [aria-label="页墟 Page Garden"]')).toBeVisible()
+  await expect(page.locator('[data-fluid-scene] [aria-label^="用户 "]')).toBeVisible()
   await page.getByText('流体背景动画', { exact: true }).click()
   await expect(animation).toBeChecked()
   await expect(page.locator('canvas[data-fluid="active"]')).toHaveCount(1)
@@ -3226,15 +3350,15 @@ test('个人偏好 Switch 支持键盘操作，流体动画可立即关闭、重
   await expect(animation).not.toBeChecked()
   await expect(page.locator('canvas[data-fluid="active"]')).toHaveCount(0)
   await expect(page.locator('canvas[data-fluid="idle"]')).toHaveCount(1)
-  await expect(page.locator('aside [aria-label="页墟 Page Garden"]')).toBeVisible()
-  await expect(page.locator('aside [aria-label^="用户 "]')).toBeVisible()
+  await expect(page.locator('[data-fluid-scene] [aria-label="页墟 Page Garden"]')).toBeVisible()
+  await expect(page.locator('[data-fluid-scene] [aria-label^="用户 "]')).toBeVisible()
   await page.screenshot({ path: 'test-results/settings-switches-desktop.png', fullPage: true })
   const otherTab = await context.newPage()
   await otherTab.goto(url)
   await expect(otherTab.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
   await expect(otherTab.locator('canvas[data-fluid="active"]')).toHaveCount(0)
   await expect(otherTab.locator('canvas[data-fluid="idle"]')).toHaveCount(1)
-  await expect(otherTab.locator('aside [aria-label="页墟 Page Garden"]')).toBeVisible()
+  await expect(otherTab.locator('[data-fluid-scene] [aria-label="页墟 Page Garden"]')).toBeVisible()
   await otherTab.close()
   await page.reload()
   await page.getByRole('button', { name: '设置', exact: true }).click()
@@ -3248,7 +3372,7 @@ test('个人偏好 Switch 支持键盘操作，流体动画可立即关闭、重
   await expect(second.page.getByRole('switch', { name: '流体背景动画', exact: true })).not.toBeChecked()
   await expect(second.page.locator('canvas[data-fluid="active"]')).toHaveCount(0)
   await expect(second.page.locator('canvas[data-fluid="idle"]')).toHaveCount(1)
-  await expect(second.page.locator('aside [aria-label="页墟 Page Garden"]')).toBeVisible()
+  await expect(second.page.locator('[data-fluid-scene] [aria-label="页墟 Page Garden"]')).toBeVisible()
   await second.page.getByRole('switch', { name: '流体背景动画', exact: true }).click()
   await sync(second.page)
   await sync(page)
@@ -3256,9 +3380,88 @@ test('个人偏好 Switch 支持键盘操作，流体动画可立即关闭、重
   await expect(page.locator('canvas[data-fluid="active"]')).toHaveCount(1)
 })
 
+test('卡片和中央滚动区的输入继续驱动底层流体，画布保持在内容下方', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '底层流体输入')
+  for (const target of ['card', 'scroll']) {
+    await page.reload()
+    await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'native')
+    await expect(page.locator('canvas')).toHaveCount(1)
+    const panel = page.locator('main.main-content')
+    const card = page.getByRole('article', { name: '链接 底层流体输入', exact: true })
+    const box = (await (target === 'card' ? card : panel).boundingBox())!
+    const x = box.x + 20
+    const y = target === 'card' ? box.y + box.height / 2 : box.y + box.height - 180
+    expect(await page.evaluate(({ x, y, target }) => {
+      const hit = document.elementFromPoint(x, y)
+      const canvas = document.querySelector('canvas')!
+      const main = document.querySelector('main.main-content')!
+      return !!hit?.closest(target === 'card' ? 'article' : '[data-overlayscrollbars-viewport]') &&
+        Number(getComputedStyle(canvas.parentElement!).zIndex) < Number(getComputedStyle(main.closest('.workbench')!).zIndex)
+    }, { x, y, target })).toBe(true)
+    // Expose only the underlying pixels for this assertion. Opacity preserves
+    // the real card/link/scroll hit targets; production paint order stays intact.
+    await panel.evaluate(node => { node.style.opacity = '0' })
+    await page.mouse.move(x, y)
+    await page.waitForTimeout(400)
+    const clip = { x: Math.floor(box.x), y: Math.floor(y - 80), width: Math.floor(Math.min(box.width, 400)), height: 160 }
+    const before = await page.screenshot({ clip })
+    await page.mouse.move(x + Math.min(box.width - 40, 240), y, { steps: 24 })
+    await expect.poll(async () => (await page.screenshot({ clip })).equals(before), { timeout: 3000, message: target }).toBe(false)
+    await panel.evaluate(node => { node.style.removeProperty('opacity') })
+  }
+  await page.getByRole('article', { name: '链接 底层流体输入', exact: true }).getByRole('button', { name: '编辑链接', exact: true }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+test('鼠标在交互按钮上移动也能触发流体动画', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await page.reload()
+  await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'native')
+  const button = page.getByRole('button', { name: /^Todo/ })
+  const box = (await button.boundingBox())!
+  const clip = { x: 0, y: Math.floor(box.y - 15), width: 225, height: Math.ceil(box.height + 30) }
+  await page.mouse.move(box.x + 20, box.y + box.height / 2)
+  expect(await button.evaluate(node => node.matches(':hover'))).toBe(true)
+  await page.waitForTimeout(400) // Let the button's existing hover transition finish.
+  const before = await page.screenshot({ clip })
+  await page.mouse.move(box.x + box.width - 20, box.y + box.height / 2, { steps: 20 })
+  await expect.poll(async () => (await page.screenshot({ clip })).equals(before), { timeout: 3000 }).toBe(false)
+  await button.click()
+  await expect(page.getByRole('heading', { name: 'Todo', exact: true })).toBeVisible()
+})
+
+test('动画关闭或系统减少动态效果时，交互按钮上的移动不产生波纹', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('switch', { name: '流体背景动画', exact: true }).click()
+  for (const mode of ['disabled', 'reduced-motion']) {
+    if (mode === 'reduced-motion') {
+      await page.getByRole('button', { name: '设置', exact: true }).click()
+      await page.getByRole('switch', { name: '流体背景动画', exact: true }).click()
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+    }
+    await page.reload()
+    await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'native')
+    const button = page.getByRole('button', { name: /^Todo/ })
+    const box = (await button.boundingBox())!
+    const clip = { x: 0, y: Math.floor(box.y - 15), width: 225, height: Math.ceil(box.height + 30) }
+    await page.mouse.move(box.x + 20, box.y + box.height / 2)
+    await page.waitForTimeout(400)
+    const before = await page.screenshot({ clip })
+    await page.mouse.move(box.x + box.width - 20, box.y + box.height / 2, { steps: 20 })
+    await page.waitForTimeout(150)
+    expect((await page.screenshot({ clip })).equals(before), mode).toBe(true)
+  }
+})
+
 test('浅色流体背景响应鼠标，仍可打开弹窗和正常收藏', async () => {
   const { page } = await openClient()
   await connect(page)
+  await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'native')
   const clip = { x: 245, y: 5, width: 400, height: 90 }
   await page.mouse.move(100, 900)
   const before = await page.screenshot({ clip })
@@ -3281,6 +3484,9 @@ test('流体初始化不可用时仍能收藏、编辑和处理 Todo', async () 
       return kind === 'webgl' || kind === 'webgl2' ? null : original.call(this, kind, ...args);
     };`)
   await page.reload()
+  await expect(page.locator('[data-html-source-status]')).toHaveAttribute('data-html-source-status', 'fallback')
+  await expect(page.locator('[data-fluid-scene]').getByRole('img', { name: '用户 Rain', exact: true })).toContainText('Rain')
+  await expect(page.locator('[data-fluid-scene]').getByRole('img', { name: '页墟 Page Garden', exact: true })).toBeVisible()
   const card = page.getByRole('article', { name: '链接 无 GPU 时的收藏', exact: true })
   await card.hover()
   await card.getByRole('button', { name: '编辑链接', exact: true }).click()
@@ -5253,4 +5459,180 @@ test('日期选择组件：点击任意位置弹出日历、不支持键盘输�
   // 点击外部遮罩区域则会正常关闭弹窗
   await page.mouse.click(5, 5)
   await expect(shareDialog).not.toBeVisible()
+})
+
+test('收藏块公开分享全流程：是否分享笔记开关、忽略未分享笔记、已分享防重及分享管理更新下线', async () => {
+  const { page, context } = await openClient()
+  await connect(page)
+
+  // 1. 在设置中配置 s.ee API Key
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('s.ee API Key', { exact: true }).fill('see-collection-key')
+  await page.getByRole('button', { name: '保存 s.ee API Key', exact: true }).click()
+  await expect(page.getByText('s.ee API Key 已保存', { exact: true })).toBeVisible()
+
+  // Mock s.ee 接口
+  let createdPayload: any = null
+  let updatedPayload: any = null
+  let deletedPayload: any = null
+  let createCount = 0
+
+  await context.route('https://s.ee/api/v1/text/domains', route => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: { domains: ['s.ee', 'fs.to'] } }),
+    })
+  })
+
+  await context.route('https://s.ee/api/v1/text', async route => {
+    const method = route.request().method()
+    if (method === 'POST') {
+      createCount++
+      createdPayload = JSON.parse(route.request().postData() || '{}')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 0,
+          data: { slug: `slug-${createCount}`, short_url: `https://${createdPayload.domain}/slug-${createCount}` },
+        }),
+      })
+    }
+    if (method === 'PUT') {
+      updatedPayload = JSON.parse(route.request().postData() || '{}')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 0, message: 'success' }),
+      })
+    }
+    if (method === 'DELETE') {
+      deletedPayload = JSON.parse(route.request().postData() || '{}')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 0, message: 'success' }),
+      })
+    }
+    return route.fallback()
+  })
+
+  // 进入空间页面
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+
+  // 2. 测试空收藏块的防空提交拦截
+  await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
+  const createColDialog = page.getByRole('dialog')
+  await createColDialog.getByLabel('名称', { exact: true }).fill('空白收藏块')
+  await createColDialog.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(createColDialog).not.toBeVisible()
+
+  // 点击空收藏块上的分享按钮
+  await page.getByRole('button', { name: '分享 空白收藏块', exact: true }).click()
+  const emptyShareDialog = page.getByRole('dialog', { name: '分享收藏块', exact: true })
+  await expect(emptyShareDialog).toBeVisible()
+  await expect(emptyShareDialog.getByText('当前收藏块没有可导出的有效卡片（未分享的笔记不会被导出）。')).toBeVisible()
+  await expect(emptyShareDialog.getByRole('button', { name: '确认分享', exact: true })).toBeDisabled()
+  await emptyShareDialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(emptyShareDialog).not.toBeVisible()
+
+  // 3. 在「日常收藏」中创建笔记并分享其中一篇
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  const note1Card = page.getByRole('article', { name: '笔记 新笔记', exact: true }).first()
+  await expect(note1Card).toBeVisible()
+  await note1Card.getByRole('button', { name: '分享笔记', exact: true }).click()
+  const noteShareDialog = page.getByRole('dialog', { name: '分享笔记', exact: true })
+  await noteShareDialog.getByLabel('分享标题').fill('已公开的参考笔记')
+  await noteShareDialog.getByRole('button', { name: '确认分享', exact: true }).click()
+  await expect(noteShareDialog).not.toBeVisible()
+
+  // 再新建一篇不分享的笔记
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+
+  // 4. 对「日常收藏」发起收藏块分享
+  await page.getByRole('button', { name: '分享 日常收藏', exact: true }).click()
+  const colShareDialog = page.getByRole('dialog', { name: '分享收藏块', exact: true })
+  await expect(colShareDialog).toBeVisible()
+
+  // 检查首项为「是否分享笔记」开关，且默认关闭
+  const noteSwitch = colShareDialog.getByRole('switch', { name: '是否分享笔记', exact: true })
+  await expect(noteSwitch).toBeVisible()
+  await expect(noteSwitch).not.toBeChecked()
+
+  // 检查动态篇数提示
+  await expect(colShareDialog.getByText(/已检测到 1 篇已分享笔记/)).toBeVisible()
+  await expect(colShareDialog.getByText(/1 篇未分享笔记将自动忽略/)).toBeVisible()
+
+  // 开启「是否分享笔记」
+  await noteSwitch.click()
+  await expect(noteSwitch).toBeChecked()
+
+  // 修改分享标题
+  await colShareDialog.getByLabel('分享标题').fill('日常精选资源合集')
+
+  // 确认分享提交
+  await colShareDialog.getByRole('button', { name: '确认分享', exact: true }).click()
+  await expect(colShareDialog).not.toBeVisible()
+
+  // 验证 POST 发往 s.ee 的正文：包含链接与已分享笔记，不包含未分享笔记
+  expect(createdPayload).toMatchObject({
+    title: '日常精选资源合集',
+    text_type: 'markdown',
+  })
+  expect(createdPayload.content).toContain('# 日常收藏')
+  expect(createdPayload.content).toContain('https://s.ee/slug-1') // 已分享笔记短链
+  expect(createdPayload.content).not.toContain('未公开')
+
+  // 5. 校验收藏块工具栏变更为「已分享」状态，再次点击打开防重弹窗
+  const sharedColBtn = page.getByRole('button', { name: '查看已分享短链 日常收藏', exact: true })
+  await expect(sharedColBtn).toBeVisible()
+  await sharedColBtn.click()
+
+  const alreadyColDialog = page.getByRole('dialog', { name: '收藏块已分享', exact: true })
+  await expect(alreadyColDialog).toBeVisible()
+  await expect(alreadyColDialog.getByRole('textbox')).toHaveValue('https://s.ee/slug-2')
+
+  // 点击「同步最新内容」按钮
+  await alreadyColDialog.getByRole('button', { name: '同步最新内容', exact: true }).click()
+  await expect(page.getByText('分享内容已同步更新')).toBeVisible()
+  expect(updatedPayload).toMatchObject({
+    title: '日常精选资源合集',
+  })
+  expect(updatedPayload.content).toContain('# 日常收藏')
+
+  // 点击「前往分享管理」
+  await alreadyColDialog.getByRole('button', { name: '前往分享管理', exact: true }).click()
+  await expect(alreadyColDialog).not.toBeVisible()
+
+  // 6. 验证在分享管理中的呈现与修改/删除
+  await expect(page.getByRole('heading', { name: '分享管理', exact: true })).toBeVisible()
+  // 检查收藏块分类选项卡
+  const colTab = page.getByRole('button', { name: /收藏块\s*1/ })
+  await expect(colTab).toBeVisible()
+  await colTab.click()
+
+  await expect(page.getByText('日常精选资源合集')).toBeVisible()
+  await expect(page.getByText('含公开笔记')).toBeVisible()
+
+  // 修改分享
+  await page.getByRole('button', { name: '修改分享 日常精选资源合集', exact: true }).click()
+  const editDialog = page.getByRole('dialog', { name: '修改分享内容', exact: true })
+  await expect(editDialog).toBeVisible()
+  await editDialog.getByLabel('分享标题').fill('更新后的日常精选合集')
+  await editDialog.getByRole('button', { name: '确认更新', exact: true }).click()
+  await expect(editDialog).not.toBeVisible()
+  expect(updatedPayload.title).toBe('更新后的日常精选合集')
+
+  // 删除分享（彻底下线）
+  await page.getByRole('button', { name: '删除分享 更新后的日常精选合集', exact: true }).click()
+  const deleteDialog = page.getByRole('dialog', { name: '删除分享', exact: true })
+  await expect(deleteDialog).toBeVisible()
+  await deleteDialog.getByRole('button', { name: '永久下线并删除', exact: true }).click()
+  await expect(deleteDialog).not.toBeVisible()
+  expect(deletedPayload.slug).toBe('slug-2')
+
+  // 7. 回到空间，验证收藏块工具栏恢复为未分享状态
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(page.getByRole('button', { name: '分享 日常收藏', exact: true })).toBeVisible()
 })

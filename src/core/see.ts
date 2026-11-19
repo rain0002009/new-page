@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { children, type Document, type ShareRecord } from './model'
+import { markdownDescription } from './markdown'
 import { readLocalSnapshot } from './local-workspace'
 import { imageCredential } from './hosted-images'
 import { rpc } from './protocol'
@@ -318,5 +320,77 @@ export async function deleteTextShare(key: string, params: DeleteTextShareParams
     const detail = message.success && !/^success$/i.test(message.data.message.trim()) ? message.data.message.replaceAll(key, '[已隐藏]').slice(0, 300) : ''
     const reason = !response.ok ? `HTTP ${response.status}` : failedCode && status.success ? `业务码 ${status.data.code}` : '服务返回删除失败'
     throw new Error(`s.ee 删除分享失败${detail ? `：${detail}` : `（${reason}）`}`)
+  }
+}
+
+export type CollectionMarkdownResult = {
+  title: string
+  content: string
+  itemCount: number
+  noteCount: { shared: number; unshared: number }
+}
+
+export function collectionToMarkdown(
+  doc: Document,
+  collectionId: string,
+  options?: { includeNotes?: boolean },
+): CollectionMarkdownResult {
+  const collection = doc.entities[collectionId]
+  const title = collection?.kind === 'collection' ? collection.title.trim() : ''
+  const items = children(doc, collectionId).filter(
+    (item): item is Extract<typeof item, { kind: 'link' | 'note' }> =>
+      item.kind === 'link' || item.kind === 'note',
+  )
+
+  const activeShares = Object.values(doc.entities).filter(
+    (e): e is ShareRecord => e.kind === 'share' && !e.purged,
+  )
+  const shareByNoteId = new Map<string, ShareRecord>()
+  for (const s of activeShares) {
+    if (s.entityKind === 'note') {
+      shareByNoteId.set(s.entityId, s)
+    }
+  }
+
+  let sharedNotes = 0
+  let unsharedNotes = 0
+  const lines: string[] = [`# ${title || '未命名收藏块'}`, '']
+  let itemCount = 0
+
+  for (const item of items) {
+    if (item.kind === 'link') {
+      itemCount++
+      const linkTitle = item.title.trim() || item.url
+      lines.push(`- [${linkTitle}](${item.url})`)
+      if (item.note?.trim()) {
+        lines.push(`  > ${item.note.trim()}`)
+      }
+    } else if (item.kind === 'note') {
+      const share = shareByNoteId.get(item.id)
+      if (share) {
+        sharedNotes++
+        if (options?.includeNotes) {
+          itemCount++
+          const noteTitle = item.title.trim() || '未命名笔记'
+          lines.push(`- 📝 [${noteTitle}](${share.shortUrl})`)
+          const desc = markdownDescription(item.body).trim()
+          if (desc) {
+            lines.push(`  > ${desc}`)
+          }
+        }
+      } else {
+        unsharedNotes++
+      }
+    }
+  }
+
+  return {
+    title,
+    content: lines.join('\n').trim() + '\n',
+    itemCount,
+    noteCount: {
+      shared: sharedNotes,
+      unshared: unsharedNotes,
+    },
   }
 }
