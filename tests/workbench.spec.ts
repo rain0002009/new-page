@@ -252,6 +252,111 @@ test('Toast 统一呈现提示，暂停自动关闭，并在弹窗内保持可�
   await expect(card.getByRole('link')).toHaveAttribute('href', 'https://react.dev/')
 })
 
+test('Tooltip 纯图标按钮悬停显示说明，排除删除与关闭，点击或 Esc 立即关闭', async () => {
+  const { page } = await openClient()
+  await connect(page)
+
+  const collection = page.getByRole('region', { name: /^收藏块 日常收藏/ })
+  await expect(collection).toBeVisible()
+
+  // 1. 收藏块工具栏上的图标按钮
+  const newNoteBtn = collection.getByRole('button', { name: '新建笔记 日常收藏' })
+  await newNoteBtn.hover()
+  const tooltip = page.getByRole('tooltip')
+  await expect(tooltip).toHaveText('新建笔记')
+  await expect(newNoteBtn).not.toHaveAttribute('title')
+
+  // 按 Esc 键，Tooltip 立即关闭
+  await page.keyboard.press('Escape')
+  await expect(tooltip).toHaveCount(0)
+
+  // 悬停在 "重命名" 图标按钮上
+  const renameBtn = collection.getByRole('button', { name: '重命名 日常收藏' })
+  await renameBtn.hover()
+  await expect(tooltip).toHaveText('重命名收藏块')
+
+  // 悬停在 "折叠" 图标按钮上
+  const collapseBtn = collection.getByRole('button', { name: '折叠 日常收藏' })
+  await collapseBtn.hover()
+  await expect(tooltip).toHaveText('折叠收藏块')
+
+  // 点击折叠按钮后，Tooltip 立即关闭
+  await collapseBtn.click()
+  await expect(tooltip).toHaveCount(0)
+
+  // 悬停在 "删除收藏块" 图标按钮上：排除项，不展示 Tooltip
+  const deleteCollectionBtn = collection.getByRole('button', { name: '删除 日常收藏' })
+  await deleteCollectionBtn.hover()
+  await expect(tooltip).toHaveCount(0)
+
+  // 2. 侧边栏空间管理图标按钮
+  const newSpaceBtn = page.getByRole('button', { name: '新建空间' })
+  await newSpaceBtn.hover()
+  await expect(tooltip).toHaveText('新建空间')
+
+  const renameSpaceBtn = page.getByRole('button', { name: '重命名空间 我的空间' })
+  await renameSpaceBtn.hover()
+  await expect(tooltip).toHaveText('重命名空间')
+  await page.keyboard.press('Escape')
+  await expect(tooltip).toHaveCount(0)
+
+  // 测试键盘 Tab 聚焦与 Esc 关闭
+  await newSpaceBtn.focus()
+  await expect(tooltip).toHaveText('新建空间')
+  await page.keyboard.press('Escape')
+  await expect(tooltip).toHaveCount(0)
+
+  // 点击新建空间打开弹窗，测试通用弹窗关闭按钮（排除项，不展示 Tooltip）
+  await newSpaceBtn.click()
+  const modalCloseBtn = page.getByRole('button', { name: '关闭弹窗' })
+  await modalCloseBtn.hover()
+  await expect(tooltip).toHaveCount(0)
+  await modalCloseBtn.click()
+
+  // 3. 待选区域头部按钮（包含禁用状态下的提示与原生 title 移除）
+  const collectBtn = page.getByRole('button', { name: '一键收藏' })
+  await expect(collectBtn).toBeDisabled()
+  await collectBtn.hover()
+  await expect(tooltip).toHaveText('一键收藏全部网页')
+  await expect(collectBtn).not.toHaveAttribute('title')
+
+  const groupBtn = page.getByRole('button', { name: '一键分组' })
+  await expect(groupBtn).toBeDisabled()
+  await groupBtn.hover()
+  await expect(tooltip).toHaveText('一键分组全部网页')
+  await expect(groupBtn).not.toHaveAttribute('title')
+
+  // 4. 卡片悬浮操作按钮
+  const expandBtn = collection.getByRole('button', { name: '展开 日常收藏' })
+  await expandBtn.hover()
+  await expect(tooltip).toHaveText('展开收藏块')
+  await expandBtn.click() // 重新展开日常收藏
+  await expect(tooltip).toHaveCount(0)
+  await addLink(page, 'Tooltip 测试链接')
+  const card = page.getByRole('article', { name: '链接 Tooltip 测试链接' })
+  await card.hover()
+
+  const editLinkBtn = card.getByRole('button', { name: '编辑链接' })
+  await editLinkBtn.hover()
+  await expect(tooltip).toHaveText('编辑链接')
+
+  const todoBtn = card.getByRole('button', { name: '加入待办' })
+  await todoBtn.hover()
+  await expect(tooltip).toHaveText('加入待办')
+
+  // 点击加入待办，测试动态切换为移出待办
+  await todoBtn.click()
+  await page.mouse.move(0, 0)
+  const untodoBtn = card.getByRole('button', { name: '移出待办' })
+  await untodoBtn.hover()
+  await expect(tooltip).toHaveText('移出待办')
+
+  // 删除链接图标（排除项，不展示 Tooltip）
+  const deleteLinkBtn = card.getByRole('button', { name: '删除链接' })
+  await deleteLinkBtn.hover()
+  await expect(tooltip).toHaveCount(0)
+})
+
 test('s.ee 图片粘贴使用最新全局密钥，失败可重试，直链随 Markdown 导出并重开', async () => {
   const { page, context } = await openClient(undefined, true)
   await connectQuark(page)
@@ -947,8 +1052,14 @@ async function openFileDirectoryFixture() {
 
 test('本地目录直接读取真实文件列表，仅展开时读取子目录并切换 Markdown', async () => {
   const { doc, directory, fileUrl } = await openFileDirectoryFixture()
-  const folder = doc.getByRole('button', { name: '本地目录', exact: true })
+  const folder = doc.getByRole('button', { name: '文件目录', exact: true })
   const outline = doc.getByRole('button', { name: '文档大纲', exact: true })
+  await folder.hover()
+  await expect(doc.getByRole('tooltip')).toHaveText('文件目录')
+  await expect(folder).not.toHaveAttribute('title')
+  await outline.hover()
+  await expect(doc.getByRole('tooltip')).toHaveText('文档大纲')
+  await expect(outline).not.toHaveAttribute('title')
   await expect(outline).toHaveAttribute('aria-pressed', 'true')
   expect(await doc.evaluate(() => localStorage.getItem('directoryReads'))).toBeNull()
   await folder.focus(); await folder.press('Enter')

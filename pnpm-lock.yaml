@@ -194,8 +194,8 @@ importers:
         specifier: ^1.11.23
         version: 1.11.23
       fluid-prism:
-        specifier: 0.0.1
-        version: 0.0.1
+        specifier: 0.1.4
+        version: 0.1.4
       lucide-react:
         specifier: ^1.70.0
         version: 1.70.0(@types/react@18.3.31)(react@18.3.1)
@@ -2310,8 +2310,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  fluid-prism@0.0.1:
-    resolution: {integrity: sha512-x5X0RWuTxOQOjM9feHyQ3N5TjW/YpnDwunb5lR+wKVetaOL5VQhtdFumPtmAmXUkIEtOQ+MLc3mBzSw8I+ZWLQ==}
+  fluid-prism@0.1.4:
+    resolution: {integrity: sha512-JP246Gh6iWx1hiWgJy8XeRkZ1u3Iqa584/MWWsUNVsGFkd/S9acQeQKzBdhiWJ9Z/kZFzVOPSGWqQWNxulQ7lA==}
 
   follow-redirects@1.16.2:
     resolution: {integrity: sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==}
@@ -6318,7 +6318,7 @@ snapshots:
     dependencies:
       which: 6.0.1
 
-  fluid-prism@0.0.1: {}
+  fluid-prism@0.1.4: {}
 
   follow-redirects@1.16.2(debug@4.4.3(supports-color@8.1.1)):
     optionalDependencies:

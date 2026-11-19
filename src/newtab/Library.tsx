@@ -5,7 +5,7 @@ import { tv } from 'tailwind-variants/lite'
 import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { documentUrl, markdownDescription } from '../core/markdown'
 import { readLocalSnapshot } from '../core/local-workspace'
-import { Button, SiteIcon } from './ui'
+import { Button, SiteIcon, Tooltip } from './ui'
 import type { Act, EditorState } from './Editor'
 import { CollectionPlaceholder, useCollectionPlaceholder, useDragItem } from './drag'
 import { linkCard } from './link-card-styles'
@@ -60,13 +60,21 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
   return <article {...drag} data-selected={!locate && selection.isSelected('saved', link.id) || undefined} aria-label={`链接 ${link.title}`}>
     <div className={styles.top()}><span className={styles.icon()}>{locate ? <SiteIcon size="card" url={link.icon} title={link.title} /> : <SelectionIcon size="card" id={link.id} source="saved" title={link.title}><SiteIcon size="card" url={link.icon} title={link.title} /></SelectionIcon>}</span><SavedPageLink href={link.url} className={styles.title()}>{link.title}</SavedPageLink></div>
     <div className={styles.actions()}>
-      <Button tone="custom" size="custom" className={cardAction()} aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
+      <Tooltip content="编辑链接">
+        <Button tone="custom" size="custom" className={cardAction()} aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
+      </Tooltip>
       <Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
-      <Button tone="custom" size="custom" className={cardAction({ tone: link.todo ? 'todo' : 'regular' })} aria-label={link.todo ? '移出 Todo' : '加入 Todo'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
+      <Tooltip content={link.todo ? '移出待办' : '加入待办'}>
+        <Button tone="custom" size="custom" className={cardAction({ tone: link.todo ? 'todo' : 'regular' })} aria-label={link.todo ? '移出待办' : '加入待办'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
+      </Tooltip>
     </div>
     <p className={styles.note()}>{link.note}</p>
     {(location || locate) && <div className={styles.bottom()}>{location && <span className={styles.location()} title={location}><Folder size={10} />{location}</span>}<div className={styles.secondary()}>
-      {locate && <Button size="custom" className="h-[21px] w-[23px] shrink-0 p-0" aria-label="定位收藏" onClick={locate}><LocateFixed size={13} /></Button>}
+      {locate && (
+        <Tooltip content="定位收藏">
+          <Button size="custom" className="h-[21px] w-[23px] shrink-0 p-0" aria-label="定位收藏" onClick={locate}><LocateFixed size={13} /></Button>
+        </Tooltip>
+      )}
     </div></div>}
   </article>
 }
@@ -88,16 +96,17 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
     <div className={styles.top()}><span className={styles.icon()}>{search ? noteIcon : <SelectionIcon size="card" id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}</span><a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a></div>
     <div className={styles.actions()}>
       {onShare && (
-        <Button
-          tone="custom"
-          size="custom"
-          className={cardAction({ tone: share ? 'share' : 'regular' })}
-          aria-label={share ? '查看已分享短链' : '分享笔记'}
-          title={share ? '已分享（点击查看/复制短链）' : '分享笔记'}
-          onClick={() => onShare(note, share)}
-        >
-          <Share2 size={13} className={share ? 'stroke-[2.2]' : ''} />
-        </Button>
+        <Tooltip content={share ? '查看已分享短链' : '分享笔记'}>
+          <Button
+            tone="custom"
+            size="custom"
+            className={cardAction({ tone: share ? 'share' : 'regular' })}
+            aria-label={share ? '查看已分享短链' : '分享笔记'}
+            onClick={() => onShare(note, share)}
+          >
+            <Share2 size={13} className={share ? 'stroke-[2.2]' : ''} />
+          </Button>
+        </Tooltip>
       )}
       <Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button>
     </div>
@@ -127,23 +136,31 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
   const marker = placeholder && <CollectionPlaceholder collectionId={collection.id} target={placeholder.target} height={placeholder.height} />
   return <section {...drag} aria-label={`收藏块 ${collection.title}`} id={`collection-${collection.id}`}>
     <div className={collectionStyles.header()}><div className={collectionStyles.heading()}>
-      <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collection.collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={() => void act({ type: 'edit', id: collection.id, patch: { collapsed: !collection.collapsed } })}>{collection.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
+      <Tooltip content={collection.collapsed ? '展开收藏块' : '折叠收藏块'}>
+        <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collection.collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={() => void act({ type: 'edit', id: collection.id, patch: { collapsed: !collection.collapsed } })}>{collection.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
+      </Tooltip>
       <h2 className={collectionStyles.title()}>{collection.title}<span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span></h2>
     </div><div className={collectionStyles.tools()}>
-      <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
+      <Tooltip content="新建笔记">
+        <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
+      </Tooltip>
       {onShareCollection && (
-        <Button
-          tone="custom"
-          size="custom"
-          className={collectionTool}
-          aria-label={collectionShare ? `查看已分享短链 ${collection.title}` : `分享 ${collection.title}`}
-          aria-pressed={!!collectionShare}
-          onClick={() => onShareCollection(collection, collectionShare)}
-        >
-          <Share2 size={13} className={collectionShare ? 'text-[#627d49]' : ''} />
-        </Button>
+        <Tooltip content={collectionShare ? '查看已分享短链' : '分享收藏块'}>
+          <Button
+            tone="custom"
+            size="custom"
+            className={collectionTool}
+            aria-label={collectionShare ? `查看已分享短链 ${collection.title}` : `分享 ${collection.title}`}
+            aria-pressed={!!collectionShare}
+            onClick={() => onShareCollection(collection, collectionShare)}
+          >
+            <Share2 size={13} className={collectionShare ? 'text-[#627d49]' : ''} />
+          </Button>
+        </Tooltip>
       )}
-      <Button tone="custom" size="custom" className={collectionTool} aria-label={`重命名 ${collection.title}`} onClick={() => edit({ kind: 'rename', entity: collection })}><Edit3 size={13} /></Button>
+      <Tooltip content="重命名收藏块">
+        <Button tone="custom" size="custom" className={collectionTool} aria-label={`重命名 ${collection.title}`} onClick={() => edit({ kind: 'rename', entity: collection })}><Edit3 size={13} /></Button>
+      </Tooltip>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>
     <MotionRegion>{(!collection.collapsed || placeholder) && (savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>

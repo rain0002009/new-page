@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, FileText, Folder, ListTree } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { Button } from '../newtab/ui'
+import { Button, Tooltip } from '../newtab/ui'
 import DocumentOutline from './DocumentOutline'
 import { readLocalDirectory, fileAccessMessage, type LocalDirectoryEntry } from './local-directory'
 import { Toast } from '../shared/Toast'
@@ -17,8 +17,12 @@ export default function LocalDocumentSidebar({ body, directory, active, browsing
 }) {
   return <>
     <div role="group" aria-label="文档导航切换" className="flex items-center gap-[4px] mb-[12px]">
-      <Button tone="custom" size="icon" className={navigationButton({ selected: browsing })} aria-label="本地目录" title="本地目录" aria-pressed={browsing} disabled={busy} onClick={browse}><Folder size={17} /></Button>
-      <Button tone="custom" size="icon" className={navigationButton({ selected: !browsing })} aria-label="文档大纲" title="文档大纲" aria-pressed={!browsing} onClick={outline}><ListTree size={17} /></Button>
+      <Tooltip content="文件目录">
+        <Button tone="custom" size="icon" className={navigationButton({ selected: browsing })} aria-label="文件目录" aria-pressed={browsing} disabled={busy} onClick={browse}><Folder size={17} /></Button>
+      </Tooltip>
+      <Tooltip content="文档大纲">
+        <Button tone="custom" size="icon" className={navigationButton({ selected: !browsing })} aria-label="文档大纲" aria-pressed={!browsing} onClick={outline}><ListTree size={17} /></Button>
+      </Tooltip>
     </div>
     {busy && <p role="status" className="text-[11px] text-ui-muted">正在读取目录…</p>}
     {error && <DirectoryError error={error} />}

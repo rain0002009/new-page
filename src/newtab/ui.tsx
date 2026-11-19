@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { createContext, forwardRef, useCallback, useContext, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { tv, type VariantProps } from 'tailwind-variants/lite'
 import { X, Globe2 } from 'lucide-react'
 import { motionEase, reducedMotion } from './motion'
@@ -16,9 +16,11 @@ const button = tv({
   },
   defaultVariants: { tone: 'ghost', size: 'regular' },
 })
-export function Button({ tone, size, className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof button>) {
-  return <button type="button" className={button({ tone, size, className })} {...props} onMouseDown={event => { event.stopPropagation(); props.onMouseDown?.(event) }} onTouchStart={event => { event.stopPropagation(); props.onTouchStart?.(event) }} />
-}
+export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof button>>(
+  function Button({ tone, size, className, ...props }, ref) {
+    return <button ref={ref} type="button" className={button({ tone, size, className })} {...props} onMouseDown={event => { event.stopPropagation(); props.onMouseDown?.(event) }} onTouchStart={event => { event.stopPropagation(); props.onTouchStart?.(event) }} />
+  }
+)
 const modal = tv({
   slots: {
     dialog: 'm-auto rounded-[18px] border border-solid border-white bg-ui-dialog p-[25px] max-h-[86vh] text-ui-ink shadow-[0_25px_100px_#334c2b2e] backdrop-blur-[25px] [&::backdrop]:bg-[#3a4b2e30] [&::backdrop]:[backdrop-filter:blur(8px)]',
@@ -122,3 +124,4 @@ export function SiteIcon({ url = '', title, size, className }: { url?: string; t
 
 export { Popover, usePopover, type PopoverProps, type UsePopoverOptions } from './popover'
 export { Select, type SelectOption, type SelectProps } from './Select'
+export { Tooltip, type TooltipProps } from './Tooltip'

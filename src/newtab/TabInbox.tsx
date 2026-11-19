@@ -8,7 +8,7 @@ import type { OpenTab } from './open-tabs'
 import type { TabSlot, WindowTabGroup } from './tab-groups'
 import { useDragItem, useTabDragProjection } from './drag'
 import { SelectionIcon, useSelection } from './Selection'
-import { Button, SiteIcon } from './ui'
+import { Button, SiteIcon, Tooltip } from './ui'
 import { Toast } from '../shared/Toast'
 import { useLayoutMotion } from './motion'
 
@@ -131,8 +131,12 @@ export default function TabInbox({ tabs, groups = [], error, open, close, collec
     .filter(index => index >= slot.index).sort((a, b) => a - b)[0]
   const preview = projection && slot && slotIndex !== undefined ? { slot: { ...slot, index: slotIndex }, height: projection.tabs.length * projection.height + (projection.tabs.length - 1) * 8, ids: projection.tabs.map(tab => tab.tabId) } : null
   return <InboxProjectionContext.Provider value={preview}><aside className={inbox({ open }).base()} aria-label="待选网页"><header className={styles.header()}><h2 className={styles.title()}>待选网页 <span className={styles.count()}>{tabs.length}</span></h2><div className="flex items-center gap-[2px]">
-    <Button size="icon" aria-label="一键收藏" title="一键收藏全部待选网页" disabled={!tabs.length || !!error || collecting || grouping || selection.busy} aria-busy={collecting} onClick={collect}>{collecting ? <LoaderCircle size={17} className="animate-spin" /> : <BookmarkPlus size={17} />}</Button>
-    <Button size="icon" aria-label="一键分组" title="将全部待选网页放入新分组" disabled={!tabs.length || !!error || collecting || grouping || selection.busy} aria-busy={grouping} onClick={groupAll}>{grouping ? <LoaderCircle size={17} className="animate-spin" /> : <Group size={17} />}</Button>
+    <Tooltip content="一键收藏全部网页">
+      <Button size="icon" aria-label="一键收藏" disabled={!tabs.length || !!error || collecting || grouping || selection.busy} aria-busy={collecting} onClick={collect}>{collecting ? <LoaderCircle size={17} className="animate-spin" /> : <BookmarkPlus size={17} />}</Button>
+    </Tooltip>
+    <Tooltip content="一键分组全部网页">
+      <Button size="icon" aria-label="一键分组" disabled={!tabs.length || !!error || collecting || grouping || selection.busy} aria-busy={grouping} onClick={groupAll}>{grouping ? <LoaderCircle size={17} className="animate-spin" /> : <Group size={17} />}</Button>
+    </Tooltip>
     <Button size="icon" className="[@media(min-width:1000.01px)]:hidden" aria-label="关闭待选网页" onClick={close}><X size={18} /></Button></div></header>
     <Toast message={error} />{!error && (entries.length ? <SortableContext items={entries.map(entry => entry.kind === 'group' ? `tab-group:${entry.group.id}` : `tab:${entry.tab.tabId}`)} strategy={verticalListSortingStrategy}><div ref={list} className={styles.list()}>{entries.map(entry => <Fragment key={entry.kind === 'group' ? `group:${entry.group.id}` : `tab:${entry.tab.tabId}`}>
       <TabDropSlot slot={{ windowId: entry.kind === 'group' ? entry.group.windowId : entry.tab.windowId, groupId: -1, index: entry.index, beforeTabId: entry.kind === 'tab' ? entry.tab.tabId : undefined }} />
@@ -165,13 +169,19 @@ function InboxGroup({ group, tabs, notify }: { group: WindowTabGroup; tabs: Open
   }
   return <div ref={list} role="group" aria-label={`标签组 ${name}`} className={groupColor({ color: group.color })} data-motion-id={`tab-group:${group.id}`}>
     <div {...drag}>
-      <Button tone="custom" size="custom" className={groupButton({ collapse: true })} aria-label={`${group.collapsed ? '展开' : '折叠'}分组 ${name}`} aria-expanded={!group.collapsed} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(() => chrome.tabGroups.update(group.id, { collapsed: !group.collapsed }))}>{group.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</Button>
+      <Tooltip content={group.collapsed ? '展开分组' : '折叠分组'}>
+        <Button tone="custom" size="custom" className={groupButton({ collapse: true })} aria-label={`${group.collapsed ? '展开' : '折叠'}分组 ${name}`} aria-expanded={!group.collapsed} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(() => chrome.tabGroups.update(group.id, { collapsed: !group.collapsed }))}>{group.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</Button>
+      </Tooltip>
       <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-current" aria-hidden="true" /><strong className="min-w-0 flex-1 truncate ml-[4px] font-medium" title={name}>{name}</strong><span className="text-[9px] opacity-70 mr-[2px]">{group.memberCount}</span>
-      <Button tone="custom" size="custom" className={groupButton()} aria-label={`编辑分组 ${name}`} title={`编辑分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => setEditing(value => !value)}><Edit3 size={12} /></Button>
-      <Button tone="custom" size="custom" className={groupButton()} aria-label={`解除分组 ${name}`} title={`解除分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(async () => {
-        const members = await chrome.tabs.query({ windowId: group.windowId, groupId: group.id })
-        if (members.length) await chrome.tabs.ungroup([members[0].id!, ...members.slice(1).map(tab => tab.id!)])
-      })}><Ungroup size={13} /></Button>
+      <Tooltip content="编辑分组">
+        <Button tone="custom" size="custom" className={groupButton()} aria-label={`编辑分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => setEditing(value => !value)}><Edit3 size={12} /></Button>
+      </Tooltip>
+      <Tooltip content="解除分组">
+        <Button tone="custom" size="custom" className={groupButton()} aria-label={`解除分组 ${name}`} disabled={busy || selection?.busy} onKeyDown={event => { if (event.code === 'Space' || event.code === 'Enter') event.stopPropagation() }} onClick={() => void change(async () => {
+          const members = await chrome.tabs.query({ windowId: group.windowId, groupId: group.id })
+          if (members.length) await chrome.tabs.ungroup([members[0].id!, ...members.slice(1).map(tab => tab.id!)])
+        })}><Ungroup size={13} /></Button>
+      </Tooltip>
     </div>
     {editing && <GroupEditor group={group} close={() => setEditing(false)} />}
     {!group.collapsed && <SortableContext items={tabs.map(tab => `tab:${tab.tabId}`)} strategy={verticalListSortingStrategy}>{tabs.map(tab => <Fragment key={tab.tabId}><TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: tab.index, beforeTabId: tab.tabId }} /><InboxTab tab={tab} notify={notify} /></Fragment>)}<TabDropSlot slot={{ windowId: group.windowId, groupId: group.id, index: group.lastIndex + 1 }} /></SortableContext>}

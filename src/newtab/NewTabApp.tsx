@@ -18,7 +18,7 @@ import { Brand, SidebarIdentity } from './SidebarIdentity'
 import ContentPanel from './ContentPanel'
 import Editor, { type EditorState } from './Editor'
 import { CollectionSection, Empty, SearchView } from './Library'
-import { Button, Modal, ModalPresence } from './ui'
+import { Button, Modal, ModalPresence, Tooltip } from './ui'
 import { Toast } from '../shared/Toast'
 import QuickCollectionGap from './QuickCollectionGap'
 import { collectionTitle, moveOpenTab, tabLink, type OpenTab } from './open-tabs'
@@ -209,7 +209,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(item => item.kind === 'link' || item.kind === 'note').map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     {notices}
     <aside className={styles.sidebar()}><SidebarIdentity nickname={nickname} reserve />
-      <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></div>
+      <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Tooltip content="新建空间"><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => setEditor({ kind: 'space' })}><Plus size={15} /></Button></Tooltip></div>
       <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} rename={() => setEditor({ kind: 'rename', entity: item })} remove={() => setEditor({ kind: 'delete', entity: item })} />)}</nav></SortableContext>
       <div className={styles.section()}><span className={styles.sectionTitle()}>工作台</span></div><nav>
         <button aria-label={`Todo ${links.filter(l => l.todo).length}`} title="Todo" className={navigation({ selected: page === 'todo' }).button()} onClick={() => setPage('todo')}><Bookmark size={18} /><span className={nav.label()}>Todo</span><span className={nav.count()}>{links.filter(l => l.todo).length}</span></button>
@@ -235,5 +235,5 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
 }
 function SpaceRow({ item, selected, select, rename, remove }: { item: Entity; selected: boolean; select: () => void; rename: () => void; remove: () => void }) {
   const drag = useDragItem(item.id, { kind: 'space', entityId: item.id, title: item.title }, styles.space())
-  return <div {...drag}><button aria-label={item.title} title={item.title} className={navigation({ selected }).button()} onClick={select}><span className={nav.symbol()}><Folder size={17} /></span><span className={nav.label({ className: 'group-hover/space:max-w-[85px]' })}>{item.title}</span>{selected && <span className={nav.dot()} />}</button><div className={styles.tools()}><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`重命名空间 ${item.title}`} onClick={rename}><Edit3 size={12} /></Button><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`删除空间 ${item.title}`} onClick={remove}><Trash2 size={12} /></Button></div></div>
+  return <div {...drag}><button aria-label={item.title} title={item.title} className={navigation({ selected }).button()} onClick={select}><span className={nav.symbol()}><Folder size={17} /></span><span className={nav.label({ className: 'group-hover/space:max-w-[85px]' })}>{item.title}</span>{selected && <span className={nav.dot()} />}</button><div className={styles.tools()}><Tooltip content="重命名空间"><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`重命名空间 ${item.title}`} onClick={rename}><Edit3 size={12} /></Button></Tooltip><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`删除空间 ${item.title}`} onClick={remove}><Trash2 size={12} /></Button></div></div>
 }
