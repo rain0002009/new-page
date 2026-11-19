@@ -5532,12 +5532,13 @@ test('收藏块公开分享全流程：是否分享笔记开关、忽略未分�
   await page.getByRole('button', { name: '分享 空白收藏块', exact: true }).click()
   const emptyShareDialog = page.getByRole('dialog', { name: '分享收藏块', exact: true })
   await expect(emptyShareDialog).toBeVisible()
-  await expect(emptyShareDialog.getByText('当前收藏块没有可导出的有效卡片（未分享的笔记不会被导出）。')).toBeVisible()
+  await expect(emptyShareDialog.getByText('当前收藏块没有可导出的有效卡片。')).toBeVisible()
   await expect(emptyShareDialog.getByRole('button', { name: '确认分享', exact: true })).toBeDisabled()
   await emptyShareDialog.getByRole('button', { name: '取消', exact: true }).click()
   await expect(emptyShareDialog).not.toBeVisible()
 
-  // 3. 在「日常收藏」中创建笔记并分享其中一篇
+  // 3. 在「日常收藏」中创建链接和笔记并分享其中一篇笔记
+  await addLink(page, 'React 文档')
   await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
   const note1Card = page.getByRole('article', { name: '笔记 新笔记', exact: true }).first()
   await expect(note1Card).toBeVisible()
@@ -5549,24 +5550,24 @@ test('收藏块公开分享全流程：是否分享笔记开关、忽略未分�
 
   // 再新建一篇不分享的笔记
   await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  await expect(page.getByRole('article', { name: '笔记 新笔记', exact: true })).toHaveCount(2)
 
   // 4. 对「日常收藏」发起收藏块分享
   await page.getByRole('button', { name: '分享 日常收藏', exact: true }).click()
   const colShareDialog = page.getByRole('dialog', { name: '分享收藏块', exact: true })
   await expect(colShareDialog).toBeVisible()
 
-  // 检查首项为「是否分享笔记」开关，且默认关闭
+  // 检查首项为「是否分享笔记」开关，且默认关闭；此时未分享笔记提示不应出现
   const noteSwitch = colShareDialog.getByRole('switch', { name: '是否分享笔记', exact: true })
   await expect(noteSwitch).toBeVisible()
   await expect(noteSwitch).not.toBeChecked()
+  await expect(colShareDialog.getByText(/未分享的笔记不会被包含/)).not.toBeVisible()
 
-  // 检查动态篇数提示
-  await expect(colShareDialog.getByText(/已检测到 1 篇已分享笔记/)).toBeVisible()
-  await expect(colShareDialog.getByText(/1 篇未分享笔记将自动忽略/)).toBeVisible()
-
-  // 开启「是否分享笔记」
+  // 开启「是否分享笔记」后，在合适时机展示未分享笔记过滤提示
   await noteSwitch.click()
   await expect(noteSwitch).toBeChecked()
+  await expect(colShareDialog.getByText(/已并入 1 篇已公开笔记/)).toBeVisible()
+  await expect(colShareDialog.getByText(/未分享的笔记不会被包含/)).toBeVisible()
 
   // 修改分享标题
   await colShareDialog.getByLabel('分享标题').fill('日常精选资源合集')
@@ -5575,13 +5576,14 @@ test('收藏块公开分享全流程：是否分享笔记开关、忽略未分�
   await colShareDialog.getByRole('button', { name: '确认分享', exact: true }).click()
   await expect(colShareDialog).not.toBeVisible()
 
-  // 验证 POST 发往 s.ee 的正文：包含链接与已分享笔记，不包含未分享笔记
+  // 验证 POST 发往 s.ee 的正文：不包含冗余标题，包含加粗链接与已分享笔记，不包含未分享笔记
   expect(createdPayload).toMatchObject({
     title: '日常精选资源合集',
     text_type: 'markdown',
   })
-  expect(createdPayload.content).toContain('# 日常收藏')
+  expect(createdPayload.content).not.toContain('#')
   expect(createdPayload.content).toContain('https://s.ee/slug-1') // 已分享笔记短链
+  expect(createdPayload.content).toContain('- **[React 文档]')
   expect(createdPayload.content).not.toContain('未公开')
 
   // 5. 校验收藏块工具栏变更为「已分享」状态，再次点击打开防重弹窗
@@ -5599,7 +5601,8 @@ test('收藏块公开分享全流程：是否分享笔记开关、忽略未分�
   expect(updatedPayload).toMatchObject({
     title: '日常精选资源合集',
   })
-  expect(updatedPayload.content).toContain('# 日常收藏')
+  expect(updatedPayload.content).not.toContain('#')
+  expect(updatedPayload.content).toContain('https://s.ee/slug-1')
 
   // 点击「前往分享管理」
   await alreadyColDialog.getByRole('button', { name: '前往分享管理', exact: true }).click()

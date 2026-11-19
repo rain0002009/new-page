@@ -355,18 +355,22 @@ export function collectionToMarkdown(
 
   let sharedNotes = 0
   let unsharedNotes = 0
-  const lines: string[] = [`# ${title || '未命名收藏块'}`, '']
+  const blocks: string[] = []
   let itemCount = 0
 
   for (const item of items) {
     if (item.kind === 'link') {
       itemCount++
       const linkTitle = item.title.trim() || item.url
-      lines.push(`- [${linkTitle}](${item.url})`)
-      if (item.note?.trim()) {
-        for (const line of item.note.trim().split(/\r?\n/)) {
-          lines.push(`  > ${line}`)
-        }
+      const noteText = item.note?.trim()
+      if (noteText) {
+        const indentedNote = noteText
+          .split(/\r?\n/)
+          .map(line => `  ${line}`)
+          .join('\n')
+        blocks.push(`- **[${linkTitle}](${item.url})**  \n${indentedNote}`)
+      } else {
+        blocks.push(`- **[${linkTitle}](${item.url})**`)
       }
     } else if (item.kind === 'note') {
       const share = shareByNoteId.get(item.id)
@@ -375,12 +379,15 @@ export function collectionToMarkdown(
         if (options?.includeNotes) {
           itemCount++
           const noteTitle = item.title.trim() || '未命名笔记'
-          lines.push(`- 📝 [${noteTitle}](${share.shortUrl})`)
           const desc = markdownDescription(item.body).trim()
           if (desc) {
-            for (const line of desc.split(/\r?\n/)) {
-              lines.push(`  > ${line}`)
-            }
+            const indentedDesc = desc
+              .split(/\r?\n/)
+              .map(line => `  ${line}`)
+              .join('\n')
+            blocks.push(`- 📝 **[${noteTitle}](${share.shortUrl})**  \n${indentedDesc}`)
+          } else {
+            blocks.push(`- 📝 **[${noteTitle}](${share.shortUrl})**`)
           }
         }
       } else {
@@ -391,7 +398,7 @@ export function collectionToMarkdown(
 
   return {
     title,
-    content: lines.join('\n').trim() + '\n',
+    content: blocks.length ? blocks.join('\n\n') + '\n' : '',
     itemCount,
     noteCount: {
       shared: sharedNotes,

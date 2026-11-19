@@ -351,7 +351,9 @@ function CreateShareModal({
 
         {isEmptyCollection && (
           <div className="p-[12px] rounded-[8px] bg-[#fff5ea] text-[#9b5837] text-[12px] border border-solid border-[#edd5c0]">
-            当前收藏块没有可导出的有效卡片（未分享的笔记不会被导出）。
+            {includeNotes && collectionMd?.noteCount.unshared
+              ? '当前收藏块没有可导出的有效卡片（未分享的笔记不会被包含）。'
+              : '当前收藏块没有可导出的有效卡片。'}
           </div>
         )}
 
@@ -361,7 +363,7 @@ function CreateShareModal({
           </div>
         )}
 
-        {isCollection && (
+        {isCollection && ((collectionMd?.noteCount.shared ?? 0) + (collectionMd?.noteCount.unshared ?? 0)) > 0 && (
           <div>
             <Switch
               label="是否分享笔记"
@@ -369,11 +371,13 @@ function CreateShareModal({
               disabled={busy}
               onChange={setIncludeNotes}
             />
-            <p className="mt-[2px] text-[11px] text-[#718260] leading-relaxed">
-              {collectionMd && collectionMd.noteCount.shared > 0
-                ? `已检测到 ${collectionMd.noteCount.shared} 篇已分享笔记（开启后将转为公开链接并入文档）；${collectionMd.noteCount.unshared > 0 ? `${collectionMd.noteCount.unshared} 篇未分享笔记将自动忽略。` : '无未分享笔记。'}`
-                : `当前收藏块无已分享笔记，未分享笔记不会被包含。`}
-            </p>
+            {includeNotes && (
+              <p className="mt-[2px] text-[11px] text-[#718260] leading-relaxed">
+                {collectionMd && collectionMd.noteCount.shared > 0
+                  ? `已并入 ${collectionMd.noteCount.shared} 篇已公开笔记${collectionMd.noteCount.unshared > 0 ? `；其余 ${collectionMd.noteCount.unshared} 篇未分享的笔记不会被包含。` : '。'}`
+                  : '当前收藏块无已公开笔记，未分享的笔记不会被包含。'}
+              </p>
+            )}
           </div>
         )}
 

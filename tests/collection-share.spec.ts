@@ -55,9 +55,9 @@ test('collectionToMarkdown 在 includeNotes 为 false 时仅导出链接卡片',
 
   expect(result.itemCount).toBe(2)
   expect(result.noteCount).toEqual({ shared: 1, unshared: 1 })
-  expect(result.content).toContain(`# ${collection.title}`)
-  expect(result.content).toContain('- [GitHub](https://github.com/)\n  > 代码仓库托管与协作平台')
-  expect(result.content).toContain('- [TypeScript](https://www.typescriptlang.org/)')
+  expect(result.content).not.toContain('#')
+  expect(result.content).toContain('- **[GitHub](https://github.com/)**  \n  代码仓库托管与协作平台')
+  expect(result.content).toContain('- **[TypeScript](https://www.typescriptlang.org/)**')
   // 不包含任何笔记
   expect(result.content).not.toContain('架构备忘录')
   expect(result.content).not.toContain('https://s.ee/arch-memo')
@@ -71,11 +71,11 @@ test('collectionToMarkdown 在 includeNotes 为 true 时包含已分享笔记并
 
   expect(result.itemCount).toBe(3) // 2 links + 1 shared note
   expect(result.noteCount).toEqual({ shared: 1, unshared: 1 })
-  expect(result.content).toContain(`# ${collection.title}`)
-  expect(result.content).toContain('- [GitHub](https://github.com/)\n  > 代码仓库托管与协作平台')
-  expect(result.content).toContain('- [TypeScript](https://www.typescriptlang.org/)')
+  expect(result.content).not.toContain('#')
+  expect(result.content).toContain('- **[GitHub](https://github.com/)**  \n  代码仓库托管与协作平台')
+  expect(result.content).toContain('- **[TypeScript](https://www.typescriptlang.org/)**')
   // 包含已分享笔记（带短链与摘要）
-  expect(result.content).toContain('- 📝 [架构备忘录](https://s.ee/arch-memo)\n  > 架构设计')
+  expect(result.content).toContain('- 📝 **[架构备忘录](https://s.ee/arch-memo)**  \n  架构设计')
   // 未分享笔记被完全忽略
   expect(result.content).not.toContain('草稿笔记')
   expect(result.content).not.toContain('未公开的私密笔记')
@@ -133,8 +133,8 @@ test('collectionToMarkdown 针对多行备注正确添加每行缩进引用，�
   })
 
   const result = collectionToMarkdown(doc, collection.id, { includeNotes: true })
-  // 多行备注每行均带有缩进引用
-  expect(result.content).toContain('- [多行备注工具](https://example.com/tool)\n  > 第一行说明\n  > 第二行要点\n  > 第三行总结')
+  // 多行备注每行均保持缩进，条目间空行隔开
+  expect(result.content).toContain('- **[多行备注工具](https://example.com/tool)**  \n  第一行说明\n  第二行要点\n  第三行总结')
 
   // 已过期的笔记短链不被导出，且不计入 shared 数量
   expect(result.content).not.toContain('expired-slug')
