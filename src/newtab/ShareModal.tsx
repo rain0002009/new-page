@@ -7,6 +7,7 @@ import { Button, Modal, Select } from './ui'
 import { formStyles } from './form-styles'
 import { Toast } from '../shared/Toast'
 import { DatePicker } from './DatePicker'
+import Switch from './Switch'
 import { collectionToMarkdown, createTextShare, fetchSeeDomains, updateTextShare, validateTextShareLength } from '../core/see'
 
 const fields = formStyles()
@@ -17,8 +18,6 @@ export type ShareTarget =
 
 export function ShareModal({
   target,
-  note,
-  collection,
   share,
   doc,
   act,
@@ -26,9 +25,7 @@ export function ShareModal({
   onNavigateToShares,
   onNavigateToSettings,
 }: {
-  target?: ShareTarget
-  note?: Note
-  collection?: Collection
+  target: ShareTarget
   share?: ShareRecord
   doc: Document
   act: Act
@@ -39,15 +36,10 @@ export function ShareModal({
   const profile = doc.entities.profile
   const seeApiKey = profile?.kind === 'profile' ? profile.seeApiKey?.trim() ?? '' : ''
 
-  const resolvedTarget: ShareTarget | undefined = target ??
-    (note ? { kind: 'note', note } : collection ? { kind: 'collection', collection } : undefined)
-
-  if (!resolvedTarget) return null
-
   if (share && !share.purged) {
     return (
       <AlreadySharedModal
-        target={resolvedTarget}
+        target={target}
         share={share}
         doc={doc}
         seeApiKey={seeApiKey}
@@ -59,7 +51,7 @@ export function ShareModal({
 
   return (
     <CreateShareModal
-      target={resolvedTarget}
+      target={target}
       doc={doc}
       seeApiKey={seeApiKey}
       act={act}
@@ -370,26 +362,17 @@ function CreateShareModal({
         )}
 
         {isCollection && (
-          <div className={fields.label()}>
-            <div className="flex items-center justify-between">
-              <label htmlFor={includeNotesId} className="cursor-pointer font-medium text-ui-ink">
-                是否分享笔记
-              </label>
-              <input
-                id={includeNotesId}
-                type="checkbox"
-                role="switch"
-                aria-label="是否分享笔记"
-                className="w-[18px] h-[18px] cursor-pointer accent-[#657b52]"
-                checked={includeNotes}
-                disabled={busy}
-                onChange={e => setIncludeNotes(e.target.checked)}
-              />
-            </div>
-            <p className="mt-[6px] text-[11px] text-[#718260] leading-relaxed">
+          <div>
+            <Switch
+              label="是否分享笔记"
+              checked={includeNotes}
+              disabled={busy}
+              onChange={setIncludeNotes}
+            />
+            <p className="mt-[2px] text-[11px] text-[#718260] leading-relaxed">
               {collectionMd && collectionMd.noteCount.shared > 0
                 ? `已检测到 ${collectionMd.noteCount.shared} 篇已分享笔记（开启后将转为公开链接并入文档）；${collectionMd.noteCount.unshared > 0 ? `${collectionMd.noteCount.unshared} 篇未分享笔记将自动忽略。` : '无未分享笔记。'}`
-                : `当前收藏块无已分享笔记，${collectionMd && collectionMd.noteCount.unshared > 0 ? `${collectionMd.noteCount.unshared} 篇未分享笔记将被自动忽略。` : '暂无笔记卡片。'}`}
+                : `当前收藏块无已分享笔记，未分享笔记不会被包含。`}
             </p>
           </div>
         )}

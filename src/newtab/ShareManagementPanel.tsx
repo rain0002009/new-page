@@ -25,12 +25,15 @@ const fields = formStyles()
 export default function ShareManagementPanel({
   doc,
   act,
+  onLocateEntity,
   onLocateNote,
 }: {
   doc: Document
   act: Act
-  onLocateNote?: (noteId: string) => void
+  onLocateEntity?: (entityId: string) => void
+  onLocateNote?: (entityId: string) => void
 }) {
+  const locateTarget = onLocateEntity ?? onLocateNote
   const [activeTab, setActiveTab] = useState<'all' | 'collection' | 'note'>('all')
   const [editingShare, setEditingShare] = useState<ShareRecord | null>(null)
   const [deletingShare, setDeletingShare] = useState<ShareRecord | null>(null)
@@ -178,7 +181,7 @@ export default function ShareManagementPanel({
                         <button
                           type="button"
                           className="text-[#556b43] underline bg-transparent border-0 p-0 cursor-pointer ml-[2px]"
-                          onClick={() => onLocateNote?.(sourceEntity.id)}
+                          onClick={() => locateTarget?.(sourceEntity.id)}
                         >
                           {sourceEntity.title}
                         </button>
@@ -306,7 +309,7 @@ function EditShareModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!entityAlive) {
-      setError(`原${isCollection ? '收藏块' : '笔记'}已被彻底删除，无法抓取最新内容更新外链`)
+      setError(`原${isCollection ? '收藏块' : '笔记'}已被彻底删除，无法抓取最新内容更新公开短链`)
       return
     }
     if (isEmptyCollection) {

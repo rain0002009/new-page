@@ -192,8 +192,14 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       if (notices.size) setMessage([...notices].join('；'))
     } finally { collectingRef.current = false; setCollecting(false); refreshTabs() }
   }
-  function locate(item: SavedItem) {
+  function locate(item: SavedItem | Collection) {
     setSearchOpen(false)
+    if (item.kind === 'collection') {
+      if (!item.parentId) return
+      setSelected(item.parentId); setPage('space')
+      setTimeout(() => document.getElementById(`collection-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+      return
+    }
     const collection = doc.entities[item.parentId!]
     if (!collection) return
     setSelected(collection.parentId!); setPage('space')
@@ -217,7 +223,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     </>}>
       {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => setEditor({ kind: 'collection', parentId: space.id })}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
-      {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateNote={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link')) locate(n) }} />}
+      {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateEntity={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link' || n.kind === 'collection')) locate(n) }} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
     </ContentPanel>
     <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} groups={groups} groupAll={() => void groupTabs()} grouping={grouping} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />

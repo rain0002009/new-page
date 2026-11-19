@@ -342,8 +342,9 @@ export function collectionToMarkdown(
       item.kind === 'link' || item.kind === 'note',
   )
 
+  const nowSec = Math.floor(Date.now() / 1000)
   const activeShares = Object.values(doc.entities).filter(
-    (e): e is ShareRecord => e.kind === 'share' && !e.purged,
+    (e): e is ShareRecord => e.kind === 'share' && !e.purged && (!e.expireAt || e.expireAt > nowSec),
   )
   const shareByNoteId = new Map<string, ShareRecord>()
   for (const s of activeShares) {
@@ -363,7 +364,9 @@ export function collectionToMarkdown(
       const linkTitle = item.title.trim() || item.url
       lines.push(`- [${linkTitle}](${item.url})`)
       if (item.note?.trim()) {
-        lines.push(`  > ${item.note.trim()}`)
+        for (const line of item.note.trim().split(/\r?\n/)) {
+          lines.push(`  > ${line}`)
+        }
       }
     } else if (item.kind === 'note') {
       const share = shareByNoteId.get(item.id)
@@ -375,7 +378,9 @@ export function collectionToMarkdown(
           lines.push(`- 📝 [${noteTitle}](${share.shortUrl})`)
           const desc = markdownDescription(item.body).trim()
           if (desc) {
-            lines.push(`  > ${desc}`)
+            for (const line of desc.split(/\r?\n/)) {
+              lines.push(`  > ${line}`)
+            }
           }
         }
       } else {
