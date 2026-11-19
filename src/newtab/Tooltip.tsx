@@ -28,7 +28,7 @@ import { tv } from 'tailwind-variants/lite'
 import { reducedMotion } from './motion'
 
 const tooltipStyle = tv({
-  base: 'z-50 pointer-events-none select-none rounded-[6px] bg-[#2a3526] px-[8px] py-[4px] text-[11px] leading-tight text-white shadow-[0_4px_14px_#1e2b1b33] whitespace-nowrap',
+  base: 'z-50 pointer-events-none select-none rounded-[6px] bg-[#2a3526] px-[8px] py-[4px] text-[11px] leading-tight text-white shadow-[0_4px_14px_#1e2b1b33] whitespace-nowrap w-max',
 })
 
 export interface TooltipProps {
@@ -62,10 +62,12 @@ export function Tooltip({
     [offsetPx]
   )
 
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context, isPositioned } = useFloating({
     open: isEnabled ? open : false,
     onOpenChange: setOpen,
     placement,
+    strategy: 'fixed',
+    transform: false,
     whileElementsMounted: autoUpdate,
     middleware,
   })
@@ -92,6 +94,14 @@ export function Tooltip({
 
   const { isMounted, styles: transitionStyles } = useTransitionStyles(context, {
     duration: reducedMotion() ? 0 : 150,
+    common: ({ side }) => ({
+      transformOrigin: {
+        top: 'bottom center',
+        bottom: 'top center',
+        left: 'right center',
+        right: 'left center',
+      }[side],
+    }),
     initial: {
       opacity: 0,
       transform: 'scale(0.96)',
@@ -148,6 +158,7 @@ export function Tooltip({
             style={{
               ...floatingStyles,
               ...transitionStyles,
+              visibility: isPositioned ? undefined : 'hidden',
               ...style,
             }}
             className={tooltipStyle({ className })}

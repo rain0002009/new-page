@@ -256,6 +256,28 @@ test('Tooltip 纯图标按钮悬停显示说明，排除删除与关闭，点击
   const { page } = await openClient()
   await connect(page)
 
+  const expectTooltipNear = async (tooltip: Locator, target: Locator, expectedText: string) => {
+    await expect(tooltip).toHaveText(expectedText)
+    await expect(tooltip).toBeVisible()
+    const tooltipBox = await tooltip.boundingBox()
+    const targetBox = await target.boundingBox()
+    expect(tooltipBox).not.toBeNull()
+    expect(targetBox).not.toBeNull()
+    if (tooltipBox && targetBox) {
+      // 校验浮层没有卡死在页面左上角 (0, 0)
+      expect(tooltipBox.x).toBeGreaterThan(10)
+      expect(tooltipBox.y).toBeGreaterThan(10)
+      // 校验水平方向与目标按钮邻近对齐
+      const tooltipCenterX = tooltipBox.x + tooltipBox.width / 2
+      const targetCenterX = targetBox.x + targetBox.width / 2
+      expect(Math.abs(tooltipCenterX - targetCenterX)).toBeLessThan(Math.max(tooltipBox.width, targetBox.width) + 30)
+      // 校验垂直方向位于按钮上方或下方邻近（40px 以内）
+      const isAbove = Math.abs(tooltipBox.y + tooltipBox.height - targetBox.y) < 40
+      const isBelow = Math.abs(targetBox.y + targetBox.height - tooltipBox.y) < 40
+      expect(isAbove || isBelow).toBe(true)
+    }
+  }
+
   const collection = page.getByRole('region', { name: /^收藏块 日常收藏/ })
   await expect(collection).toBeVisible()
 
@@ -263,7 +285,7 @@ test('Tooltip 纯图标按钮悬停显示说明，排除删除与关闭，点击
   const newNoteBtn = collection.getByRole('button', { name: '新建笔记 日常收藏' })
   await newNoteBtn.hover()
   const tooltip = page.getByRole('tooltip')
-  await expect(tooltip).toHaveText('新建笔记')
+  await expectTooltipNear(tooltip, newNoteBtn, '新建笔记')
   await expect(newNoteBtn).not.toHaveAttribute('title')
 
   // 按 Esc 键，Tooltip 立即关闭
@@ -273,12 +295,12 @@ test('Tooltip 纯图标按钮悬停显示说明，排除删除与关闭，点击
   // 悬停在 "重命名" 图标按钮上
   const renameBtn = collection.getByRole('button', { name: '重命名 日常收藏' })
   await renameBtn.hover()
-  await expect(tooltip).toHaveText('重命名收藏块')
+  await expectTooltipNear(tooltip, renameBtn, '重命名收藏块')
 
   // 悬停在 "折叠" 图标按钮上
   const collapseBtn = collection.getByRole('button', { name: '折叠 日常收藏' })
   await collapseBtn.hover()
-  await expect(tooltip).toHaveText('折叠收藏块')
+  await expectTooltipNear(tooltip, collapseBtn, '折叠收藏块')
 
   // 点击折叠按钮后，Tooltip 立即关闭
   await collapseBtn.click()
@@ -292,17 +314,17 @@ test('Tooltip 纯图标按钮悬停显示说明，排除删除与关闭，点击
   // 2. 侧边栏空间管理图标按钮
   const newSpaceBtn = page.getByRole('button', { name: '新建空间' })
   await newSpaceBtn.hover()
-  await expect(tooltip).toHaveText('新建空间')
+  await expectTooltipNear(tooltip, newSpaceBtn, '新建空间')
 
   const renameSpaceBtn = page.getByRole('button', { name: '重命名空间 我的空间' })
   await renameSpaceBtn.hover()
-  await expect(tooltip).toHaveText('重命名空间')
+  await expectTooltipNear(tooltip, renameSpaceBtn, '重命名空间')
   await page.keyboard.press('Escape')
   await expect(tooltip).toHaveCount(0)
 
   // 测试键盘 Tab 聚焦与 Esc 关闭
   await newSpaceBtn.focus()
-  await expect(tooltip).toHaveText('新建空间')
+  await expectTooltipNear(tooltip, newSpaceBtn, '新建空间')
   await page.keyboard.press('Escape')
   await expect(tooltip).toHaveCount(0)
 
@@ -317,19 +339,19 @@ test('Tooltip 纯图标按钮悬停显示说明，排除删除与关闭，点击
   const collectBtn = page.getByRole('button', { name: '一键收藏' })
   await expect(collectBtn).toBeDisabled()
   await collectBtn.hover()
-  await expect(tooltip).toHaveText('一键收藏全部网页')
+  await expectTooltipNear(tooltip, collectBtn, '一键收藏全部网页')
   await expect(collectBtn).not.toHaveAttribute('title')
 
   const groupBtn = page.getByRole('button', { name: '一键分组' })
   await expect(groupBtn).toBeDisabled()
   await groupBtn.hover()
-  await expect(tooltip).toHaveText('一键分组全部网页')
+  await expectTooltipNear(tooltip, groupBtn, '一键分组全部网页')
   await expect(groupBtn).not.toHaveAttribute('title')
 
   // 4. 卡片悬浮操作按钮
   const expandBtn = collection.getByRole('button', { name: '展开 日常收藏' })
   await expandBtn.hover()
-  await expect(tooltip).toHaveText('展开收藏块')
+  await expectTooltipNear(tooltip, expandBtn, '展开收藏块')
   await expandBtn.click() // 重新展开日常收藏
   await expect(tooltip).toHaveCount(0)
   await addLink(page, 'Tooltip 测试链接')
@@ -338,18 +360,18 @@ test('Tooltip 纯图标按钮悬停显示说明，排除删除与关闭，点击
 
   const editLinkBtn = card.getByRole('button', { name: '编辑链接' })
   await editLinkBtn.hover()
-  await expect(tooltip).toHaveText('编辑链接')
+  await expectTooltipNear(tooltip, editLinkBtn, '编辑链接')
 
   const todoBtn = card.getByRole('button', { name: '加入待办' })
   await todoBtn.hover()
-  await expect(tooltip).toHaveText('加入待办')
+  await expectTooltipNear(tooltip, todoBtn, '加入待办')
 
   // 点击加入待办，测试动态切换为移出待办
   await todoBtn.click()
   await page.mouse.move(0, 0)
   const untodoBtn = card.getByRole('button', { name: '移出待办' })
   await untodoBtn.hover()
-  await expect(tooltip).toHaveText('移出待办')
+  await expectTooltipNear(tooltip, untodoBtn, '移出待办')
 
   // 删除链接图标（排除项，不展示 Tooltip）
   const deleteLinkBtn = card.getByRole('button', { name: '删除链接' })
