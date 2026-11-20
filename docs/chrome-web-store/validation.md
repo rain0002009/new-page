@@ -1,6 +1,22 @@
 # 发布材料验证与剩余事项
 
-记录日期：2026-11-14；首版 1.0.0 已发布，1.2.0 版本准备更新于 2026-11-17（Asia/Shanghai）。目标：Chrome Manifest V3，页墟 · Page Garden 1.2.0。
+记录日期：2026-11-14；首版 1.0.0 已发布，1.3.0 版本准备更新于 2026-11-20（Asia/Shanghai）。目标：Chrome Manifest V3，页墟 · Page Garden 1.3.0。
+
+## 1.3.0 版本准备与发布验证（2026-11-20）
+
+- 首版 1.0.0 已在 [Chrome 应用商店](https://chromewebstore.google.com/detail/fonjkepbgbaijaghboomgbkpohhopomm) 正式发布。
+- `package.json` 与 `src/manifest.json` 保持严格一致，版本均为 1.3.0。
+- `CHANGELOG.md` 包含 1.3.0 版本的完整变更说明（统一纯图标 Tooltip 规范、升级 fluid-prism 0.1.4 原生 HTML in Canvas 渲染等）。
+- `pnpm typecheck` 通过（0 errors）。
+- `node --test scripts/prepare-chrome-store.test.mjs` 6 项测试全部通过。
+- `tests/build-budget.spec.ts`、`tests/see.spec.ts` 等 74 项单元与构建预算测试全部通过（20.5s）。
+- `tests/workbench.spec.ts` 5 项核心 Smoke 测试全部通过（1.9m，包含 Tooltip 几何坐标真机贴合断言）。
+- `pnpm build:chrome` 成功完成 1.3.0 生产构建（构建环境：Node 22.23.1、pnpm 12.16.1、Extension.js 4.1.39）。
+- `pnpm package:chrome` 成功生成 `dist/page-garden-1.3.0.zip` 及商店材料：
+  - 文件数：168
+  - 上传包 SHA-256：`bb2eee92ad925bf845c07cd6b9a44859ca0a7089008335182be08052467ce224`
+  - 重新渲染包含完整说明的 `dist/chrome-store/privacy-policy.html`，生成更新后的 `dist/chrome-store/package-info.json`。
+- 商店材料文案（`README.md`、`listing.md`、`permissions.md`）全面同步更新至 1.3.0。
 
 ## 1.2.0 版本准备与发布验证（2026-11-17）
 
