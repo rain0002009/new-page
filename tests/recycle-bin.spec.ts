@@ -56,3 +56,29 @@ test('手动删除与三十天到期清理使用相同的正文清理规则', ()
   const now = Math.max(...Object.values(doc.entities).map(entity => entity.deletedAt ?? 0)) + 31 * 86400_000
   expectPurged(prune(doc, now), [collection.id, ...links.map(link => link.id)])
 })
+
+test('新建但放弃命名的空间或收藏块直接彻底删除（purge），绕过回收站', () => {
+  let doc = createDocument('Rain')
+  const space = active(doc).find(e => e.kind === 'space')!
+  const newColId = 'draft-col-1'
+  doc = apply(doc, { type: 'add-collection', parentId: space.id, title: '新收藏块', id: newColId })
+  expect(doc.entities[newColId].title).toBe('新收藏块')
+  expect(active(doc).some(e => e.id === newColId)).toBe(true)
+
+  // 放弃创建：直接 purge
+  const purgedCol = apply(doc, { type: 'purge', id: newColId })
+  expect(purgedCol.entities[newColId].purged).toBe(true)
+  expect(active(purgedCol).some(e => e.id === newColId)).toBe(false)
+  // 不进入回收站
+  const deletedInBin = Object.values(purgedCol.entities).filter(e => !e.purged && e.deletedAt !== null)
+  expect(deletedInBin.some(e => e.id === newColId)).toBe(false)
+
+  // 同理新建空间后放弃
+  const newSpaceId = 'draft-space-1'
+  doc = apply(doc, { type: 'add-space', title: '新空间', id: newSpaceId })
+  expect(doc.entities[newSpaceId].title).toBe('新空间')
+  const purgedSpace = apply(doc, { type: 'purge', id: newSpaceId })
+  expect(purgedSpace.entities[newSpaceId].purged).toBe(true)
+  expect(active(purgedSpace).some(e => e.id === newSpaceId)).toBe(false)
+})
+

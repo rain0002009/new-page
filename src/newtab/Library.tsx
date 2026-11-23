@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
-import { Bookmark, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Share2, Trash2 } from 'lucide-react'
+import { Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Share2, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { documentUrl, markdownDescription } from '../core/markdown'
+import { useInlineTitleEdit } from './useInlineTitleEdit'
 import { readLocalSnapshot } from '../core/local-workspace'
 import { Button, SiteIcon, Tooltip } from './ui'
 import type { Act, EditorState } from './Editor'
@@ -115,12 +116,25 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
   </article>
 }
 
-export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void }) {
+export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, isEditing = false, isNew = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; isEditing?: boolean; isNew?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
   const [collapsed, setCollapsed] = useState(collection.collapsed)
   const [prevPropCollapsed, setPrevPropCollapsed] = useState(collection.collapsed)
   const collapsedRef = useRef(collapsed)
   collapsedRef.current = collapsed
   const pendingAct = useRef<number>()
+  const { inputRef, editingTitle, setEditingTitle, saveTitle, cancelTitle, handleKeyDown, handleBlur } = useInlineTitleEdit({
+    title: collection.title,
+    isEditing,
+    isNew,
+    scrollIntoView: true,
+    onSave: async trimmed => {
+      await act({ type: 'edit', id: collection.id, patch: { title: trimmed } })
+    },
+    onCancelNew: async () => {
+      await act({ type: 'purge', id: collection.id })
+    },
+    onEndEdit,
+  })
 
   if (prevPropCollapsed !== collection.collapsed) {
     setPrevPropCollapsed(collection.collapsed)
@@ -157,7 +171,7 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
       await chrome.tabs.create({ url: documentUrl({ note: id, source: data.sourceId! }) })
     } catch { setCreateError('笔记已保存，打开失败，请从卡片重试') } finally { setCreating(false) }
   }
-  const drag = useDragItem(collection.id, { kind: 'collection', entityId: collection.id, title: collection.title }, collectionStyles.base())
+  const drag = useDragItem(collection.id, { kind: 'collection', entityId: collection.id, title: collection.title }, collectionStyles.base(), isEditing)
   const placeholder = useCollectionPlaceholder(doc, collection.id)
   const marker = placeholder && <CollectionPlaceholder collectionId={collection.id} target={placeholder.target} height={placeholder.height} />
 
@@ -176,7 +190,52 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
       <Tooltip content={collapsed ? '展开收藏块' : '折叠收藏块'}>
         <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={toggleCollapsed}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
       </Tooltip>
-      <h2 className={collectionStyles.title()}>{collection.title}<span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span></h2>
+      {isEditing ? (
+        <div className="flex items-center gap-[4px] min-w-0" onBlur={handleBlur} onPointerDown={e => e.stopPropagation()}>
+          <input
+            ref={inputRef}
+            className="h-[28px] text-[15px] font-semibold text-[#485b3d] bg-[#ffffffcc] border border-solid border-[#92a878] rounded-[6px] px-[8px] py-0 outline-none shadow-[0_0_0_2px_#92a87833] focus:border-[#718b56] min-w-[120px] max-w-[260px] [@media(max-width:650px)]:max-w-[160px]"
+            aria-label="收藏块名称"
+            value={editingTitle}
+            maxLength={1000}
+            onChange={e => setEditingTitle(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          <Tooltip content="确定">
+            <Button
+              tone="custom"
+              size="custom"
+              className="h-[26px] w-[26px] shrink-0 p-0 rounded-[6px] border border-solid border-transparent bg-transparent text-[#627d49] hover:bg-[#eaf0e0]"
+              aria-label="确定"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => void saveTitle()}
+            >
+              <Check size={14} />
+            </Button>
+          </Tooltip>
+          <Tooltip content="取消">
+            <Button
+              tone="custom"
+              size="custom"
+              className="h-[26px] w-[26px] shrink-0 p-0 rounded-[6px] border border-solid border-transparent bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface hover:text-[#5c6e4e]"
+              aria-label="取消"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => void cancelTitle()}
+            >
+              <X size={14} />
+            </Button>
+          </Tooltip>
+        </div>
+      ) : (
+        <h2
+          className={`${collectionStyles.title()} cursor-pointer select-none`}
+          title="双击重命名收藏块"
+          onDoubleClick={onStartEdit}
+        >
+          {collection.title}
+          <span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span>
+        </h2>
+      )}
     </div><div className={collectionStyles.tools()}>
       <Tooltip content="新建笔记">
         <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
@@ -195,9 +254,6 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
           </Button>
         </Tooltip>
       )}
-      <Tooltip content="重命名收藏块">
-        <Button tone="custom" size="custom" className={collectionTool} aria-label={`重命名 ${collection.title}`} onClick={() => edit({ kind: 'rename', entity: collection })}><Edit3 size={13} /></Button>
-      </Tooltip>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>
     <MotionRegion open={!collapsed || !!placeholder}>

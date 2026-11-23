@@ -44,8 +44,8 @@ export type Conflict = {
 }
 export type LinkInput = { title: string; url: string; icon?: string; note?: string }
 export type Action =
-  | { type: 'add-space'; title: string }
-  | { type: 'add-collection'; parentId: string; title: string }
+  | { type: 'add-space'; title: string; id?: string }
+  | { type: 'add-collection'; parentId: string; title: string; id?: string }
   | { type: 'add-note'; parentId: string; id: string }
   | { type: 'add-links'; parentId: string; links: LinkInput[]; beforeId?: string }
   | { type: 'collect-tabs'; parentId: string; title: string; links: LinkInput[]; beforeId?: string; placement?: 'top' | 'end' }
@@ -168,21 +168,21 @@ function insertionPosition(siblings: Entity[], beforeId: string | undefined, now
 export function apply(doc: Document, action: Action): Document {
   const next = readDocument(doc)
   const now = Date.now()
-  const insertCollection = (parentId: string, title: string, beforeId?: string) => {
+  const insertCollection = (parentId: string, title: string, beforeId?: string, id?: string) => {
     requireEntity(next, parentId, 'space')
     const siblings = children(next, parentId).filter(e => e.kind === 'collection')
     const position = insertionPosition(siblings, beforeId, now)
-    const collection: Collection = { ...common('collection', title, parentId, position), kind: 'collection', collapsed: false }
+    const collection: Collection = { ...common('collection', title, parentId, position), id: id ?? crypto.randomUUID(), kind: 'collection', collapsed: false }
     next.entities[collection.id] = collection
     return collection
   }
   switch (action.type) {
     case 'add-space': {
-      const entity = { ...common('space', action.title, null, appendPosition(next, null, 'space')), kind: 'space' } as const
+      const entity = { ...common('space', action.title, null, appendPosition(next, null, 'space')), id: action.id ?? crypto.randomUUID(), kind: 'space' } as const
       next.entities[entity.id] = entity
       break
     }
-    case 'add-collection': insertCollection(action.parentId, action.title); break
+    case 'add-collection': insertCollection(action.parentId, action.title, undefined, action.id); break
     case 'add-note': {
       const collection = requireEntity(next, action.parentId, 'collection') as Collection
       if (next.entities[action.id]) throw new Error('此笔记已存在，请重新创建')
@@ -348,7 +348,8 @@ export function apply(doc: Document, action: Action): Document {
     }
     case 'purge': {
       const entity = next.entities[action.id]
-      if (!entity || entity.deletedAt === null || entity.purged) throw new Error('回收站内容已改变，请刷新后重试')
+      if (!entity || entity.kind === 'profile' || entity.purged) throw new Error('回收站内容已改变，请刷新后重试')
+      if (entity.kind === 'space' && active(next).filter(e => e.kind === 'space').length <= 1 && entity.deletedAt === null) throw new Error('请至少保留一个空间')
       for (const item of Object.values(next.entities)) if (!item.purged && (item.id === entity.id || parents(next, item).some(parent => parent.id === entity.id))) {
         item.deletedAt ??= now
         item.deletedBy ??= entity.id
