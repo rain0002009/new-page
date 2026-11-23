@@ -413,9 +413,12 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     }
     queueNoteChanges(source, before)
     queueDocumentImageChanges(root, request.sourceId, before, source.doc)
-    source.status = source.conflicts.length ? 'conflict' : 'pending'
-    source.error = ''
-    schedule(request.sourceId)
+    const isOnlyCollapsed = request.type === 'action' && request.action.type === 'edit' && Object.keys(request.action.patch).length === 1 && 'collapsed' in request.action.patch
+    if (!isOnlyCollapsed) {
+      source.status = source.conflicts.length ? 'conflict' : 'pending'
+      source.error = ''
+      schedule(request.sourceId)
+    }
     return { ok: true, snapshot: snapshot(root) } as const
   })
   if (request.type !== 'snapshot' && request.type !== 'export') broadcast()

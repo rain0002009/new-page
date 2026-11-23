@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 export const motionEase = 'cubic-bezier(.22,.7,.2,1)'
 export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -10,7 +10,7 @@ function translation(transform: string) {
 
 // Animate the visual transform, leaving the final layout available to dnd-kit's
 // transform-agnostic collision measurements throughout the transition.
-export function useLayoutMotion(ref: RefObject<HTMLElement>, selector: string) {
+export function useLayoutMotion(ref: RefObject<HTMLElement>, selector: string, options?: { skipInitialFade?: boolean }) {
   const previous = useRef(new Map<string, { x: number; y: number; node: HTMLElement; animation?: Animation }>())
   useLayoutEffect(() => {
     const root = ref.current
@@ -48,7 +48,9 @@ export function useLayoutMotion(ref: RefObject<HTMLElement>, selector: string) {
       next.set(id, entry)
       if (reducedMotion()) { old?.animation?.cancel(); continue }
       if (!old) {
-        entry.animation = node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: motionEase })
+        if (!options?.skipInitialFade) {
+          entry.animation = node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: motionEase })
+        }
         continue
       }
       if (Math.abs(old.x - x) < .5 && Math.abs(old.y - y) < .5) continue
@@ -71,35 +73,107 @@ export function useLayoutMotion(ref: RefObject<HTMLElement>, selector: string) {
 }
 
 // The inner node keeps its natural height while the outer node animates. This
-// also covers grid/empty-state switches and temporary expansion while dragging.
-export function MotionRegion({ children }: { children: ReactNode }) {
+// also covers grid/empty-state switches, collapse/expand and temporary expansion while dragging.
+export function MotionRegion({ children, open = true }: { children: ReactNode; open?: boolean }) {
   const outer = useRef<HTMLDivElement>(null)
   const inner = useRef<HTMLDivElement>(null)
   const height = useRef<number>()
   const animation = useRef<Animation>()
-  useLayoutMotion(inner, '.card-grid > [data-drag-id], .card-grid > [data-motion-id]')
+  const isMounted = useRef(false)
+
+  const [animatingClose, setAnimatingClose] = useState(false)
+  const [prevOpen, setPrevOpen] = useState(open)
+
+  if (prevOpen !== open) {
+    setPrevOpen(open)
+    if (!open) {
+      setAnimatingClose(true)
+    } else {
+      setAnimatingClose(false)
+    }
+  }
+
+  const shouldRender = open || animatingClose
+
+  useLayoutMotion(inner, '.card-grid > [data-drag-id], .card-grid > [data-motion-id]', { skipInitialFade: true })
+
   useLayoutEffect(() => {
     const node = outer.current!
     const content = inner.current!
+
     const update = () => {
-      const next = content.getBoundingClientRect().height
-      if (height.current === next) return
-      const from = animation.current?.playState === 'running' ? node.getBoundingClientRect().height : height.current ?? next
-      animation.current?.cancel()
-      node.style.overflow = ''
-      height.current = next
-      if (Math.abs(from - next) > .5 && !reducedMotion()) {
-        node.style.overflow = 'clip'
-        const current = node.animate([{ height: `${from}px` }, { height: `${next}px` }], { duration: 240, easing: motionEase })
-        animation.current = current
-        void current.finished.then(() => { if (animation.current === current) node.style.overflow = '' }).catch(() => {})
+      const contentHeight = content.getBoundingClientRect().height
+      const targetHeight = open ? contentHeight : 0
+
+      if (!isMounted.current) {
+        isMounted.current = true
+        height.current = targetHeight
+        if (!open) {
+          node.style.height = '0px'
+          node.style.overflow = 'clip'
+        }
+        return
       }
+
+      if (height.current === targetHeight && (!open || Math.abs((animation.current ? node.getBoundingClientRect().height : targetHeight) - targetHeight) < .5)) return
+
+      const from = animation.current?.playState === 'running'
+        ? node.getBoundingClientRect().height
+        : (height.current ?? (open ? 0 : contentHeight))
+
+      animation.current?.cancel()
+      height.current = targetHeight
+
+      if (reducedMotion() || Math.abs(from - targetHeight) <= .5) {
+        node.style.willChange = ''
+        if (open) {
+          node.style.overflow = ''
+          node.style.height = ''
+        } else {
+          node.style.overflow = 'clip'
+          node.style.height = '0px'
+          setAnimatingClose(false)
+        }
+        return
+      }
+
+      node.style.overflow = 'clip'
+      node.style.willChange = 'height'
+      const current = node.animate([{ height: `${from}px` }, { height: `${targetHeight}px` }], { duration: 240, easing: motionEase, fill: 'forwards' })
+      animation.current = current
+
+      void current.finished.then(() => {
+        if (animation.current === current) {
+          node.style.willChange = ''
+          if (open) {
+            node.style.overflow = ''
+            node.style.height = ''
+            current.cancel()
+          } else {
+            node.style.overflow = 'clip'
+            node.style.height = '0px'
+            current.cancel()
+            setAnimatingClose(false)
+          }
+        }
+      }).catch(() => {})
     }
+
     update()
-    const observer = new ResizeObserver(update)
+    const observer = new ResizeObserver(() => {
+      if (open) update()
+    })
     observer.observe(content)
     return () => observer.disconnect()
   })
+
   useLayoutEffect(() => () => animation.current?.cancel(), [])
-  return <div ref={outer}><div ref={inner}>{children}</div></div>
+
+  return (
+    <div ref={outer}>
+      <div ref={inner}>
+        {shouldRender && children}
+      </div>
+    </div>
+  )
 }

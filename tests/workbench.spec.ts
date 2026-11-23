@@ -2553,6 +2553,45 @@ test('收藏块展开和收起动画结束时高度连续', async () => {
   }
 })
 
+test('收藏块收起过程中卡片保持渲染并在动画中自然收起，且响应迅速', async () => {
+  const { page } = await openClient()
+  await connect(page)
+  await addLink(page, '测试卡片')
+  const collection = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
+  await expect(collection.getByRole('article', { name: '链接 测试卡片' })).toBeVisible()
+
+  const frames = await page.evaluate(async () => {
+    const region = document.querySelector<HTMLElement>('section[aria-label="收藏块 日常收藏"]')!
+    const collapseBtn = region.querySelector<HTMLButtonElement>('button[aria-label="折叠 日常收藏"]')!
+    const samples: { elapsed: number; cardCount: number; height: number; animating: boolean }[] = []
+    const start = performance.now()
+    collapseBtn.click()
+    while (performance.now() - start < 700) {
+      await new Promise(requestAnimationFrame)
+      const cards = region.querySelectorAll('article')
+      const anims = region.getAnimations({ subtree: true })
+      const isHeightAnim = anims.some(a => a.playState === 'running' && (a.effect as KeyframeEffect | null)?.getKeyframes().some(f => 'height' in f))
+      samples.push({
+        elapsed: performance.now() - start,
+        cardCount: cards.length,
+        height: region.getBoundingClientRect().height,
+        animating: isHeightAnim,
+      })
+    }
+    return samples
+  })
+
+  const firstAnimFrame = frames.find(f => f.animating)
+  expect(firstAnimFrame, '点击折叠后应迅速启动动画').toBeDefined()
+  expect(firstAnimFrame!.elapsed, '点击折叠后启动动画不应有明显延迟').toBeLessThan(100)
+
+  const midAnimFrames = frames.filter(f => f.animating)
+  expect(midAnimFrames.length, '应有收起动画过程帧').toBeGreaterThan(0)
+  for (const frame of midAnimFrames) {
+    expect(frame.cardCount, '收起动画执行过程中卡片不应提前消失').toBeGreaterThan(0)
+  }
+})
+
 test('跨收藏块的落点占位稳定，折叠块取消拖动后保持原状', async () => {
   const { page } = await openClient()
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -2711,7 +2750,7 @@ test('删除收藏块隐藏 Todo，回收站恢复层次与标记，备份不含
   await connect(page)
   await addLink(page, '值得重读')
   await page.getByRole('article').hover()
-  await page.getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await page.getByRole('button', { name: /加入(待办| Todo)/, exact: true }).click()
   await page.getByRole('button', { name: '删除 日常收藏', exact: true }).click()
   await page.screenshot({ path: 'test-results/delete-collection-dialog.png', fullPage: true })
   await page.getByRole('dialog').getByRole('button', { name: '移到回收站', exact: true }).click()
@@ -4670,7 +4709,7 @@ test('批量收藏：跨收藏块选择链接和笔记并快速移入新收藏',
   await connect(page)
   await addLink(page, '归拢链接')
   const source = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
-  await source.getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await source.getByRole('button', { name: /加入(待办| Todo)/, exact: true }).click()
   const note = await newNote(page, context, '归拢笔记', '正文在跨块整理后仍保留')
   await page.bringToFront()
   await expect(page.getByRole('article', { name: '笔记 归拢笔记', exact: true })).toBeVisible()
@@ -4688,7 +4727,7 @@ test('批量收藏：跨收藏块选择链接和笔记并快速移入新收藏',
   await expect(collected.getByRole('article')).toHaveCount(2)
   expect(await collected.getByRole('article').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(['笔记 归拢笔记', '链接 归拢链接'])
   await expect(collected.getByText('正文在跨块整理后仍保留', { exact: true })).toBeVisible()
-  await expect(collected.getByRole('button', { name: '移出 Todo', exact: true })).toBeVisible()
+  await expect(collected.getByRole('button', { name: /移出(待办| Todo)/, exact: true })).toBeVisible()
   await expect(source.getByRole('article')).toHaveCount(0)
   await expect(page.getByRole('region', { name: '收藏块 另一个收藏块', exact: true }).getByRole('article')).toHaveCount(0)
   await expect(toolbar).toHaveCount(0)
@@ -5124,7 +5163,7 @@ test('批量移动：混合卡片确认目标并整批拖回原收藏块保留�
   await connect(page)
   await addLink(page, '整批移动链接')
   const source = page.getByRole('region', { name: '收藏块 日常收藏', exact: true })
-  await source.getByRole('button', { name: '加入 Todo', exact: true }).click()
+  await source.getByRole('button', { name: /加入(待办| Todo)/, exact: true }).click()
   const editor = await newNote(page, context, '整批移动笔记', '移动前后同一篇正文')
   await page.bringToFront()
   await page.getByRole('button', { name: '新建收藏块', exact: true }).click()
@@ -5147,7 +5186,7 @@ test('批量移动：混合卡片确认目标并整批拖回原收藏块保留�
   await expect(toolbar).toHaveCount(0)
   await expect(destination.getByRole('article')).toHaveCount(0)
   expect(await source.getByRole('article').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(order)
-  await expect(source.getByRole('button', { name: '移出 Todo', exact: true })).toBeVisible()
+  await expect(source.getByRole('button', { name: /移出(待办| Todo)/, exact: true })).toBeVisible()
   await expect(source.getByText('移动前后同一篇正文', { exact: true })).toBeVisible()
   await editor.getByRole('textbox', { name: 'Markdown 正文', exact: true }).fill('移动之后仍能编辑原笔记')
   await expect(editor.getByRole('status')).toContainText('已保存到本机')

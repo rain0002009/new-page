@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
 import { Bookmark, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Share2, Trash2 } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
@@ -116,6 +116,32 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
 }
 
 export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void }) {
+  const [collapsed, setCollapsed] = useState(collection.collapsed)
+  const [prevPropCollapsed, setPrevPropCollapsed] = useState(collection.collapsed)
+  const collapsedRef = useRef(collapsed)
+  collapsedRef.current = collapsed
+  const pendingAct = useRef<number>()
+
+  if (prevPropCollapsed !== collection.collapsed) {
+    setPrevPropCollapsed(collection.collapsed)
+    setCollapsed(collection.collapsed)
+  }
+
+  useEffect(() => {
+    const flush = () => {
+      if (pendingAct.current) {
+        clearTimeout(pendingAct.current)
+        pendingAct.current = undefined
+        void act({ type: 'edit', id: collection.id, patch: { collapsed: collapsedRef.current } })
+      }
+    }
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      flush()
+    }
+  }, [collection.id, act])
+
   const savedItems = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
   const collectionShare = Object.values(doc.entities).find(
     (e): e is ShareRecord => e.kind === 'share' && !e.purged && e.entityKind === 'collection' && e.entityId === collection.id
@@ -134,10 +160,21 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
   const drag = useDragItem(collection.id, { kind: 'collection', entityId: collection.id, title: collection.title }, collectionStyles.base())
   const placeholder = useCollectionPlaceholder(doc, collection.id)
   const marker = placeholder && <CollectionPlaceholder collectionId={collection.id} target={placeholder.target} height={placeholder.height} />
+
+  function toggleCollapsed() {
+    const next = !collapsed
+    setCollapsed(next)
+    if (pendingAct.current) clearTimeout(pendingAct.current)
+    pendingAct.current = window.setTimeout(() => {
+      pendingAct.current = undefined
+      void act({ type: 'edit', id: collection.id, patch: { collapsed: next } })
+    }, 400)
+  }
+
   return <section {...drag} aria-label={`收藏块 ${collection.title}`} id={`collection-${collection.id}`}>
     <div className={collectionStyles.header()}><div className={collectionStyles.heading()}>
-      <Tooltip content={collection.collapsed ? '展开收藏块' : '折叠收藏块'}>
-        <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collection.collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={() => void act({ type: 'edit', id: collection.id, patch: { collapsed: !collection.collapsed } })}>{collection.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
+      <Tooltip content={collapsed ? '展开收藏块' : '折叠收藏块'}>
+        <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={toggleCollapsed}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
       </Tooltip>
       <h2 className={collectionStyles.title()}>{collection.title}<span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span></h2>
     </div><div className={collectionStyles.tools()}>
@@ -163,12 +200,14 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
       </Tooltip>
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
     </div></div>
-    <MotionRegion>{(!collection.collapsed || placeholder) && (savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
-      <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
-    </SortableContext> : <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">
-      <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
-      <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
-    </div>)}</MotionRegion><Toast message={createError} onClose={() => setCreateError('')} />
+    <MotionRegion open={!collapsed || !!placeholder}>
+      {savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
+        <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
+      </SortableContext> : <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">
+        <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
+        <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
+      </div>}
+    </MotionRegion><Toast message={createError} onClose={() => setCreateError('')} />
   </section>
 }
 
