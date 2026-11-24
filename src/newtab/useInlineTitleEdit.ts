@@ -3,20 +3,16 @@ import { useEffect, useRef, useState } from 'react'
 export interface InlineEditOptions {
   title: string
   isEditing?: boolean
-  isNew?: boolean
   scrollIntoView?: boolean
   onSave: (trimmed: string) => Promise<void> | void
-  onCancelNew?: () => Promise<void> | void
   onEndEdit?: () => void
 }
 
 export function useInlineTitleEdit({
   title,
   isEditing = false,
-  isNew = false,
   scrollIntoView = false,
   onSave,
-  onCancelNew,
   onEndEdit,
 }: InlineEditOptions) {
   const [editingTitle, setEditingTitle] = useState(title)
@@ -38,11 +34,7 @@ export function useInlineTitleEdit({
   const saveTitle = async () => {
     const trimmed = editingTitle.trim()
     if (!trimmed) {
-      if (isNew) {
-        await onCancelNew?.()
-      } else {
-        setEditingTitle(title)
-      }
+      setEditingTitle(title)
       onEndEdit?.()
       return
     }
@@ -52,12 +44,8 @@ export function useInlineTitleEdit({
     onEndEdit?.()
   }
 
-  const cancelTitle = async () => {
-    if (isNew) {
-      await onCancelNew?.()
-    } else {
-      setEditingTitle(title)
-    }
+  const cancelTitle = () => {
+    setEditingTitle(title)
     onEndEdit?.()
   }
 
@@ -67,7 +55,7 @@ export function useInlineTitleEdit({
       void saveTitle()
     } else if (e.key === 'Escape') {
       e.preventDefault()
-      void cancelTitle()
+      cancelTitle()
     }
   }
 

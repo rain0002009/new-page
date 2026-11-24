@@ -116,7 +116,7 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
   </article>
 }
 
-export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, isEditing = false, isNew = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; isEditing?: boolean; isNew?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
+export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, isEditing = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
   const [collapsed, setCollapsed] = useState(collection.collapsed)
   const [prevPropCollapsed, setPrevPropCollapsed] = useState(collection.collapsed)
   const collapsedRef = useRef(collapsed)
@@ -125,13 +125,9 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
   const { inputRef, editingTitle, setEditingTitle, saveTitle, cancelTitle, handleKeyDown, handleBlur } = useInlineTitleEdit({
     title: collection.title,
     isEditing,
-    isNew,
     scrollIntoView: true,
     onSave: async trimmed => {
       await act({ type: 'edit', id: collection.id, patch: { title: trimmed } })
-    },
-    onCancelNew: async () => {
-      await act({ type: 'purge', id: collection.id })
     },
     onEndEdit,
   })
@@ -236,7 +232,7 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
           <span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span>
         </h2>
       )}
-    </div><div className={collectionStyles.tools()}>
+    </div>{!isEditing && <div className={collectionStyles.tools()}>
       <Tooltip content="新建笔记">
         <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
       </Tooltip>
@@ -255,7 +251,7 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
         </Tooltip>
       )}
       <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
-    </div></div>
+    </div>}</div>
     <MotionRegion open={!collapsed || !!placeholder}>
       {savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
         <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
@@ -265,6 +261,96 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
       </div>}
     </MotionRegion><Toast message={createError} onClose={() => setCreateError('')} />
   </section>
+}
+
+export function NewCollectionDraft({
+  onSave,
+  onCancel,
+}: {
+  onSave: (title: string) => Promise<void> | void
+  onCancel: () => void
+}) {
+  const [title, setTitle] = useState('新收藏块')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+      inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }, [])
+
+  const handleSave = async () => {
+    const trimmed = title.trim() || '新收藏块'
+    await onSave(trimmed)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      void handleSave()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onCancel()
+    }
+  }
+
+  const handleBlur = (e: React.FocusEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    const trimmed = title.trim()
+    if (!trimmed) {
+      onCancel()
+    } else {
+      void handleSave()
+    }
+  }
+
+  return (
+    <section className={collectionStyles.base()} aria-label="收藏块 新收藏块">
+      <div className={collectionStyles.header()}><div className={collectionStyles.heading()}>
+        <div className="flex items-center gap-[4px] min-w-0" onBlur={handleBlur} onPointerDown={e => e.stopPropagation()}>
+          <input
+            ref={inputRef}
+            className="h-[28px] text-[15px] font-semibold text-[#485b3d] bg-[#ffffffcc] border border-solid border-[#92a878] rounded-[6px] px-[8px] py-0 outline-none shadow-[0_0_0_2px_#92a87833] focus:border-[#718b56] min-w-[120px] max-w-[260px] [@media(max-width:650px)]:max-w-[160px]"
+            aria-label="收藏块名称"
+            value={title}
+            maxLength={1000}
+            onChange={e => setTitle(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          <Tooltip content="确定">
+            <Button
+              tone="custom"
+              size="custom"
+              className="h-[26px] w-[26px] shrink-0 p-0 rounded-[6px] border border-solid border-transparent bg-transparent text-[#627d49] hover:bg-[#eaf0e0]"
+              aria-label="确定"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => void handleSave()}
+            >
+              <Check size={14} />
+            </Button>
+          </Tooltip>
+          <Tooltip content="取消">
+            <Button
+              tone="custom"
+              size="custom"
+              className="h-[26px] w-[26px] shrink-0 p-0 rounded-[6px] border border-solid border-transparent bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface hover:text-[#5c6e4e]"
+              aria-label="取消"
+              onMouseDown={e => e.preventDefault()}
+              onClick={onCancel}
+            >
+              <X size={14} />
+            </Button>
+          </Tooltip>
+        </div>
+      </div></div>
+      <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">
+        <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
+        <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">创建后可从右侧拖入网页</p></div>
+      </div>
+    </section>
+  )
 }
 
 export function SearchView({ doc, act, edit, locate, onShare }: { doc: Document; act: Act; edit: (state: EditorState) => void; locate: (link: Link) => void; onShare?: (note: Note, share?: ShareRecord) => void }) {

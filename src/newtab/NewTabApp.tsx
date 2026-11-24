@@ -17,7 +17,7 @@ import FluidBackground from './FluidBackground'
 import { Brand, SidebarIdentity } from './SidebarIdentity'
 import ContentPanel from './ContentPanel'
 import Editor, { type Act, type EditorState } from './Editor'
-import { CollectionSection, Empty, SearchView } from './Library'
+import { CollectionSection, Empty, NewCollectionDraft, SearchView } from './Library'
 import { Button, Modal, ModalPresence, Tooltip } from './ui'
 import { useInlineTitleEdit } from './useInlineTitleEdit'
 import { Toast } from '../shared/Toast'
@@ -89,7 +89,9 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const [page, setPage] = useState('space')
   const [searchOpen, setSearchOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
-  const [editingEntity, setEditingEntity] = useState<{ id: string; isNew?: boolean; previousSpaceId?: string } | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [creatingSpace, setCreatingSpace] = useState(false)
+  const [creatingCollection, setCreatingCollection] = useState(false)
   const [sharingTarget, setSharingTarget] = useState<
     | { kind: 'note'; note: Note; share?: ShareRecord }
     | { kind: 'collection'; collection: Collection; share?: ShareRecord }
@@ -208,31 +210,22 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
     setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
   }
-  const createSpace = async () => {
-    const id = crypto.randomUUID()
-    const previousSpaceId = space?.id
-    if (await act({ type: 'add-space', title: '新空间', id })) {
-      setSelected(id)
-      setPage('space')
-      setEditingEntity({ id, isNew: true, previousSpaceId })
-    }
+  const createSpace = () => {
+    setEditingId(null)
+    setCreatingCollection(false)
+    setCreatingSpace(true)
   }
-  const cancelNewSpace = async (id: string, previousSpaceId?: string) => {
-    await act({ type: 'purge', id })
-    if (previousSpaceId) setSelected(previousSpaceId)
-  }
-  const createCollection = async () => {
+  const createCollection = () => {
     if (!space) return
-    const id = crypto.randomUUID()
-    if (await act({ type: 'add-collection', parentId: space.id, title: '新收藏块', id })) {
-      setEditingEntity({ id, isNew: true })
-    }
+    setEditingId(null)
+    setCreatingSpace(false)
+    setCreatingCollection(true)
   }
   return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(item => item.kind === 'link' || item.kind === 'note').map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
     {notices}
     <aside className={styles.sidebar()}><SidebarIdentity nickname={nickname} reserve />
-      <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Tooltip content="新建空间"><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={() => void createSpace()}><Plus size={15} /></Button></Tooltip></div>
-      <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} remove={() => setEditor({ kind: 'delete', entity: item })} isEditing={editingEntity?.id === item.id} isNew={editingEntity?.id === item.id && editingEntity.isNew} onStartEdit={() => setEditingEntity({ id: item.id })} onEndEdit={() => setEditingEntity(null)} act={act} onCancelNew={() => void cancelNewSpace(item.id, editingEntity?.previousSpaceId)} />)}</nav></SortableContext>
+      <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Tooltip content="新建空间"><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={createSpace}><Plus size={15} /></Button></Tooltip></div>
+      <SortableContext items={spaces.map(item => item.id)} strategy={verticalListSortingStrategy}><nav className={styles.spaces()} aria-label="空间">{spaces.map(item => <SpaceRow key={item.id} item={item} selected={page === 'space' && space?.id === item.id} select={() => { setSelected(item.id); setPage('space') }} remove={() => setEditor({ kind: 'delete', entity: item })} isEditing={editingId === item.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(item.id) }} onEndEdit={() => setEditingId(null)} act={act} />)}{creatingSpace && <NewSpaceDraft onSave={async title => { const id = crypto.randomUUID(); if (await act({ type: 'add-space', title, id })) { setSelected(id); setPage('space') }; setCreatingSpace(false) }} onCancel={() => setCreatingSpace(false)} />}</nav></SortableContext>
       <div className={styles.section()}><span className={styles.sectionTitle()}>工作台</span></div><nav>
         <button aria-label={`Todo ${links.filter(l => l.todo).length}`} title="Todo" className={navigation({ selected: page === 'todo' }).button()} onClick={() => setPage('todo')}><Bookmark size={18} /><span className={nav.label()}>Todo</span><span className={nav.count()}>{links.filter(l => l.todo).length}</span></button>
         <button aria-label={`分享管理 ${activeShares.length}`} title="分享管理" className={navigation({ selected: page === 'shares' }).button()} onClick={() => setPage('shares')}><Share2 size={18} /><span className={nav.label()}>分享管理</span>{!!activeShares.length && <span className={nav.count()}>{activeShares.length}</span>}</button>
@@ -241,9 +234,9 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       <div className="mt-auto"><RecycleBin doc={doc} act={act} /><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
-      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={() => void createCollection()}><Plus size={15} />新建收藏块</Button>}</div>
+      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={createCollection}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} isEditing={editingEntity?.id === collection.id} isNew={editingEntity?.id === collection.id && editingEntity.isNew} onStartEdit={() => setEditingEntity({ id: collection.id })} onEndEdit={() => setEditingEntity(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{!!collections.length && <QuickCollectionGap spaceId={space.id} />}{!collections.length && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={() => void createCollection()}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} isEditing={editingId === collection.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(collection.id) }} onEndEdit={() => setEditingId(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{creatingCollection && <NewCollectionDraft onSave={async title => { await act({ type: 'add-collection', parentId: space.id, title }); setCreatingCollection(false) }} onCancel={() => setCreatingCollection(false)} />}{!!collections.length && !creatingCollection && <QuickCollectionGap spaceId={space.id} />}{!collections.length && !creatingCollection && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={createCollection}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateEntity={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link' || n.kind === 'collection')) locate(n) }} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
@@ -255,15 +248,13 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     <ModalPresence>{sharingTarget && <ShareModal target={sharingTarget} share={sharingTarget.share} doc={doc} act={act} close={() => setSharingTarget(null)} onNavigateToShares={() => { setSharingTarget(null); setPage('shares') }} onNavigateToSettings={() => { setSharingTarget(null); setPage('settings') }} />}</ModalPresence>
   </div></DragBoard></SelectionProvider>
 }
-function SpaceRow({ item, selected, select, remove, isEditing = false, isNew = false, onStartEdit, onEndEdit, act, onCancelNew }: { item: Entity; selected: boolean; select: () => void; remove: () => void; isEditing?: boolean; isNew?: boolean; onStartEdit?: () => void; onEndEdit?: () => void; act: Act; onCancelNew?: () => void }) {
+function SpaceRow({ item, selected, select, remove, isEditing = false, onStartEdit, onEndEdit, act }: { item: Entity; selected: boolean; select: () => void; remove: () => void; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void; act: Act }) {
   const { inputRef, editingTitle, setEditingTitle, saveTitle, cancelTitle, handleKeyDown, handleBlur } = useInlineTitleEdit({
     title: item.title,
     isEditing,
-    isNew,
     onSave: async trimmed => {
       await act({ type: 'edit', id: item.id, patch: { title: trimmed } })
     },
-    onCancelNew,
     onEndEdit,
   })
 
@@ -299,7 +290,7 @@ function SpaceRow({ item, selected, select, remove, isEditing = false, isNew = f
             className="h-[24px] w-[22px] shrink-0 p-0 rounded-[4px] border-none bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface hover:text-[#5c6e4e]"
             aria-label="取消"
             onMouseDown={e => e.preventDefault()}
-            onClick={() => void cancelTitle()}
+            onClick={cancelTitle}
           >
             <X size={13} />
           </Button>
@@ -309,4 +300,78 @@ function SpaceRow({ item, selected, select, remove, isEditing = false, isNew = f
   }
 
   return <div {...drag}><button aria-label={item.title} title={item.title} className={navigation({ selected }).button()} onClick={select} onDoubleClick={onStartEdit}><span className={nav.symbol()}><Folder size={17} /></span><span className={nav.label({ className: 'group-hover/space:max-w-[85px]' })}>{item.title}</span>{selected && <span className={nav.dot()} />}</button><div className={styles.tools()}><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`删除空间 ${item.title}`} onClick={remove}><Trash2 size={12} /></Button></div></div>
+}
+
+function NewSpaceDraft({ onSave, onCancel }: { onSave: (title: string) => Promise<void> | void; onCancel: () => void }) {
+  const [title, setTitle] = useState('新空间')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    })
+  }, [])
+
+  const handleSave = async () => {
+    const trimmed = title.trim() || '新空间'
+    await onSave(trimmed)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      void handleSave()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onCancel()
+    }
+  }
+
+  const handleBlur = (e: React.FocusEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    const trimmed = title.trim()
+    if (!trimmed) {
+      onCancel()
+    } else {
+      void handleSave()
+    }
+  }
+
+  return (
+    <div className={`${styles.space()} py-[3px]`} onBlur={handleBlur} onPointerDown={e => e.stopPropagation()}>
+      <span className={nav.symbol()}><Folder size={17} /></span>
+      <input
+        ref={inputRef}
+        className="h-[24px] text-[13px] text-[#414d38] bg-[#ffffffcc] border border-solid border-[#92a878] rounded-[4px] px-[6px] py-0 outline-none w-[90px] focus:border-[#718b56]"
+        aria-label="空间名称"
+        value={title}
+        maxLength={1000}
+        onChange={e => setTitle(e.target.value)}
+        onKeyDown={handleKeyDown}
+      />
+      <div className="flex items-center gap-[2px] ml-auto">
+        <Button
+          tone="custom"
+          size="custom"
+          className="h-[24px] w-[22px] shrink-0 p-0 rounded-[4px] border-none bg-transparent text-[#627d49] hover:bg-[#eaf0e0]"
+          aria-label="确定"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => void handleSave()}
+        >
+          <Check size={13} />
+        </Button>
+        <Button
+          tone="custom"
+          size="custom"
+          className="h-[24px] w-[22px] shrink-0 p-0 rounded-[4px] border-none bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface hover:text-[#5c6e4e]"
+          aria-label="取消"
+          onMouseDown={e => e.preventDefault()}
+          onClick={onCancel}
+        >
+          <X size={13} />
+        </Button>
+      </div>
+    </div>
+  )
 }
