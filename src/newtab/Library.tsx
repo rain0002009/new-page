@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
-import { Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Pencil, Plus, Search, Share2, Trash2, X } from 'lucide-react'
+import { ArrowUpDown, Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Pencil, Plus, Search, Share2, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { documentUrl, markdownDescription } from '../core/markdown'
 import { useInlineTitleEdit } from './useInlineTitleEdit'
 import { readLocalSnapshot } from '../core/local-workspace'
-import { Button, SiteIcon, Tooltip } from './ui'
+import { Button, ModalPresence, SiteIcon, Tooltip } from './ui'
 import type { Act, EditorState } from './Editor'
 import { CollectionPlaceholder, useCollectionPlaceholder, useDragItem } from './drag'
 import { linkCard } from './link-card-styles'
@@ -14,6 +14,8 @@ import { MotionRegion } from './motion'
 import SavedPageLink from './SavedPageLink'
 import { Toast } from '../shared/Toast'
 import { SelectionIcon, useSelection } from './Selection'
+import { OpenCollectionModal } from './OpenCollectionModal'
+import { openCollection } from './open-collection'
 
 const cardAction = tv({
   base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
@@ -158,6 +160,8 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
   )
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
+  const [openModalVisible, setOpenModalVisible] = useState(false)
+  const [openError, setOpenError] = useState('')
   async function createNote() {
     setCreating(true); setCreateError('')
     try {
@@ -234,6 +238,18 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
         </h2>
       )}
     </div>{!isEditing && <div className={collectionStyles.tools()}>
+      <Tooltip content={savedItems.length ? '切换并打开' : '收藏块内暂无内容'}>
+        <Button
+          tone="custom"
+          size="custom"
+          className={collectionTool}
+          aria-label={`切换并打开 ${collection.title}`}
+          disabled={!savedItems.length}
+          onClick={() => setOpenModalVisible(true)}
+        >
+          <ArrowUpDown size={14} />
+        </Button>
+      </Tooltip>
       <Tooltip content="新建笔记">
         <Button tone="custom" size="custom" className={collectionTool} aria-label={`新建笔记 ${collection.title}`} disabled={creating} onClick={() => void createNote()}><FilePlus2 size={14} /></Button>
       </Tooltip>
@@ -261,6 +277,23 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
         <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
       </div>}
     </MotionRegion><Toast message={createError} onClose={() => setCreateError('')} />
+    <Toast message={openError} onClose={() => setOpenError('')} />
+    <ModalPresence>
+      {openModalVisible && (
+        <OpenCollectionModal
+          collection={collection}
+          itemCount={savedItems.length}
+          close={() => setOpenModalVisible(false)}
+          onConfirm={async strategy => {
+            try {
+              await openCollection(savedItems, strategy)
+            } catch {
+              setOpenError('打开收藏块失败，请重试')
+            }
+          }}
+        />
+      )}
+    </ModalPresence>
   </section>
 }
 
