@@ -113,8 +113,10 @@ test('收藏块去掉重命名图标按钮，双击名称进入行内编辑，En
   // 1. 图标按钮已去掉
   await expect(collection.getByRole('button', { name: /重命名/ })).toHaveCount(0)
 
-  // 2. 双击名称进入行内编辑状态
+  // 2. 悬停提示与双击名称进入行内编辑状态
   const titleHeading = collection.getByRole('heading', { name: '日常收藏', exact: true })
+  await expect(titleHeading).toHaveAttribute('title', '双击重命名收藏块')
+  await expect(titleHeading.locator('svg')).toHaveCount(1)
   await titleHeading.dblclick()
 
   const input = collection.getByRole('textbox', { name: '收藏块名称' })
@@ -190,13 +192,26 @@ test('空间去掉重命名图标按钮，双击进入行内编辑，新建空�
   const spaceNav = page.getByRole('navigation', { name: '空间' })
   await expect(spaceNav.getByRole('button', { name: /重命名空间/ })).toHaveCount(0)
 
-  // 双击空间按钮进入编辑
+  // 悬停提示与双击空间按钮进入编辑
   const spaceBtn = spaceNav.getByRole('button', { name: '我的空间', exact: true })
+  await expect(spaceBtn).toHaveAttribute('title', '我的空间 (双击重命名)')
+  await expect(spaceBtn.locator('svg')).toHaveCount(2) // Folder 图标与悬停提示 Pencil 图标
   await spaceBtn.dblclick()
 
   const spaceInput = spaceNav.getByRole('textbox', { name: '空间名称' })
   await expect(spaceInput).toBeVisible()
   await expect(spaceInput).toHaveValue('我的空间')
+
+  // 验证单行布局：行内编辑容器高度单行（小于 50px），输入框与确定/取消按钮处于同一水平行（垂直坐标差小于 10px）
+  const editContainer = spaceNav.locator('.space-row').first()
+  const box = await editContainer.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box!.height).toBeLessThan(50)
+
+  const inputBox = await spaceInput.boundingBox()
+  const confirmBtn = spaceNav.getByRole('button', { name: '确定', exact: true })
+  const confirmBox = await confirmBtn.boundingBox()
+  expect(Math.abs(inputBox!.y - confirmBox!.y)).toBeLessThan(10)
 
   await spaceInput.fill('工作空间')
   await spaceInput.press('Enter')
@@ -209,6 +224,12 @@ test('空间去掉重命名图标按钮，双击进入行内编辑，新建空�
   const newSpaceInput = spaceNav.getByRole('textbox', { name: '空间名称' })
   await expect(newSpaceInput).toBeVisible()
   await expect(newSpaceInput).toHaveValue('新空间')
+
+  // 验证新建空间草稿也是单行布局
+  const newEditContainer = spaceNav.locator('.space-row').first()
+  const newBox = await newEditContainer.boundingBox()
+  expect(newBox).not.toBeNull()
+  expect(newBox!.height).toBeLessThan(50)
 
   // 点击取消
   const cancelSpaceBtn = spaceNav.getByRole('button', { name: '取消', exact: true })

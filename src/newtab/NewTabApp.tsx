@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, Check, Folder, Layers3, Leaf, LoaderCircle, Plus, Search, Settings2, Share2, Trash2, X } from 'lucide-react'
+import { Bookmark, Check, Folder, Layers3, Leaf, LoaderCircle, Pencil, Plus, Search, Settings2, Share2, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { active, children, type Action, type Collection, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
@@ -262,18 +262,23 @@ function SpaceRow({ item, selected, select, remove, isEditing = false, onStartEd
 
   if (isEditing) {
     return (
-      <div {...drag} className={`${styles.space()} py-[3px]`} onBlur={handleBlur} onPointerDown={e => e.stopPropagation()}>
-        <span className={nav.symbol()}><Folder size={17} /></span>
+      <div
+        {...drag}
+        className="space-row group/space relative w-full min-w-0 flex items-center gap-[6px] px-[8px] py-[7px] mb-[5px] min-h-[40px] rounded-[9px] bg-[#eff5e480] shadow-[inset_0_1px_0_#ffffff70] border border-solid border-[#92a87866]"
+        onBlur={handleBlur}
+        onPointerDown={e => e.stopPropagation()}
+      >
+        <span className="flex shrink-0 text-[#677b57]"><Folder size={17} /></span>
         <input
           ref={inputRef}
-          className="h-[24px] text-[13px] text-[#414d38] bg-[#ffffffcc] border border-solid border-[#92a878] rounded-[4px] px-[6px] py-0 outline-none w-[90px] focus:border-[#718b56]"
+          className="flex-1 min-w-0 h-[26px] text-[12px] text-[#414d38] bg-[#ffffffcc] border border-solid border-[#92a878] rounded-[5px] px-[6px] py-0 outline-none focus:border-[#718b56] shadow-[0_0_0_2px_#92a87820]"
           aria-label="空间名称"
           value={editingTitle}
           maxLength={1000}
           onChange={e => setEditingTitle(e.target.value)}
           onKeyDown={handleKeyDown}
         />
-        <div className="flex items-center gap-[2px] ml-auto">
+        <div className="flex items-center gap-[2px] shrink-0">
           <Button
             tone="custom"
             size="custom"
@@ -299,7 +304,27 @@ function SpaceRow({ item, selected, select, remove, isEditing = false, onStartEd
     )
   }
 
-  return <div {...drag}><button aria-label={item.title} title={item.title} className={navigation({ selected }).button()} onClick={select} onDoubleClick={onStartEdit}><span className={nav.symbol()}><Folder size={17} /></span><span className={nav.label({ className: 'group-hover/space:max-w-[85px]' })}>{item.title}</span>{selected && <span className={nav.dot()} />}</button><div className={styles.tools()}><Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`删除空间 ${item.title}`} onClick={remove}><Trash2 size={12} /></Button></div></div>
+  return (
+    <div {...drag}>
+      <button
+        aria-label={item.title}
+        title={`${item.title} (双击重命名)`}
+        className={navigation({ selected }).button()}
+        onClick={select}
+        onDoubleClick={onStartEdit}
+      >
+        <span className={nav.symbol()}><Folder size={17} /></span>
+        <span className={nav.label({ className: 'group-hover/space:max-w-[85px] group-hover/space:text-[#2d3a24] flex items-center gap-[4px] min-w-0 transition-colors' })}>
+          <span className="truncate">{item.title}</span>
+          <Pencil size={11} className="opacity-0 group-hover/space:opacity-60 transition-opacity text-[#71865b] shrink-0" aria-hidden="true" />
+        </span>
+        {selected && <span className={nav.dot()} />}
+      </button>
+      <div className={styles.tools()}>
+        <Button size="custom" className="h-[26px] w-[23px] shrink-0 p-0" aria-label={`删除空间 ${item.title}`} onClick={remove}><Trash2 size={12} /></Button>
+      </div>
+    </div>
+  )
 }
 
 function NewSpaceDraft({ onSave, onCancel }: { onSave: (title: string) => Promise<void> | void; onCancel: () => void }) {
@@ -339,18 +364,22 @@ function NewSpaceDraft({ onSave, onCancel }: { onSave: (title: string) => Promis
   }
 
   return (
-    <div className={`${styles.space()} py-[3px]`} onBlur={handleBlur} onPointerDown={e => e.stopPropagation()}>
-      <span className={nav.symbol()}><Folder size={17} /></span>
+    <div
+      className="space-row group/space relative w-full min-w-0 flex items-center gap-[6px] px-[8px] py-[7px] mb-[5px] min-h-[40px] rounded-[9px] bg-[#eff5e480] shadow-[inset_0_1px_0_#ffffff70] border border-solid border-[#92a87866]"
+      onBlur={handleBlur}
+      onPointerDown={e => e.stopPropagation()}
+    >
+      <span className="flex shrink-0 text-[#677b57]"><Folder size={17} /></span>
       <input
         ref={inputRef}
-        className="h-[24px] text-[13px] text-[#414d38] bg-[#ffffffcc] border border-solid border-[#92a878] rounded-[4px] px-[6px] py-0 outline-none w-[90px] focus:border-[#718b56]"
+        className="flex-1 min-w-0 h-[26px] text-[12px] text-[#414d38] bg-[#ffffffcc] border border-solid border-[#92a878] rounded-[5px] px-[6px] py-0 outline-none focus:border-[#718b56] shadow-[0_0_0_2px_#92a87820]"
         aria-label="空间名称"
         value={title}
         maxLength={1000}
         onChange={e => setTitle(e.target.value)}
         onKeyDown={handleKeyDown}
       />
-      <div className="flex items-center gap-[2px] ml-auto">
+      <div className="flex items-center gap-[2px] shrink-0">
         <Button
           tone="custom"
           size="custom"

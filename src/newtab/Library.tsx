@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
-import { Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Plus, Search, Share2, Trash2, X } from 'lucide-react'
+import { Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Pencil, Plus, Search, Share2, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { documentUrl, markdownDescription } from '../core/markdown'
@@ -224,12 +224,13 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
         </div>
       ) : (
         <h2
-          className={`${collectionStyles.title()} cursor-pointer select-none`}
+          className={`${collectionStyles.title()} group/col-title cursor-pointer select-none hover:bg-[#edf3e488] hover:text-[#2d3a24] px-[6px] py-[3px] -mx-[6px] -my-[3px] rounded-[7px] transition-all duration-150`}
           title="双击重命名收藏块"
           onDoubleClick={onStartEdit}
         >
-          {collection.title}
+          <span className="truncate">{collection.title}</span>
           <span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span>
+          <Pencil size={12} className="opacity-0 group-hover/col-title:opacity-60 transition-opacity text-[#71865b] shrink-0 ml-[2px]" aria-hidden="true" />
         </h2>
       )}
     </div>{!isEditing && <div className={collectionStyles.tools()}>
