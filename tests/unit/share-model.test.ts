@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { active, apply, createDocument, type Document, type ShareRecord } from '../src/core/model'
+import { test, expect } from 'vitest'
+import { active, apply, createDocument, type Document, type ShareRecord } from '../../src/core/model'
 
 function createDocWithNote() {
   let doc = createDocument('Tester')

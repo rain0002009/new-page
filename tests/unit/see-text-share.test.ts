@@ -1,11 +1,11 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from 'vitest'
 import {
   createTextShare,
   deleteTextShare,
   fetchSeeDomains,
   updateTextShare,
   validateTextShareLength,
-} from '../src/core/see'
+} from '../../src/core/see'
 
 const originalFetch = globalThis.fetch
 

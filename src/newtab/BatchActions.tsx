@@ -5,9 +5,7 @@ import { documentUrl, isMarkdownUrl } from '../core/markdown'
 import type { Act } from './Editor'
 import { Button, Modal, ModalPresence } from './ui'
 import { useSelection } from './Selection'
-import { collectionTitle, tabLink, type OpenTab } from './open-tabs'
-import { createTabGroup } from './tab-groups'
-import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
+import { closeSavedTabs, collectionTitle, createTabGroup, saveTabsBeforeClosing, tabLink, type OpenTab } from './tab-manager'
 
 type Props = { doc: Document; sourceId: string; spaceId?: string; tabs: OpenTab[]; act: Act; notify: (message: string) => void; refreshTabs: () => void; reveal: (spaceId: string) => void }
 export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify, refreshTabs, reveal }: Props) {

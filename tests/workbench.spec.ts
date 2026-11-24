@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, rmdir, cp, readFile, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { generate } from 'selfsigned'
+import { getTestCertificate } from './test-cert'
 import { QuarkFixture } from './quark-fixture'
 import type { StoredWorkspace } from '../src/core/local-workspace'
 import type { Document } from '../src/core/model'
@@ -26,9 +26,7 @@ const imageHistory: { url: string; hash: string }[] = []
 const imageDeletes: string[] = []
 
 test.beforeAll(async () => {
-  const cert = await generate([{ name: 'commonName', value: 'localhost' }], {
-    extensions: [{ name: 'subjectAltName', altNames: [{ type: 2, value: 'localhost' }] }],
-  })
+  const cert = await getTestCertificate()
   server = createServer({ key: cert.private, cert: cert.cert }, async (req, res) => {
     if (await quark.handle(req, res, origin)) return
     const path = new URL(req.url!, 'https://localhost').pathname

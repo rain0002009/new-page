@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import type { DropAnimationFunctionArguments } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import type { OpenTab } from './open-tabs'
+import type { OpenTab } from './tab-manager'
 import { linkCard } from './link-card-styles'
 import { SiteIcon } from './ui'
 import { motionEase, reducedMotion } from './motion'

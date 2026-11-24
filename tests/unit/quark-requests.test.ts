@@ -1,13 +1,13 @@
-import { test, expect } from '@playwright/test'
-import { QuarkClient } from '../src/core/quark/client'
-import { QuarkStore } from '../src/core/quark/store'
-import { RevisionChanged } from '../src/core/webdav'
+import { test, expect } from 'vitest'
+import { QuarkClient } from '../../src/core/quark/client'
+import { QuarkStore } from '../../src/core/quark/store'
+import { RevisionChanged } from '../../src/core/webdav'
 import { createHash } from 'node:crypto'
-import { apply, createDocument } from '../src/core/model'
-import type { QuarkEntry } from '../src/core/quark/types'
-import { handle, synchronize } from '../src/core/workspace'
-import { storageKey, type StoredWorkspace } from '../src/core/local-workspace'
-import { imageCredential } from '../src/core/hosted-images'
+import { apply, createDocument } from '../../src/core/model'
+import type { QuarkEntry } from '../../src/core/quark/types'
+import { handle, synchronize } from '../../src/core/workspace'
+import { storageKey, type StoredWorkspace } from '../../src/core/local-workspace'
+import { imageCredential } from '../../src/core/hosted-images'
 
 type StoredFile = QuarkEntry & { body: string }
 const config = { kind: 'quark', accountId: 'test-account', folderId: 'root', nickname: 'Rain' } as const

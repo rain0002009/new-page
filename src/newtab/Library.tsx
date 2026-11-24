@@ -15,7 +15,7 @@ import SavedPageLink from './SavedPageLink'
 import { Toast } from '../shared/Toast'
 import { SelectionIcon, useSelection } from './Selection'
 import { OpenCollectionModal } from './OpenCollectionModal'
-import { openCollection } from './open-collection'
+import { openCollection } from './tab-manager'
 
 const cardAction = tv({
   base: 'h-[27px] w-[27px] shrink-0 p-0 rounded-[9px] border border-solid border-transparent bg-[#f9fcf3e6] group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',

@@ -5,11 +5,9 @@ import { CSS } from '@dnd-kit/utilities'
 import { children, todos, type Document, type Entity } from '../core/model'
 import type { Act } from './Editor'
 import DragPreview, { animateDrop, snapshotElement } from './DragPreview'
-import { canSortTabs, tabLink, type OpenTab } from './open-tabs'
+import { canSortTabs, closeSavedTabs, moveTabsToSlot, moveWholeGroup, saveTabsBeforeClosing, tabLink, type OpenTab, type TabSlot } from './tab-manager'
 import type { QuickCollectionTarget } from './QuickCollectionGap'
 import { useSelection } from './Selection'
-import { moveTabsToSlot, moveWholeGroup, type TabSlot } from './tab-groups'
-import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
 
 type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string } | { kind: 'tab-group'; groupId: number; windowId: number; lastIndex: number; title: string }
 type DragTarget = DragItem | { kind: 'content' } | { kind: 'trash' } | QuickCollectionTarget | ({ kind: 'tab-slot' } & TabSlot)

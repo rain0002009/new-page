@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, Square } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import type { OpenTab } from './open-tabs'
+import type { OpenTab } from './tab-manager'
 
 type Source = 'tabs' | 'saved'
 type Selection = { source: Source | null; ids: string[]; anchor?: string }

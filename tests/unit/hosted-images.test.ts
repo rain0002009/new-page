@@ -1,8 +1,8 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from 'vitest'
 import { createHash } from 'node:crypto'
-import { apply, createDocument, type Document, type Note } from '../src/core/model'
-import type { StoredWorkspace, WorkspaceSource } from '../src/core/local-workspace'
-import { imageCredential, imageIsReferenced, queueDocumentImageChanges, queueRemovedImages, sourceImageKey, updateLocalImageDocument } from '../src/core/hosted-images'
+import { apply, createDocument, type Document, type Note } from '../../src/core/model'
+import type { StoredWorkspace, WorkspaceSource } from '../../src/core/local-workspace'
+import { imageCredential, imageIsReferenced, queueDocumentImageChanges, queueRemovedImages, sourceImageKey, updateLocalImageDocument } from '../../src/core/hosted-images'
 
 const url = 'https://images.example.test/upload.png'
 const image = `![图片](${url})`

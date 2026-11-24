@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { active, apply, createDocument, prune, type Document } from '../src/core/model'
+import { test, expect } from 'vitest'
+import { active, apply, createDocument, prune, type Document } from '../../src/core/model'
 
 function fixture() {
   let doc = createDocument('Rain')

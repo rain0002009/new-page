@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:https'
 import { mkdtemp, cp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { generate } from 'selfsigned'
+import { getTestCertificate } from './test-cert'
 import { QuarkFixture } from './quark-fixture'
 
 let server: Server
@@ -13,9 +13,7 @@ const clients: { context: BrowserContext; profile: string }[] = []
 const quark = new QuarkFixture()
 
 test.beforeAll(async () => {
-  const cert = await generate([{ name: 'commonName', value: 'localhost' }], {
-    extensions: [{ name: 'subjectAltName', altNames: [{ type: 2, value: 'localhost' }] }],
-  })
+  const cert = await getTestCertificate()
   server = createServer({ key: cert.private, cert: cert.cert }, async (req, res) => {
     if (await quark.handle(req, res, origin)) return
     if (req.headers.authorization !== `Basic ${Buffer.from('tester:secret').toString('base64')}`) {

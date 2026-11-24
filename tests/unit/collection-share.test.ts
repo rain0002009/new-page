@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test'
-import { active, apply, createDocument, type Document } from '../src/core/model'
-import { collectionToMarkdown } from '../src/core/see'
+import { test, expect } from 'vitest'
+import { active, apply, createDocument, type Document } from '../../src/core/model'
+import { collectionToMarkdown } from '../../src/core/see'
 
 function setupCollectionDoc() {
   let doc = createDocument('Tester')

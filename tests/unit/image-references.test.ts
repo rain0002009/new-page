@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { imageReferences, normalizeImageUrl, removedImageReferences } from '../src/core/image-references'
+import { test, expect } from 'vitest'
+import { imageReferences, normalizeImageUrl, removedImageReferences } from '../../src/core/image-references'
 
 test('图片引用规范化协议、主机与片段，保留查询参数并去重', () => {
   expect([...imageReferences('![a](HTTPS://EXAMPLE.COM:443/a.png?size=2#one)\n\n![b](https://example.com/a.png?size=2#two)')]).toEqual(['https://example.com/a.png?size=2'])

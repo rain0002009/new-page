@@ -1,9 +1,9 @@
-import { test, expect } from '@playwright/test'
-import { createDocument } from '../src/core/model'
-import { storageKey, type StoredWorkspace } from '../src/core/local-workspace'
-import { deleteHostedImage, findHostedImages, uploadImage } from '../src/core/see'
-import { imageCredential } from '../src/core/hosted-images'
-import type { Request, Result } from '../src/core/protocol'
+import { test, expect } from 'vitest'
+import { createDocument } from '../../src/core/model'
+import { storageKey, type StoredWorkspace } from '../../src/core/local-workspace'
+import { deleteHostedImage, findHostedImages, uploadImage } from '../../src/core/see'
+import { imageCredential } from '../../src/core/hosted-images'
+import type { Request, Result } from '../../src/core/protocol'
 
 const originalChrome = Object.getOwnPropertyDescriptor(globalThis, 'chrome')
 const originalFetch = globalThis.fetch

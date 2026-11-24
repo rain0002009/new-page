@@ -22,13 +22,11 @@ import { Button, Modal, ModalPresence, Tooltip } from './ui'
 import { useInlineTitleEdit } from './useInlineTitleEdit'
 import { Toast } from '../shared/Toast'
 import QuickCollectionGap from './QuickCollectionGap'
-import { collectionTitle, moveOpenTab, tabLink, type OpenTab } from './open-tabs'
+import { closeSavedTabs, collectionTitle, createTabGroup, moveOpenTab, saveTabsBeforeClosing, tabLink, type OpenTab } from './tab-manager'
 import { documentUrl } from '../core/document-address'
 import { markdownName, readDroppedMarkdown, rememberFile } from '../document/local-files'
 import { SelectionProvider } from './Selection'
 import BatchActions from './BatchActions'
-import { createTabGroup } from './tab-groups'
-import { closeSavedTabs, saveTabsBeforeClosing } from './tab-actions'
 
 const workbench = tv({
   slots: {

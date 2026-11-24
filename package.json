@@ -39,7 +39,8 @@
     "extension": "^4.1.39",
     "selfsigned": "^5.5.0",
     "typescript": "7.0.2",
-    "unocss": "^66.12.0"
+    "unocss": "^66.12.0",
+    "vitest": "^5.1.1"
   },
   "scripts": {
     "dev": "extension dev --browser chrome",
@@ -47,8 +48,11 @@
     "start": "extension start --browser chrome",
     "build": "extension build --browser chrome",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build:chrome && playwright test",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:all": "vitest run && pnpm build:chrome && playwright test",
     "preview": "extension preview --browser chrome",
     "build:chrome": "extension build --browser chrome",
     "package:chrome": "node scripts/prepare-chrome-store.mjs"
