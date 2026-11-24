@@ -77,8 +77,7 @@ pnpm exec playwright test tests/build-budget.spec.ts
 
 登录 Cookie 或 WebDAV 密码只保存在当前设备的扩展本地存储，不进入界面消息、业务 JSON、备份或日志。本地存储没有额外加密，卸载扩展会移除本地数据；建议定期导出备份。夸克直连额外申请 `webRequest` 和 `declarativeNetRequestWithHostAccess`，用于读取登录响应中的 Cookie、设置 API 必需的请求头。每条临时规则只作用于本扩展发往具体 URL 的请求，完成后删除；登录跳转只允许受支持的夸克/上传域名。
 
-保留的 WebDAV 方式要求服务器支持 HTTPS、Basic 认证、PROPFIND、MKCOL、GET、PUT、DELETE、强 ETag，以及正确执行 `If-Match` / `If-None-Match`。连接用临时文件检查能力，在用户目录下保存 
-ew-page/data-v1.json`。
+保留的 WebDAV 方式要求服务器支持 HTTPS、Basic 认证、PROPFIND、MKCOL、GET、PUT、DELETE、强 ETag，以及正确执行 `If-Match` / `If-None-Match`。连接用临时文件检查能力，在用户目录下保存 `new-page/data-v1.json`。
 
 ## 自动化验证
 
@@ -102,11 +101,8 @@ pnpm test
 - [src/core/webdav.ts](../src/core/webdav.ts)：WebDAV 验证、版本读取和条件写入。
 - [src/core/quark/](../src/core/quark/)：夸克登录、浏览器请求适配、上传和当前文件发布。
 - [src/background.ts](../src/background.ts)：消息边界与后台重试。
-- [new-tab-bookmarks.md](specs/new-tab-bookmarks.md)：完整规格。
-- [ui-refinement-2026-11-10.md](specs/ui-refinement-2026-11-10.md)：收藏、Todo、dnd-kit 与流体视觉的增量规格。
-- [ui-refinement-validation.md](ui-refinement-validation.md)：本轮实现、双轴审查与浏览器验证记录。
-- [markdown-notes-validation.md](markdown-notes-validation.md)：Markdown 笔记实现、双轴审查、验证结果与浏览器验收限制。
-- [tab-groups-and-selection-validation.md](tab-groups-and-selection-validation.md)：Chrome 原生分组、双侧多选、批量操作与失败重试的验证记录。
-- [CONTEXT.md](../CONTEXT.md)、[docs/adr/](adr/)：领域术语与架构决策。
+- [CONTEXT.md](../CONTEXT.md)：领域术语与数据结构。
+- [docs/adr/](adr/)：架构决策记录（ADR）。
+- [PRIVACY.md](../PRIVACY.md)：隐私政策。
 
 任务跟踪使用 GitHub Issues（`rain0002009/new-page`）；技能入口为 [AGENTS.md](../AGENTS.md)。

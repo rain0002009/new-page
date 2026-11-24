@@ -174,7 +174,7 @@ async function main() {
   await prepareScreenshots(assetsRoot)
   copyFileSync(join(repoRoot, 'src/images/icon-128.png'), join(assetsRoot, 'icon-128.png'))
   writeFileSync(join(outputRoot, 'privacy-policy.html'),
-    renderPolicy(readFileSync(join(repoRoot, 'docs/chrome-web-store/privacy-policy.md'), 'utf8')))
+    renderPolicy(readFileSync(join(repoRoot, 'PRIVACY.md'), 'utf8')))
   const zip = `page-garden-${manifest.version}.zip`
   writeFileSync(join(repoRoot, 'dist', zip), archive)
   const info = {
@@ -184,7 +184,7 @@ async function main() {
     zip: `../${zip}`,
     sha256: createHash('sha256').update(archive).digest('hex'),
     files: files.length,
-    status: 'candidate; see docs/chrome-web-store/validation.md before submission',
+    status: 'packaged',
   }
   const json = JSON.stringify(info, null, 2)
   writeFileSync(join(outputRoot, 'package-info.json'), `${json}\n`)

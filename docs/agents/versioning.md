@@ -7,4 +7,4 @@
 3. 在根目录 `CHANGELOG.md` 为新版本写一节，简述这批用户可感知的变化，并标明是否已提交审核。后续同批修改补在这一节；另一次交付再升版。
 4. 核对两个源码版本和 `CHANGELOG.md` 标题一致，运行 `pnpm typecheck`、相关测试及 `pnpm build:chrome`，确认生成的 `dist/chrome/manifest.json` 版本一致。准备下一次商店提交时，另行更新商店材料及上传包。
 
-`docs/chrome-web-store/` 中标记为 1.0.0 的材料记录的是已提审的首版，不随开发中的版本号改写；新一轮提交时再建立与新版本相符的材料。
+新一轮提交 Chrome 商店时，使用 `scripts/prepare-chrome-store.mjs` 打包并生成发布材料与上传包。
