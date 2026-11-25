@@ -4,6 +4,10 @@
 
 Target Chrome only. Before implementation, browser testing, or issue acceptance work, read `docs/agents/platform.md`.
 
+### Testing scope
+
+Verify at the seam of change; never run full test suites during normal feature work. Before running tests, writing verification plans, or issue acceptance, read `docs/agents/testing.md`.
+
 ### Issue tracker
 
 Use GitHub Issues. Before issue work, read `docs/agents/issue-tracker.md`.
