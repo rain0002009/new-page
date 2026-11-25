@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
-import { ArrowUpDown, Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Pencil, Plus, Search, Share2, Trash2, X } from 'lucide-react'
+import { ArrowUpDown, Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Pencil, Plus, Search, Share2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
+import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord, type Tag as TagRecord } from '../core/model'
 import { documentUrl, markdownDescription } from '../core/markdown'
 import { useInlineTitleEdit } from './useInlineTitleEdit'
 import { readLocalSnapshot } from '../core/local-workspace'
@@ -10,6 +10,7 @@ import { Button, ModalPresence, SiteIcon, Tooltip } from './ui'
 import type { Act, EditorState } from './Editor'
 import { CollectionPlaceholder, useCollectionPlaceholder, useDragItem } from './drag'
 import { linkCard } from './link-card-styles'
+import { TagActionMenu, TagList } from './Tags'
 import { MotionRegion } from './motion'
 import SavedPageLink from './SavedPageLink'
 import { Toast } from '../shared/Toast'
@@ -56,8 +57,9 @@ const empty = tv({
 })
 const emptyStyles = empty()
 
-export function Card({ link, act, edit, location, locate }: { link: Link; act: Act; edit: (state: EditorState) => void; location?: string; locate?: () => void }) {
+export function Card({ link, doc, act, edit, location, locate }: { link: Link; doc: Document; act: Act; edit: (state: EditorState) => void; location?: string; locate?: () => void }) {
   const selection = useSelection()
+  const tags = (link.tagIds ?? []).map(id => doc.entities[id]).filter((e): e is TagRecord => e?.kind === 'tag')
   const styles = linkCard({ search: !!locate })
   const drag = useDragItem(locate ? `search:${link.id}` : link.id, { kind: 'saved-item', itemKind: 'link', entityId: link.id, title: link.title }, styles.base(), !!locate)
   return <article {...drag} data-selected={!locate && selection.isSelected('saved', link.id) || undefined} aria-label={`链接 ${link.title}`}>
@@ -66,12 +68,12 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
       <Tooltip content="编辑链接">
         <Button tone="custom" size="custom" className={cardAction()} aria-label="编辑链接" onClick={() => edit({ kind: 'edit', entity: link })}><Edit3 size={14} /></Button>
       </Tooltip>
-      <Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除链接" onClick={() => void act({ type: 'delete', id: link.id })}><Trash2 size={14} /></Button>
       <Tooltip content={link.todo ? '移出待办' : '加入待办'}>
         <Button tone="custom" size="custom" className={cardAction({ tone: link.todo ? 'todo' : 'regular' })} aria-label={link.todo ? '移出待办' : '加入待办'} aria-pressed={link.todo} onClick={() => void act({ type: 'todo', id: link.id, value: !link.todo })}><Bookmark size={15} fill={link.todo ? 'currentColor' : 'none'} /></Button>
       </Tooltip>
+      <TagActionMenu doc={doc} target={link} label={link.title} act={act} onDelete={() => void act({ type: 'delete', id: link.id })} deleteLabel="删除链接" />
     </div>
-    <p className={styles.note()}>{link.note}</p>
+    {tags.length ? <TagList tags={tags} label={link.title} /> : <p className={styles.note()}>{link.note}</p>}
     {(location || locate) && <div className={styles.bottom()}>{location && <span className={styles.location()} title={location}><Folder size={10} />{location}</span>}<div className={styles.secondary()}>
       {locate && (
         <Tooltip content="定位收藏">
@@ -84,6 +86,7 @@ export function Card({ link, act, edit, location, locate }: { link: Link; act: A
 
 function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc: Document; act: Act; search?: boolean; onShare?: (note: Note, share?: ShareRecord) => void }) {
   const selection = useSelection()
+  const tags = (note.tagIds ?? []).map(id => doc.entities[id]).filter((e): e is TagRecord => e?.kind === 'tag')
   const styles = linkCard({ note: true, search })
   const drag = useDragItem(search ? `search:${note.id}` : note.id, { kind: 'saved-item', itemKind: 'note', entityId: note.id, title: note.title }, styles.base(), search)
   const [error, setError] = useState('')
@@ -111,14 +114,14 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
           </Button>
         </Tooltip>
       )}
-      <Button tone="custom" size="custom" className={cardAction({ tone: 'danger' })} aria-label="删除笔记" onClick={() => void act({ type: 'delete', id: note.id })}><Trash2 size={14} /></Button>
+      <TagActionMenu doc={doc} target={note} label={note.title} act={act} onDelete={() => void act({ type: 'delete', id: note.id })} deleteLabel="删除笔记" />
     </div>
     <span className={styles.domain()}>Markdown 笔记</span>
-    <p className={styles.note()}>{markdownDescription(note.body)}</p><Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
+    {tags.length ? <TagList tags={tags} label={note.title} /> : <p className={styles.note()}>{markdownDescription(note.body)}</p>}<Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>
 }
 
-export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, isEditing = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
+export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, visibleItems, isEditing = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; visibleItems?: SavedItem[]; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
   const [collapsed, setCollapsed] = useState(collection.collapsed)
   const [prevPropCollapsed, setPrevPropCollapsed] = useState(collection.collapsed)
   const collapsedRef = useRef(collapsed)
@@ -154,7 +157,8 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
     }
   }, [collection.id, act])
 
-  const savedItems = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const savedItems = visibleItems ?? children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const collectionTags = (collection.tagIds ?? []).map(id => doc.entities[id]).filter((e): e is TagRecord => e?.kind === 'tag')
   const collectionShare = Object.values(doc.entities).find(
     (e): e is ShareRecord => e.kind === 'share' && !e.purged && e.entityKind === 'collection' && e.entityId === collection.id
   )
@@ -234,6 +238,7 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
         >
           <span className="truncate">{collection.title}</span>
           <span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span>
+          <TagList tags={collectionTags} label={collection.title} />
           <Pencil size={12} className="opacity-0 group-hover/col-title:opacity-60 transition-opacity text-[#71865b] shrink-0 ml-[2px]" aria-hidden="true" />
         </h2>
       )}
@@ -267,11 +272,11 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
           </Button>
         </Tooltip>
       )}
-      <Button tone="custom" size="custom" className={collectionTool} aria-label={`删除 ${collection.title}`} onClick={() => edit({ kind: 'delete', entity: collection })}><Trash2 size={13} /></Button>
+      <TagActionMenu doc={doc} target={collection} label={collection.title} act={act} onDelete={() => edit({ kind: 'delete', entity: collection })} deleteLabel="删除收藏块" placement="collection" />
     </div>}</div>
     <MotionRegion open={!collapsed || !!placeholder}>
       {savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
-        <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
+        <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} doc={doc} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
       </SortableContext> : <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">
         <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
         <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
@@ -393,7 +398,7 @@ export function SearchView({ doc, act, edit, locate, onShare }: { doc: Document;
   const result = term.trim() ? savedItems.filter(item => `${item.title}\n${item.kind === 'note' ? item.body : item.url + '\n' + item.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
   return <><div className={searchStyles.field()}><Search size={19} /><input className={searchStyles.input()} aria-label="搜索全部收藏" type="search" placeholder="搜索标题、正文、网址或备注…" value={term} onChange={e => setTerm(e.target.value)} autoFocus data-autofocus /><kbd className={searchStyles.shortcut()}>全部空间</kbd></div>
     <p className={searchStyles.count()}>{term ? `找到 ${result.length} 个收藏` : `共 ${savedItems.length} 个收藏`}</p>
-    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(item => item.kind === 'note' ? <NoteCard key={item.id} note={item} doc={doc} act={act} search onShare={onShare} /> : <Card key={item.id} link={item} act={act} edit={edit} location={locationName(doc, item)} locate={() => locate(item)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
+    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(item => item.kind === 'note' ? <NoteCard key={item.id} note={item} doc={doc} act={act} search onShare={onShare} /> : <Card key={item.id} link={item} doc={doc} act={act} edit={edit} location={locationName(doc, item)} locate={() => locate(item)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
   </>
 }
 export function locationName(doc: Document, entity: Entity) {

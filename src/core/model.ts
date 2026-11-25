@@ -1,5 +1,10 @@
 import { z } from 'zod'
 
+export const tagColors = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'] as const
+export type TagColor = typeof tagColors[number]
+const tagColorSchema = z.enum(tagColors)
+const taggedFields = { tagIds: z.array(z.string().min(1).max(100)).max(100).optional() }
+
 const base = {
   id: z.string().min(1).max(100), title: z.string().max(1000),
   parentId: z.string().nullable(), position: z.number().finite(),
@@ -9,9 +14,9 @@ const base = {
 const entitySchema = z.discriminatedUnion('kind', [
   z.object({ ...base, kind: z.literal('profile'), seeApiKey: z.string().optional(), fluidAnimation: z.boolean().optional() }),
   z.object({ ...base, kind: z.literal('space') }),
-  z.object({ ...base, kind: z.literal('collection'), collapsed: z.boolean() }),
-  z.object({ ...base, kind: z.literal('note'), body: z.string() }),
-  z.object({ ...base, kind: z.literal('link'), url: z.string().max(10_000), icon: z.string().max(250_000), note: z.string().max(20_000), todo: z.boolean(), todoPosition: z.number().finite().optional() }),
+  z.object({ ...base, ...taggedFields, kind: z.literal('collection'), collapsed: z.boolean() }),
+  z.object({ ...base, ...taggedFields, kind: z.literal('note'), body: z.string() }),
+  z.object({ ...base, ...taggedFields, kind: z.literal('link'), url: z.string().max(10_000), icon: z.string().max(250_000), note: z.string().max(20_000), todo: z.boolean(), todoPosition: z.number().finite().optional() }),
   z.object({
     ...base,
     kind: z.literal('share'),
@@ -24,6 +29,7 @@ const entitySchema = z.discriminatedUnion('kind', [
     hasPassword: z.boolean().optional(),
     includeNotes: z.boolean().optional(),
   }),
+  z.object({ ...base, title: z.string().max(40).refine(value => Array.from(value).length <= 20), kind: z.literal('tag'), color: tagColorSchema }),
 ])
 const documentSchema = z.object({
   format: z.literal('new-page'), version: z.literal(1),
@@ -35,6 +41,8 @@ export type Note = Extract<Entity, { kind: 'note' }>
 export type ShareRecord = Extract<Entity, { kind: 'share' }>
 export type SavedItem = Link | Note
 export type Collection = Extract<Entity, { kind: 'collection' }>
+export type Tag = Extract<Entity, { kind: 'tag' }>
+export type TaggedEntity = Collection | Link | Note
 export type Document = z.infer<typeof documentSchema>
 export type Conflict = {
   id: string; entityId: string; fields: string[]
@@ -64,6 +72,10 @@ export type Action =
   | { type: 'add-share'; id: string; entityKind: 'note' | 'collection'; entityId: string; domain: string; slug: string; shortUrl: string; title: string; expireAt?: number | null; hasPassword?: boolean; includeNotes?: boolean }
   | { type: 'update-share'; id: string; title: string; expireAt?: number | null }
   | { type: 'delete-share'; id: string }
+  | { type: 'add-tag'; id?: string; name: string; color: TagColor }
+  | { type: 'edit-tag'; id: string; name: string; color: TagColor }
+  | { type: 'delete-tag'; id: string }
+  | { type: 'set-tags'; id: string; tagIds: string[] }
 
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -71,6 +83,34 @@ export function canonical(value: unknown): string {
   return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`
 }
 export const equal = (a: unknown, b: unknown) => canonical(a) === canonical(b)
+export function normalizeTagName(value: string) {
+  const name = value.trim()
+  const length = Array.from(name).length
+  if (!name) throw new Error('标签名称不能为空')
+  if (length > 20) throw new Error('标签名称最多 20 个字符')
+  return name
+}
+export function tagKey(tag: { title: string; color: TagColor }) {
+  return `${tag.title}\u0000${tag.color}`
+}
+export function tagIds(entity: TaggedEntity): string[] {
+  return entity.tagIds ? [...new Set(entity.tagIds)] : []
+}
+export function filterTagSelection(doc: Document, spaceId: string, selectedTagIds: string[]) {
+  const selected = new Set(selectedTagIds)
+  const result = new Map<string, SavedItem[]>()
+  for (const collection of children(doc, spaceId).filter((e): e is Collection => e.kind === 'collection')) {
+    const items = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+    if (!selected.size) {
+      if (items.length) result.set(collection.id, items)
+      continue
+    }
+    const collectionMatches = tagIds(collection).some(id => selected.has(id))
+    const matchedItems = collectionMatches ? items : items.filter(item => tagIds(item).some(id => selected.has(id)))
+    if (collectionMatches || matchedItems.length) result.set(collection.id, matchedItems)
+  }
+  return result
+}
 export function savedUrl(value: string) {
   const url = new URL(value)
   // Keep historical URL schemes readable in existing snapshots and backups.
@@ -94,8 +134,24 @@ export function readDocument(value: unknown): Document {
   if (!result.success) throw new Error('数据格式不兼容或已损坏，原数据未被覆盖')
   const doc = result.data
   if (doc.entities.profile?.kind !== 'profile' || doc.entities.profile.deletedAt !== null || doc.entities.profile.purged) throw new Error('数据缺少有效用户资料')
+  const activeTagKeys = new Set<string>()
   for (const [id, entity] of Object.entries(doc.entities)) {
     if (id !== entity.id || id === '__proto__' || id === 'constructor') throw new Error('数据条目标识无效')
+    if (entity.kind === 'tag') {
+      if (entity.parentId !== null) throw new Error('标签不能放入空间或收藏块')
+      if (!entity.purged) {
+        entity.title = normalizeTagName(entity.title)
+        const key = tagKey(entity)
+        if (activeTagKeys.has(key)) throw new Error('标签身份重复')
+        activeTagKeys.add(key)
+      }
+    }
+    if ((entity.kind === 'collection' || entity.kind === 'link' || entity.kind === 'note') && entity.tagIds) {
+      entity.tagIds = [...new Set(entity.tagIds)].filter(tagId => {
+        const tag = doc.entities[tagId]
+        return tag?.kind === 'tag' && isActive(doc, tag)
+      })
+    }
     if (entity.kind === 'link' && !entity.purged) {
       savedUrl(entity.url)
       entity.icon = safeIcon(entity.icon)
@@ -139,6 +195,16 @@ export function createDocument(nickname: string): Document {
 function requireEntity(doc: Document, id: string, kind?: Entity['kind']) {
   const entity = doc.entities[id]
   if (!entity || !isActive(doc, entity) || (kind && entity.kind !== kind)) throw new Error('内容已改变，请刷新后重试')
+  return entity
+}
+function requireTag(doc: Document, id: string) {
+  const entity = requireEntity(doc, id)
+  if (entity.kind !== 'tag') throw new Error('标签不存在')
+  return entity
+}
+function requireTagged(doc: Document, id: string): TaggedEntity {
+  const entity = requireEntity(doc, id)
+  if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note') throw new Error('此内容不能添加标签')
   return entity
 }
 function requireSavedItems(doc: Document, ids: string[]): SavedItem[] {
@@ -324,6 +390,7 @@ export function apply(doc: Document, action: Action): Document {
     }
     case 'delete': {
       const entity = requireEntity(next, action.id)
+      if (entity.kind === 'tag') throw new Error('标签只能永久删除')
       if (entity.kind === 'profile') throw new Error('不能删除用户资料')
       if (entity.kind === 'space' && active(next).filter(e => e.kind === 'space').length <= 1) throw new Error('请至少保留一个空间')
       const affected = active(next).filter(e => e.id === entity.id || parents(next, e).some(p => p.id === entity.id))
@@ -349,6 +416,7 @@ export function apply(doc: Document, action: Action): Document {
     case 'purge': {
       const entity = next.entities[action.id]
       if (!entity || entity.kind === 'profile' || entity.purged) throw new Error('回收站内容已改变，请刷新后重试')
+      if (entity.kind === 'tag') throw new Error('标签只能永久删除')
       if (entity.kind === 'space' && active(next).filter(e => e.kind === 'space').length <= 1 && entity.deletedAt === null) throw new Error('请至少保留一个空间')
       for (const item of Object.values(next.entities)) if (!item.purged && (item.id === entity.id || parents(next, item).some(parent => parent.id === entity.id))) {
         item.deletedAt ??= now
@@ -395,6 +463,51 @@ export function apply(doc: Document, action: Action): Document {
       entity.updatedAt = now
       break
     }
+    case 'add-tag': {
+      const name = normalizeTagName(action.name)
+      const duplicate = Object.values(next.entities).find(e => e.kind === 'tag' && !e.purged && e.title === name && e.color === action.color)
+      if (duplicate) throw new Error('标签已存在')
+      const id = action.id ?? crypto.randomUUID()
+      if (next.entities[id]) throw new Error('标签已存在')
+      next.entities[id] = { ...common('tag', name, null, appendPosition(next, null, 'tag')), id, kind: 'tag', color: action.color }
+      break
+    }
+    case 'edit-tag': {
+      const source = requireTag(next, action.id)
+      const name = normalizeTagName(action.name)
+      const target = Object.values(next.entities).find(e => e.kind === 'tag' && !e.purged && e.id !== source.id && e.title === name && e.color === action.color) as Tag | undefined
+      source.title = name
+      source.color = action.color
+      source.updatedAt = now
+      if (target) {
+        for (const entity of Object.values(next.entities)) {
+          if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note') continue
+          entity.tagIds = [...new Set((entity.tagIds ?? []).map(id => id === target.id ? source.id : id))]
+        }
+        delete next.entities[target.id]
+      }
+      break
+    }
+    case 'delete-tag': {
+      const tag = requireTag(next, action.id)
+      tag.deletedAt = now
+      tag.deletedBy = tag.id
+      purgeEntity(tag, now)
+      for (const entity of Object.values(next.entities)) {
+        if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note') continue
+        entity.tagIds = (entity.tagIds ?? []).filter(id => id !== tag.id)
+      }
+      break
+    }
+    case 'set-tags': {
+      const target = requireTagged(next, action.id)
+      if (!Array.isArray(action.tagIds) || action.tagIds.length > 100) throw new Error('标签数量无效')
+      const unique = [...new Set(action.tagIds)]
+      for (const id of unique) requireTag(next, id)
+      target.tagIds = unique
+      target.updatedAt = now
+      break
+    }
     case 'delete-share': {
       const entity = next.entities[action.id]
       if (!entity || entity.kind !== 'share' || entity.purged) throw new Error('分享记录不存在或已删除')
@@ -407,8 +520,12 @@ export function apply(doc: Document, action: Action): Document {
   return readDocument(next)
 }
 function purgeEntity(entity: Entity, now: number) {
-  entity.purged = true; entity.title = ''; entity.updatedAt = now
-  if (entity.kind === 'link') { entity.url = ''; entity.icon = ''; entity.note = ''; entity.todo = false }
+  entity.purged = true; entity.updatedAt = now
+  if (entity.kind !== 'tag') entity.title = ''
+  if (entity.kind === 'link') { entity.url = ''; entity.icon = ''; entity.note = ''; entity.todo = false; entity.tagIds = [] }
+  if (entity.kind === 'note') entity.tagIds = []
+  if (entity.kind === 'collection') entity.tagIds = []
+
   if (entity.kind === 'note') entity.body = ''
   if (entity.kind === 'share') { entity.shortUrl = ''; entity.slug = ''; entity.domain = ''; entity.entityId = '' }
 }

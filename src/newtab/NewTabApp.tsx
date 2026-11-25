@@ -3,7 +3,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Check, Folder, Layers3, Leaf, LoaderCircle, Pencil, Plus, Search, Settings2, Share2, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, type Action, type Collection, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
+import { active, children, filterTagSelection, type Action, type Collection, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import SettingsPanel from './SettingsPanel'
@@ -27,6 +27,7 @@ import { documentUrl } from '../core/document-address'
 import { markdownName, readDroppedMarkdown, rememberFile } from '../document/local-files'
 import { SelectionProvider } from './Selection'
 import BatchActions from './BatchActions'
+import { TagFilterButton } from './Tags'
 
 const workbench = tv({
   slots: {
@@ -37,7 +38,7 @@ const workbench = tv({
     sectionTitle: 'block text-[10px] [font-weight:650] tracking-[1px] text-[#989e90] [@media(max-width:650px)]:hidden',
     spaces: 'mb-[22px] overflow-auto max-h-[34vh] [@media(max-width:650px)]:mb-[30px] [@media(max-width:650px)]:max-h-[40vh]',
     sync: 'flex items-center gap-[7px] mt-[15px] mx-[13px] mb-0 text-[10px] text-[#9aa18f] bg-transparent border-0 [@media(max-width:650px)]:hidden',
-    heading: 'flex items-center justify-between gap-[12px] mb-[10px] [@media(max-width:650px)]:items-start',
+    heading: 'flex flex-wrap items-center justify-between gap-x-[12px] gap-y-[6px] mb-[10px] [@media(max-width:650px)]:items-start',
     pageHeader: 'pt-[30px] pb-[28px] [@media(max-width:650px)]:py-[25px]',
     title: 'text-[28px] tracking-[-.5px] font-semibold [line-height:1.5] [@media(max-width:650px)]:text-[24px]',
     loading: 'relative z-1 min-h-screen flex flex-col items-center justify-center gap-[18px] text-[#849571] text-[12px] bg-[#f8faef99]',
@@ -101,6 +102,10 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const collectingRef = useRef(false)
   const pendingClosures = useMemo(() => new Map<number, OpenTab>(), [data?.sourceId])
   const [collectionReveal, setCollectionReveal] = useState(0)
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  useEffect(() => {
+    setSelectedTagIds([])
+  }, [selected])
   useEffect(() => {
     let opening = false
     const dragover = (event: DragEvent) => {
@@ -167,6 +172,8 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const space = spaces.find(e => e.id === selected) ?? spaces[0]
   const nickname = doc.entities.profile.title
   const collections = space ? children(doc, space.id).filter((e): e is Collection => e.kind === 'collection') : []
+  const visibleByTag = space ? filterTagSelection(doc, space.id, selectedTagIds) : new Map<string, SavedItem[]>()
+  const filteredCollections = selectedTagIds.length ? collections.filter(collection => visibleByTag.has(collection.id)) : collections
   const links = all.filter((e): e is Link => e.kind === 'link')
   const activeShares = Object.values(doc.entities).filter((e): e is ShareRecord => e.kind === 'share' && !e.purged)
   const status = syncStatusLabels[data.status]
@@ -232,9 +239,9 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       <div className="mt-auto"><RecycleBin doc={doc} act={act} /><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
-      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={createCollection}><Plus size={15} />新建收藏块</Button>}</div>
+      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <div className="order-3 basis-full pb-[6px]"><TagFilterButton doc={doc} spaceId={space.id} value={selectedTagIds} onChange={setSelectedTagIds} /></div>}{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={createCollection}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={collections.map(c => c.id)} strategy={verticalListSortingStrategy}>{collections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} doc={doc} act={act} edit={setEditor} isEditing={editingId === collection.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(collection.id) }} onEndEdit={() => setEditingId(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{creatingCollection && <NewCollectionDraft onSave={async title => { await act({ type: 'add-collection', parentId: space.id, title }); setCreatingCollection(false) }} onCancel={() => setCreatingCollection(false)} />}{!!collections.length && !creatingCollection && <QuickCollectionGap spaceId={space.id} />}{!collections.length && !creatingCollection && <Empty icon="collection" title="暂无收藏块" text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={createCollection}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={filteredCollections.map(c => c.id)} strategy={verticalListSortingStrategy}>{filteredCollections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} visibleItems={selectedTagIds.length ? visibleByTag.get(collection.id) : undefined} doc={doc} act={act} edit={setEditor} isEditing={editingId === collection.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(collection.id) }} onEndEdit={() => setEditingId(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{creatingCollection && <NewCollectionDraft onSave={async title => { await act({ type: 'add-collection', parentId: space.id, title }); setCreatingCollection(false) }} onCancel={() => setCreatingCollection(false)} />}{!!filteredCollections.length && !creatingCollection && <QuickCollectionGap spaceId={space.id} />}{!filteredCollections.length && !creatingCollection && <Empty icon="collection" title={selectedTagIds.length ? '没有匹配标签的收藏块' : '暂无收藏块'} text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={createCollection}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateEntity={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link' || n.kind === 'collection')) locate(n) }} />}
       {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}

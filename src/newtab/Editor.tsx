@@ -4,6 +4,7 @@ import { active, parents, savedUrl, type Action, type Document, type Entity } fr
 import { Button, Modal } from './ui'
 import { formStyles } from './form-styles'
 import { Toast } from '../shared/Toast'
+import { TagAssignmentField } from './Tags'
 
 const fields = formStyles()
 
@@ -47,6 +48,7 @@ export default function Editor({ state, doc, act, close }: { state: EditorState;
       {state.kind === 'edit' && <label className={fields.label()}>网址<input className={fields.control()} aria-label="网址" type="url" required value={url} onChange={e => { setUrl(e.target.value); void autoSave({ url: e.target.value }) }} placeholder="https://" /></label>}
       <label className={fields.label()}>{['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'}<input className={fields.control()} aria-label={['space', 'collection', 'rename'].includes(state.kind) ? '名称' : '标题'} value={title} onChange={e => { setTitle(e.target.value); void autoSave({ title: e.target.value }) }} required={state.kind !== 'edit'} maxLength={1000} autoFocus  /></label>
       {state.kind === 'edit' && <label className={fields.label()}>备注<textarea className={fields.control({ className: 'resize-y min-h-[92px]' })} aria-label="备注" value={note} onChange={e => { setNote(e.target.value); void autoSave({ note: e.target.value }) }} maxLength={20_000} /></label>}
+      {state.kind === 'edit' && entity?.kind === 'link' && <TagAssignmentField doc={doc} target={entity} act={act} />}
     <Toast message={error} onClose={() => setError('')} />
     {!editing && <div className="flex justify-end gap-[8px] mt-[24px]"><Button onClick={close}>取消</Button><Button type="submit" tone="primary" disabled={busy}>创建</Button></div>}
   </form></Modal>
