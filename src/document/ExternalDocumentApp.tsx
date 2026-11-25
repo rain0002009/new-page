@@ -7,6 +7,8 @@ import MarkdownEditor from './LazyMarkdownEditor'
 import DocumentOutline from './DocumentOutline'
 import LocalDocumentApp from './LocalDocumentApp'
 import { Toast } from '../shared/Toast'
+import { urlFilename } from './document-title'
+import { useDocumentTitle } from './useDocumentTitle'
 
 export default function ExternalDocumentApp() {
   const [navigation, setNavigation] = useState(0)
@@ -34,7 +36,9 @@ function RemoteDocument({ address }: { address: string }) {
     finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [address])
-  const title = (() => { try { return decodeURIComponent(new URL(file?.url ?? address).pathname.split('/').pop() || 'Markdown') } catch { return 'Markdown' } })()
+  const filename = file ? urlFilename(file.url) : ''
+  const title = filename || urlFilename(address) || 'Markdown'
+  useDocumentTitle(!error && file ? filename : undefined)
   return <main className={documentStyles.main()}>
     <header className={documentStyles.header()}><Button onClick={() => void load()} disabled={loading}>重新加载</Button></header>
     {loading && <p role="status" className={documentStyles.status()}>正在读取…</p>}

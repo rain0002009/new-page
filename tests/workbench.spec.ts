@@ -5892,3 +5892,80 @@ test('收藏块公开分享全流程：是否分享笔记开关、忽略未分�
   await page.getByRole('button', { name: '我的空间', exact: true }).click()
   await expect(page.getByRole('button', { name: '分享 日常收藏', exact: true })).toBeVisible()
 })
+
+test('文档页标签标题随收藏笔记、本地文件与在线 Markdown 动态同步与回退', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+
+  // 1. 收藏下的托管笔记：默认标题、实时编辑、空白回退、删除/恢复回退
+  const openedNote = context.waitForEvent('page')
+  await page.getByRole('button', { name: '新建笔记 日常收藏', exact: true }).click()
+  const note = await openedNote
+  const noteTitleInput = note.getByRole('textbox', { name: '笔记标题', exact: true })
+  await expect(noteTitleInput).toHaveValue('新笔记')
+  await expect(note).toHaveTitle('新笔记')
+
+  await noteTitleInput.fill('周会纪要')
+  await expect(note).toHaveTitle('周会纪要')
+
+  await noteTitleInput.fill('   ')
+  await expect(note).toHaveTitle('页墟 · Markdown')
+
+  await noteTitleInput.fill('复盘纪要')
+  await expect(note).toHaveTitle('复盘纪要')
+  await expect(note.getByRole('status')).toContainText('已保存到本机')
+  await note.reload()
+  await expect(note).toHaveTitle('复盘纪要')
+
+  await page.getByRole('button', { name: '删除 日常收藏', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '移到回收站', exact: true }).click()
+  await expect(note.getByRole('alert')).toContainText('回收站')
+  await expect(note).toHaveTitle('页墟 · Markdown')
+
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '回收站', exact: true }).click()
+  await page.getByRole('button', { name: '恢复 日常收藏', exact: true }).click()
+  await page.getByRole('dialog', { name: '回收站' }).getByRole('button', { name: '关闭弹窗' }).click()
+  await expect(note).toHaveTitle('复盘纪要')
+
+  // 2. 拖入本地 Markdown 文件
+  const openedDropped = context.waitForEvent('page')
+  await page.evaluate(() => {
+    const transfer = new DataTransfer()
+    transfer.items.add(new File(['# 拖入标题\n\n本地正文'], '拖入手记.MD', { type: 'text/markdown' }))
+    document.querySelector('.workbench')!.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+  })
+  const droppedDoc = await openedDropped
+  await expect(droppedDoc.getByRole('heading', { name: '拖入标题', exact: true })).toBeVisible()
+  await expect(droppedDoc).toHaveTitle('拖入手记.MD')
+
+  // 3. 在线 Markdown 文件：加载成功显示文件名，相对跳转同步更新，加载失败回退默认标题
+  const remoteDoc = await context.newPage()
+  const docBaseUrl = new URL('/document/index.html', page.url()).href
+  await remoteDoc.goto(`${docBaseUrl}?url=${encodeURIComponent(`${origin}/markdown/guide.MD?version=1#安装`)}`)
+  await expect(remoteDoc.getByRole('heading', { name: '阅读指南', exact: true })).toBeVisible()
+  await expect(remoteDoc).toHaveTitle('guide.MD')
+
+  await remoteDoc.getByRole('link', { name: '下一篇', exact: true }).click()
+  await expect(remoteDoc.getByRole('heading', { name: '下一篇', exact: true })).toBeVisible()
+  await expect(remoteDoc).toHaveTitle('next.md')
+
+  await remoteDoc.goto(`${docBaseUrl}?url=${encodeURIComponent(`${origin}/markdown/error.md`)}`)
+  await expect(remoteDoc.getByRole('alert')).toBeVisible()
+  await expect(remoteDoc).toHaveTitle('页墟 · Markdown')
+
+  // 4. 本地 file:// 目录文件：打开、切换文件与浏览器后退均同步文件名
+  const { doc: localDoc, context: localContext } = await openFileDirectoryFixture()
+  try {
+    await expect(localDoc).toHaveTitle('当前文档.md')
+    await localDoc.getByRole('button', { name: '文件目录', exact: true }).click()
+    await localDoc.getByRole('button', { name: '打开 同级 #100%.MARKDOWN', exact: true }).click()
+    await expect(localDoc.getByRole('heading', { name: '同级标题', exact: true })).toBeVisible()
+    await expect(localDoc).toHaveTitle('同级 #100%.MARKDOWN')
+    await localDoc.goBack()
+    await expect(localDoc.getByRole('heading', { name: '当前标题', exact: true })).toBeVisible()
+    await expect(localDoc).toHaveTitle('当前文档.md')
+  } finally {
+    await localContext.close()
+  }
+})

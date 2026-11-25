@@ -9,6 +9,7 @@ import { Button } from '../newtab/ui'
 import MarkdownEditor from './LazyMarkdownEditor'
 import DocumentOutline from './DocumentOutline'
 import { Toast } from '../shared/Toast'
+import { useDocumentTitle } from './useDocumentTitle'
 
 export default function DocumentApp() {
   const params = new URLSearchParams(location.search)
@@ -25,6 +26,7 @@ export default function DocumentApp() {
   const dirty = useRef(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const pending = useRef(Promise.resolve())
+  useDocumentTitle(available ? draft?.title : undefined)
   useEffect(() => {
     let disposed = false
     async function refresh() {

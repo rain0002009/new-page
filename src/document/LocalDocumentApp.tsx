@@ -9,6 +9,8 @@ import MarkdownEditor from './LazyMarkdownEditor'
 import { recallFile, rememberFile, markdownName, readFileHandle, relativeFile, type LocalFile, type FileHandle, type LocalImageCleanup } from './local-files'
 import { fileDirectoryUrl, requireFileUrlAccess } from './local-directory'
 import { Toast } from '../shared/Toast'
+import { urlFilename } from './document-title'
+import { useDocumentTitle } from './useDocumentTitle'
 
 export default function LocalDocumentApp({ address = '' }: { address?: string }) {
   const [file, setFile] = useState<LocalFile>()
@@ -30,6 +32,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
   const pending = useRef(Promise.resolve())
   const drafts = useRef(Promise.resolve())
   const recordId = useRef(new URLSearchParams(location.search).get('local') ?? crypto.randomUUID())
+  useDocumentTitle(file?.title)
   function persist(value: LocalFile, id: string, acknowledged: LocalImageCleanup[] = []) {
     const task = drafts.current.catch(() => {}).then(() => rememberFile(value, id, acknowledged))
     drafts.current = task.then(() => {}, () => {})
@@ -83,7 +86,7 @@ export default function LocalDocumentApp({ address = '' }: { address?: string })
     try {
       await requireFileUrlAccess()
       const result = await rpc({ type: 'read-markdown', url })
-      if (!isDisposed() && selection === selectionEpoch.current && result.file) await show({ title: decodeURIComponent(new URL(url).pathname.split('/').pop()!), body: result.file.body, baseline: result.file.body, url }, undefined, navigate)
+      if (!isDisposed() && selection === selectionEpoch.current && result.file) await show({ title: urlFilename(url) || 'Markdown', body: result.file.body, baseline: result.file.body, url }, undefined, navigate)
     } catch (cause) {
       if (!isDisposed() && selection === selectionEpoch.current) { setStatus('读取失败'); setError(cause instanceof Error ? cause.message : '读取失败，请重试') }
     } finally { if (!isDisposed() && selection === selectionEpoch.current) setLoading(false) }
