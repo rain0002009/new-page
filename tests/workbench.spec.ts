@@ -132,27 +132,62 @@ async function openClient(existingProfile?: string, quarkMode = false) {
   const page = await context.newPage()
   await page.goto(`chrome-extension://${id}/chrome_url_overrides/newtab.html`)
   for (const startup of startupPages) await startup.close()
-  if (!quarkMode && !existingProfile) await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
+  if (!quarkMode && !existingProfile && await page.getByRole('heading', { name: '连接收藏库' }).count() > 0) await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
   return { context, page, profile, url: page.url() }
 }
 
 async function connect(page: Page, path = '/dav/', spaceTitle = '我的空间') {
+  const fromSettings = await page.getByRole('heading', { name: '设置', exact: true }).count() > 0
+  const onOnboarding = await page.getByRole('heading', { name: '连接收藏库' }).count() > 0
+  if (!fromSettings && !onOnboarding) {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+  }
   await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
-  await page.getByLabel('昵称', { exact: true }).fill('Rain')
+  const nickname = page.getByLabel('昵称', { exact: true })
+  if (await nickname.count() > 0 && await nickname.isVisible()) {
+    await nickname.fill('Rain')
+  }
   await page.getByLabel('WebDAV 地址').fill(`${origin}${path}`)
   await page.getByLabel('用户名', { exact: true }).fill('tester')
   await page.getByLabel('密码或应用专用密码').fill('secret')
-  await page.getByRole('button', { name: '连接并开始' }).click()
-  await expect(page.getByRole('heading', { name: spaceTitle, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /连接并开始|连接数据源/ }).click()
+  const confirmMerge = page.getByRole('button', { name: '确认合并' })
+  try {
+    await confirmMerge.waitFor({ state: 'visible', timeout: 1500 })
+    await confirmMerge.click()
+  } catch {}
+  const resolveBtn = page.getByRole('button', { name: /保留本地版本|保留远端版本/ })
+  try {
+    await resolveBtn.waitFor({ state: 'visible', timeout: 1500 })
+    await resolveBtn.click()
+  } catch {}
+  if (fromSettings) {
+    await expect(page.getByText(/上次同步：/).first()).toBeVisible()
+  } else {
+    if (!onOnboarding) {
+      await page.getByRole('button', { name: spaceTitle }).first().click()
+    }
+    await expect(page.getByRole('heading', { name: spaceTitle, exact: true }).first()).toBeVisible()
+  }
 }
 
 async function connectQuark(page: Page, spaceTitle = '我的空间') {
   const fromSettings = await page.getByRole('heading', { name: '设置', exact: true }).count() > 0
+  const onOnboarding = await page.getByRole('heading', { name: '连接收藏库' }).count() > 0
+  if (!fromSettings && !onOnboarding) {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+  }
   await page.getByRole('button', { name: '夸克网盘', exact: true }).click()
   await page.getByRole('button', { name: /扫码登录夸克|重新扫码 \/ 切换账号/ }).click()
   await expect(page.getByLabel('夸克登录二维码')).toBeVisible()
-  if (fromSettings) await expect(page.getByText(/当前夸克账号：/)).toBeVisible()
-  else await expect(page.getByRole('heading', { name: spaceTitle, exact: true })).toBeVisible()
+  if (fromSettings) {
+    await expect(page.getByText(/当前夸克账号：/)).toBeVisible()
+  } else if (!onOnboarding) {
+    await page.getByRole('button', { name: spaceTitle, exact: true }).click()
+    await expect(page.getByRole('heading', { name: spaceTitle, exact: true })).toBeVisible()
+  } else {
+    await expect(page.getByRole('heading', { name: spaceTitle, exact: true })).toBeVisible()
+  }
 }
 
 async function createCollection(page: Page, title: string) {
@@ -169,6 +204,101 @@ async function createSpace(page: Page, title: string) {
   await spaceInput.fill(title)
   await spaceInput.press('Enter')
 }
+
+test('未登录默认进入本地收藏库：显示未连接云端、支持本地笔记与收藏、设置页隐藏同步按钮并支持连接与断开', async () => {
+  const { page } = await openClient(undefined, true)
+  // 1. 无全屏连接引导，直接进入工作台
+  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
+  await expect(page.getByText('日常收藏')).toBeVisible()
+  // 2. 侧栏显示未连接云端
+  await expect(page.getByText('未连接云端')).toBeVisible()
+  // 3. 在未连接状态下可创建空间与收藏块
+  await createCollection(page, '本地专属块')
+  await expect(page.getByText('本地专属块')).toBeVisible()
+  // 4. 进入设置页，断言状态及按钮可见性
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page.getByText('当前为本地收藏库，仅保存在当前设备。如需多端同步或备份防丢，可连接网盘。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '立即同步' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '修复夸克同步' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '断开云端同步' })).toHaveCount(0)
+  // 5. 导出备份可用
+  await expect(page.getByRole('button', { name: '导出备份' })).toBeEnabled()
+  // 6. 连接 WebDAV
+  await connect(page)
+  // 7. 已连接后，侧栏显示同步状态
+  await expect(page.getByRole('button', { name: /已同步|正在同步|待同步/ })).toBeVisible()
+  // 8. 进入设置页断言断开连接
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page.getByRole('button', { name: '立即同步' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '断开云端同步' })).toBeVisible()
+  await page.getByRole('button', { name: '断开云端同步' }).click()
+  await page.getByRole('button', { name: '确认断开' }).click()
+  // 9. 断开后退回未连接云端，本地块保留
+  await expect(page.getByText('未连接云端')).toBeVisible()
+  await page.getByRole('button', { name: '我的空间', exact: true }).first().click()
+  await expect(page.getByText('本地专属块')).toBeVisible()
+})
+
+test('从本地收藏库连接已有云端数据时触发合并确认，取消则保留本地，确认后双向合并', async () => {
+  const remotePath = '/dav-merge/'
+  const remoteDoc = {
+    format: 'new-page',
+    version: 1,
+    entities: {
+      profile: { id: 'profile', kind: 'profile', title: '云端用户', parentId: null, position: 1024, updatedAt: Date.now(), deletedAt: null, deletedBy: null, purged: false },
+      'space-cloud': { id: 'space-cloud', kind: 'space', title: '云端空间', parentId: null, position: 1024, updatedAt: Date.now(), deletedAt: null, deletedBy: null, purged: false },
+      'col-cloud': { id: 'col-cloud', kind: 'collection', title: '远端已有块', parentId: 'space-cloud', position: 1024, updatedAt: Date.now(), deletedAt: null, deletedBy: null, purged: false, collapsed: false },
+    },
+  }
+  files.set(`${remotePath}new-page/data-v1.json`, { body: JSON.stringify(remoteDoc), revision: 1 })
+
+  const { page } = await openClient(undefined, true)
+  await createCollection(page, '本地独有块')
+  await expect(page.getByText('本地独有块')).toBeVisible()
+
+  // 进入设置连接该 WebDAV
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
+  const nickname = page.getByLabel('昵称', { exact: true })
+  if (await nickname.count() > 0 && await nickname.isVisible()) {
+    await nickname.fill('Rain')
+  }
+  await page.getByLabel('WebDAV 地址').fill(`${origin}${remotePath}`)
+  await page.getByLabel('用户名', { exact: true }).fill('tester')
+  await page.getByLabel('密码或应用专用密码').fill('secret')
+  await page.getByRole('button', { name: /连接并开始|连接数据源/ }).click()
+
+  // 断言出现合并确认弹窗
+  await expect(page.getByText('目标已有收藏。确认合并当前数据？已有内容会保留，冲突需要单独选择。')).toBeVisible()
+
+  // 点击取消：保持本地状态
+  await page.getByRole('button', { name: '取消' }).click()
+  await expect(page.getByText('未连接云端')).toBeVisible()
+  await page.getByRole('button', { name: '我的空间', exact: true }).click()
+  await expect(page.getByText('本地独有块')).toBeVisible()
+
+  // 再次提交并确认合并
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
+  const nickname2 = page.getByLabel('昵称', { exact: true })
+  if (await nickname2.count() > 0 && await nickname2.isVisible()) {
+    await nickname2.fill('Rain')
+  }
+  await page.getByLabel('WebDAV 地址').fill(`${origin}${remotePath}`)
+  await page.getByLabel('用户名', { exact: true }).fill('tester')
+  await page.getByLabel('密码或应用专用密码').fill('secret')
+  await page.getByRole('button', { name: /连接并开始|连接数据源/ }).click()
+  await page.getByRole('button', { name: '确认合并' }).click()
+
+  // 合并成功，解决冲突并切换为已同步状态，且两端空间和内容均存在
+  await page.getByRole('button', { name: '保留本地版本' }).click()
+  await expect(page.getByRole('button', { name: /已同步|正在同步|待同步/ })).toBeVisible()
+  await page.getByRole('button', { name: '我的空间', exact: true }).first().click()
+  await expect(page.getByText('本地独有块')).toBeVisible()
+  await page.getByRole('button', { name: '云端空间', exact: true }).first().click()
+  await expect(page.getByText('远端已有块')).toBeVisible()
+})
 
 test('s.ee 服务配置支持密钥显隐、夸克同步、备份及跨设备清除', async () => {
   const { page } = await openClient(undefined, true)
@@ -1336,14 +1466,14 @@ test('本地文件早期接管在后台失败时恢复原文，其他格式和�
   await doc.goto(pathToFileURL(html).href)
   await expect(doc.frameLocator('iframe').locator('body > pre')).toBeVisible()
   await expect(doc.frameLocator('iframe').locator('body > pre')).toContainText('# 本地原始内容')
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /我的空间|连接收藏库/, exact: true })).toBeVisible()
 })
 
 for (const mode of ['未连接收藏库', '已连接收藏库', '关闭自动接管', '缺少文件网址权限'] as const) test(`Chrome 原生本地文件拖放保留文件网址：${mode}`, async () => {
   const { page, context, profile } = await openClient(undefined, true)
   const path = join(profile, '原生 拖入 #100%.markdown')
   await writeFile(path, '# 原生拖放标题\n\n来自本地文件夹的正文')
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /我的空间|连接收藏库/, exact: true })).toBeVisible()
   if (mode === '已连接收藏库') await connectQuark(page)
   if (mode === '关闭自动接管') await page.evaluate(() => chrome.storage.local.set({ markdownTakeover: false }))
   if (mode === '缺少文件网址权限') await context.addInitScript(() => { chrome.extension.isAllowedFileSchemeAccess = (() => Promise.resolve(false)) as typeof chrome.extension.isAllowedFileSchemeAccess })
@@ -1385,7 +1515,7 @@ for (const mode of ['未连接收藏库', '已连接收藏库', '关闭自动接
 
 test('拖入非 md 文件不拦截报错，放行给浏览器或页面触发原有逻辑', async () => {
   const { page } = await openClient(undefined, true)
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /我的空间|连接收藏库/, exact: true })).toBeVisible()
 
   // 模拟拖入非 Markdown 文件（如 txt、png 等）
   await page.evaluate(() => {
@@ -1403,7 +1533,7 @@ test('拖入非 md 文件不拦截报错，放行给浏览器或页面触发原�
 
 test('首次拖入主动申请写入权限，随后直接编辑写回并处理磁盘冲突', async () => {
   const { page, context } = await openClient(undefined, true)
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /我的空间|连接收藏库/, exact: true })).toBeVisible()
   await page.evaluate(() => {
     Object.assign(FileSystemFileHandle.prototype, { requestPermission: async (options: { mode: string }) => {
       localStorage.setItem('dropPermission', options.mode); return 'granted'
@@ -1434,7 +1564,7 @@ test('首次拖入拒绝写入授权时保持只读，重新授权后可编辑',
     Object.assign(FileSystemFileHandle.prototype, { requestPermission: async () => localStorage.getItem('allowWrite') === 'yes' ? 'granted' : 'denied' })
   })
   await page.reload()
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /我的空间|连接收藏库/, exact: true })).toBeVisible()
   const doc = await dropLocalFile(page, context, '授权手记.md', '授权前正文')
   const body = doc.getByRole('textbox', { name: 'Markdown 正文', exact: true })
   await expect(body).toHaveAttribute('contenteditable', 'false')
@@ -1450,7 +1580,7 @@ test('首次拖入拒绝写入授权时保持只读，重新授权后可编辑',
 
 test('本地写入权限失效保留草稿，重开并重新授权后继续保存', async () => {
   const { page, context } = await openClient(undefined, true)
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /我的空间|连接收藏库/, exact: true })).toBeVisible()
   await context.addInitScript(() => {
     const writable = FileSystemFileHandle.prototype.createWritable
     FileSystemFileHandle.prototype.createWritable = function(options) {
@@ -1474,7 +1604,7 @@ test('本地写入权限失效保留草稿，重开并重新授权后继续保�
 test('拖入非 Markdown 文件时提示支持格式并留在新标签页', async () => {
   const { page, context } = await openClient(undefined, true)
   const originalUrl = page.url(), originalPages = context.pages().length
-  await expect(page.getByRole('heading', { name: '连接收藏库', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /我的空间|连接收藏库/, exact: true })).toBeVisible()
   await page.evaluate(() => {
     const transfer = new DataTransfer()
     transfer.items.add(new File(['其他文件'], '其他文件.txt', { type: 'text/plain' }))

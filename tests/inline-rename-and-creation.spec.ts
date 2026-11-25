@@ -92,13 +92,24 @@ async function openClient() {
 }
 
 async function connect(page: Page) {
+  const fromSettings = await page.getByRole('heading', { name: '设置', exact: true }).count() > 0
+  const onOnboarding = await page.getByRole('heading', { name: '连接收藏库' }).count() > 0
+  if (!fromSettings && !onOnboarding) {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+  }
   await page.getByRole('button', { name: 'WebDAV', exact: true }).click()
-  await page.getByLabel('昵称', { exact: true }).fill('Rain')
+  const nickname = page.getByLabel('昵称', { exact: true })
+  if (await nickname.count() > 0 && await nickname.isVisible()) {
+    await nickname.fill('Rain')
+  }
   await page.getByLabel('WebDAV 地址').fill(`${origin}/dav/`)
   await page.getByLabel('用户名', { exact: true }).fill('tester')
   await page.getByLabel('密码或应用专用密码').fill('secret')
-  await page.getByRole('button', { name: '连接并开始' }).click()
-  await expect(page.getByRole('heading', { name: '我的空间', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /连接并开始|连接数据源/ }).click()
+  if (!fromSettings && !onOnboarding) {
+    await page.getByRole('button', { name: '我的空间' }).first().click()
+  }
+  await expect(page.getByRole('heading', { name: '我的空间', exact: true }).first()).toBeVisible()
 }
 
 test('收藏块去掉重命名图标按钮，双击名称进入行内编辑，Enter保存，删空恢复原名', async () => {

@@ -7,7 +7,7 @@ import { startQr, pollQr, repairFolder } from './quark/auth'
 import { QuarkStore } from './quark/store'
 import { quarkOrigins } from './quark/transport'
 import type { LoginProgress } from './quark/progress'
-import { storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root, type WorkspaceSource } from './local-workspace'
+import { ensureLocalWorkspace, storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root, type WorkspaceSource } from './local-workspace'
 import { configureMarkdownNavigation, openOriginalMarkdown } from './markdown-navigation'
 import { queueDocumentImageChanges, updateLocalImageDocument } from './hosted-images'
 import { executeImageCleanup } from './hosted-image-cleaner'
@@ -22,6 +22,7 @@ function atomic<T>(work: (root: Root) => T | Promise<T>): Promise<T> {
   const result = chain.then(async () => {
     const stored = await chrome.storage.local.get(storageKey)
     const root: Root = (stored[storageKey] as Root | undefined) ?? { active: null, sources: {} }
+    ensureLocalWorkspace(root)
     const output = await work(root)
     await chrome.storage.local.set({ [storageKey]: root })
     return output
@@ -48,7 +49,7 @@ function acknowledgeNotes(source: WorkspaceSource, attempted: string[], synced: 
     (source.doc.entities[id] && isActive(source.doc, source.doc.entities[id])) !== (synced.entities[id] && isActive(synced, synced.entities[id])))
 }
 function queueNoteChanges(source: WorkspaceSource, before: Document) {
-  if (!isQuark(source.config)) return
+  if (!source.config || !isQuark(source.config)) return
   const pending = new Set(source.pendingNoteIds)
   for (const id of new Set([...Object.keys(before.entities), ...Object.keys(source.doc.entities)])) {
     const previous = before.entities[id], note = source.doc.entities[id]
@@ -62,7 +63,13 @@ function queueNoteChanges(source: WorkspaceSource, before: Document) {
 export function schedule(id: string, delay = 600) {
   const pending = scheduled.get(id)
   if (pending) clearTimeout(pending)
-  scheduled.set(id, setTimeout(() => { scheduled.delete(id); void synchronize(id) }, delay))
+  scheduled.set(id, setTimeout(() => {
+    scheduled.delete(id)
+    void atomic(root => root.sources[id]?.config).then(config => {
+      if (!config) void cleanupImages(id)
+      else void synchronize(id)
+    })
+  }, delay))
 }
 export function synchronize(id: string, repairing = false): Promise<void> {
   const pending = scheduled.get(id)
@@ -79,7 +86,7 @@ async function synchronizeSource(id: string, repairing = false) {
   try {
     const initial = await atomic(root => {
       const source = root.sources[id]
-      if (!source || source.conflicts.length) return null
+      if (!source || !source.config || source.conflicts.length) return null
       if (repairing) {
         if (!isQuark(source.config)) throw new Error('只有夸克收藏库支持此修复操作')
         source.pendingNoteIds = [...new Set([...(source.pendingNoteIds ?? []), ...Object.values(source.doc.entities).filter(entity => entity.kind === 'note').map(entity => entity.id)])]
@@ -90,7 +97,10 @@ async function synchronizeSource(id: string, repairing = false) {
       source.status = 'syncing'; source.error = ''
       return structuredClone(source)
     })
-    if (!initial) return
+    if (!initial || !initial.config) {
+      await cleanupImages(id)
+      return
+    }
     broadcast()
     if (repairing && isQuark(initial.config)) {
       const previousFolderId = initial.config.folderId
@@ -162,6 +172,17 @@ async function synchronizeSource(id: string, repairing = false) {
     else await cleanupImages(id)
   }
 }
+function hasLocalContent(previous: WorkspaceSource | null | undefined): boolean {
+  if (!previous) return false
+  const list = active(previous.doc)
+  if (list.some(e => e.kind === 'link' || e.kind === 'note' || e.kind === 'share')) return true
+  const spaces = list.filter(e => e.kind === 'space')
+  const collections = list.filter(e => e.kind === 'collection')
+  if (spaces.length !== 1 || spaces[0].title !== '我的空间') return true
+  if (collections.length !== 1 || collections[0].title !== '日常收藏') return true
+  return false
+}
+
 async function connect(request: ConnectRequest): Promise<Result> {
   const config = normalizeRemote(request.config)
   const defaultId = await remoteKey(config)
@@ -187,6 +208,7 @@ async function connect(request: ConnectRequest): Promise<Result> {
   }
   const result = await atomic(root => {
     const previous = root.active ? root.sources[root.active] : null
+    const fromLocal = !previous || !previous.config
     if (request.mode === 'migrate' && root.active === id) throw new Error('源和目标相同，无需迁移')
     if (request.mode === 'migrate' && previous?.conflicts.length) throw new Error('请先解决当前数据源的冲突再迁移')
     if (request.mode === 'migrate' && root.sources[id]?.conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
@@ -199,7 +221,19 @@ async function connect(request: ConnectRequest): Promise<Result> {
       conflicts = includeCloudConflicts(refreshConflicts(cached.conflicts, combined.conflicts, doc, remote.doc ?? emptyDocument()), cached.resolvedRevision === remote.etag ? [] : remote.conflicts)
     }
     const beforeMigration = doc
-    if (request.mode === 'migrate' && previous) {
+    const hasLocalItems = hasLocalContent(previous)
+    if (fromLocal && previous) {
+      if (hasLocalItems) {
+        if (remote.doc && !request.confirmed) return { ok: true, confirmation: '目标已有收藏。确认合并当前数据？已有内容会保留，冲突需要单独选择。' } as const
+        if (!remote.doc && !cached) doc = structuredClone(previous.doc)
+        else {
+          const combined = merge(emptyDocument(), previous.doc, doc)
+          doc = combined.doc; conflicts = combined.conflicts
+        }
+      } else {
+        if (!remote.doc && !cached) doc = structuredClone(previous.doc)
+      }
+    } else if (request.mode === 'migrate' && previous) {
       if (conflicts.length) throw new Error('目标数据源有未解决冲突，请先切换到目标并处理后再迁移')
       if (remote.doc && !request.confirmed) return { ok: true, confirmation: '目标已有收藏。确认合并当前数据？已有内容会保留，冲突需要单独选择。' } as const
       if (!remote.doc && !cached) doc = structuredClone(previous.doc)
@@ -211,7 +245,8 @@ async function connect(request: ConnectRequest): Promise<Result> {
     root.sources[id] = { config, doc: prune(doc), base: remote.doc ?? emptyDocument(), etag: remote.etag, resolvedRevision: cached?.resolvedRevision, pendingNoteIds: cached?.pendingNoteIds, conflicts, status: conflicts.length ? 'conflict' : 'pending', error: '', lastSync: cached?.lastSync ?? null }
     queueDocumentImageChanges(root, id, doc, root.sources[id].doc)
     if (cached) queueDocumentImageChanges(root, id, cached.doc, root.sources[id].doc)
-    if (request.mode === 'migrate') queueNoteChanges(root.sources[id], beforeMigration)
+    if (fromLocal || request.mode === 'migrate') queueNoteChanges(root.sources[id], beforeMigration)
+    if (fromLocal && root.active === 'local' && id !== 'local') delete root.sources['local']
     root.active = id
     return { ok: true, snapshot: snapshot(root) } as const
   })
@@ -297,10 +332,32 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     return { ok: true, qr }
   }
   if (request.type === 'connect') return connect(request)
+  if (request.type === 'disconnect') {
+    const result = await atomic(root => {
+      const currentSource = current(root, request.sourceId)
+      root.sources['local'] = {
+        config: null,
+        doc: structuredClone(currentSource.doc),
+        base: emptyDocument(),
+        etag: null,
+        conflicts: [],
+        status: 'local',
+        error: '',
+        lastSync: null,
+      }
+      root.active = 'local'
+      if (request.sourceId !== 'local') {
+        delete root.sources[request.sourceId]
+      }
+      return { ok: true, snapshot: snapshot(root) } as const
+    })
+    broadcast()
+    return result
+  }
   if (request.type === 'quark-repair') {
     await atomic(root => {
       const source = current(root, request.sourceId)
-      if (!isQuark(source.config)) throw new Error('只有夸克收藏库支持此修复操作')
+      if (!source.config || !isQuark(source.config)) throw new Error('只有夸克收藏库支持此修复操作')
       if (source.conflicts.length) throw new Error('请先处理同步冲突再修复')
     })
     await synchronize(request.sourceId, true)
@@ -311,7 +368,8 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     })
   }
   if (request.type === 'sync') {
-    await atomic(root => current(root, request.sourceId))
+    const source = await atomic(root => current(root, request.sourceId))
+    if (!source.config) return atomic(root => ({ ok: true, snapshot: snapshot(root) } as const))
     await synchronize(request.sourceId)
     return atomic(root => ({ ok: true, snapshot: snapshot(root) } as const))
   }

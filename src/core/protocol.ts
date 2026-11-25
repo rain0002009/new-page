@@ -5,10 +5,10 @@ import type { QrState, QuarkConnection } from './quark/auth'
 export type Snapshot = {
   sourceId: string | null; document: Document | null
   connection: { kind?: 'quark' | 'webdav'; url: string; username: string } | null
-  status: 'synced' | 'pending' | 'syncing' | 'error' | 'conflict'
+  status: 'synced' | 'pending' | 'syncing' | 'error' | 'conflict' | 'local'
   error: string; lastSync: number | null; conflicts: Conflict[]
 }
-export const syncStatusLabels: Record<Snapshot['status'], string> = { synced: '已同步', pending: '待同步', syncing: '正在同步', error: '同步未完成', conflict: '有冲突待处理' }
+export const syncStatusLabels: Record<Snapshot['status'], string> = { synced: '已同步', pending: '待同步', syncing: '正在同步', error: '同步未完成', conflict: '有冲突待处理', local: '未连接云端' }
 export type ConnectRequest = { type: 'connect'; config: Connection; nickname: string; mode: 'switch' | 'migrate'; confirmed?: boolean }
 export type Request =
   | { type: 'snapshot' }
@@ -23,6 +23,7 @@ export type Request =
   | { type: 'quark-qr-poll'; id: string }
   | { type: 'action'; sourceId: string; action: Action }
   | ConnectRequest
+  | { type: 'disconnect'; sourceId: string }
   | { type: 'sync'; sourceId: string }
   | { type: 'quark-repair'; sourceId: string }
   | { type: 'resolve'; sourceId: string; conflictId: string; side: 'local' | 'remote' }

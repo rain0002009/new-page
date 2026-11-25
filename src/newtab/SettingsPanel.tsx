@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Cloud, Download, Upload, RotateCcw, AlertTriangle } from 'lucide-react'
+import { Cloud, Download, Upload, RotateCcw, AlertTriangle, Unlink } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { type Entity, type Conflict, type Document } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
@@ -40,6 +40,7 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
   const [nickname, setNickname] = useState(data.document.entities.profile.title)
   const [pending, setPending] = useState<{ data: unknown; message: string } | null>(null)
   const [repairOpen, setRepairOpen] = useState(false)
+  const [disconnectOpen, setDisconnectOpen] = useState(false)
   const repairRunning = useRef(false)
   const [busy, setBusy] = useState(false)
   const [takeover, setTakeover] = useState(true)
@@ -65,6 +66,13 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
       })
     } finally { repairRunning.current = false }
   }
+  async function disconnectCloud() {
+    await execute(async () => {
+      const result = await rpc({ type: 'disconnect', sourceId: data.sourceId! })
+      if (result.snapshot) receive(result.snapshot)
+      setDisconnectOpen(false)
+    })
+  }
   const profile = data.document.entities.profile
 
   return <>
@@ -77,13 +85,18 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
       <label className={fields.label({ className: 'mt-[22px]' })}>显示昵称<input className={fields.control()} aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label>
     </section>
     {data.conflicts.length > 0 && <section className={styles.card()}><h2 className={styles.title()}><AlertTriangle size={16} />选择要保留的版本</h2><p className={styles.description()}>两个版本均已保留在本机。处理完后继续同步，你也可以继续整理其他收藏。</p>{data.conflicts.map(conflict => <ConflictChoice key={conflict.id} conflict={conflict} busy={busy} choose={side => void execute(async () => { const result = await rpc({ type: 'resolve', sourceId: data.sourceId!, conflictId: conflict.id, side }); if (result.snapshot) receive(result.snapshot) })} />)}</section>}
-    <section className={styles.card()}><h2 className={styles.title()}>连接与同步</h2><p className={styles.description()} role="status">{syncStatusLabels[data.status]}</p><div className={styles.sync()}><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><div className="flex flex-wrap gap-[8px]"><Button disabled={busy} onClick={() => void execute(async () => { const result = await rpc({ type: 'sync', sourceId: data.sourceId! }); if (result.snapshot) receive(result.snapshot) })}><Cloud size={16} />立即同步</Button>{data.connection?.kind === 'quark' && <Button disabled={busy || data.status === 'syncing' || data.conflicts.length > 0} onClick={() => setRepairOpen(true)}><RotateCcw size={16} />修复夸克同步</Button>}</div></div><ConnectionForm key={data.sourceId} initial={data.connection} connected done={receive} onError={onError} /></section>
+    <section className={styles.card()}><h2 className={styles.title()}>连接与同步</h2><p className={styles.description()} role="status">{data.connection ? syncStatusLabels[data.status] : '当前为本地收藏库，仅保存在当前设备。如需多端同步或备份防丢，可连接网盘。'}</p>{data.connection && <div className={styles.sync()}><span>上次同步：{data.lastSync ? new Date(data.lastSync).toLocaleString('zh-CN') : '尚未完成'}</span><div className="flex flex-wrap gap-[8px]"><Button disabled={busy} onClick={() => void execute(async () => { const result = await rpc({ type: 'sync', sourceId: data.sourceId! }); if (result.snapshot) receive(result.snapshot) })}><Cloud size={16} />立即同步</Button>{data.connection?.kind === 'quark' && <Button disabled={busy || data.status === 'syncing' || data.conflicts.length > 0} onClick={() => setRepairOpen(true)}><RotateCcw size={16} />修复夸克同步</Button>}<Button disabled={busy} onClick={() => setDisconnectOpen(true)}><Unlink size={16} />断开云端同步</Button></div></div>}<ConnectionForm key={data.sourceId} initial={data.connection} connected={!!data.connection} done={receive} onError={onError} /></section>
     <section className={styles.card()}><h2 className={styles.title()}>备份与迁移</h2><p className={styles.description()}>备份包含收藏、完整笔记正文、顺序、待办与回收站；不包含网盘登录信息或 WebDAV 密码。</p>{data.connection?.kind === 'quark' && <p className={styles.description()}>夸克「页墟收藏」中只保留当前收藏.json 和笔记目录中的 Markdown，不保留同步历史。普通同步包含完整笔记正文；独立 Markdown 在新建或编辑保存时更新，网盘中的手工修改不会回写。重要修改前可导出备份。</p>}<div className={styles.backup()}><Button disabled={busy} onClick={() => void execute(async () => {
       const result = await rpc({ type: 'export', sourceId: data.sourceId! })
       const url = URL.createObjectURL(new Blob([JSON.stringify(result.backup, null, 2)], { type: 'application/json' }))
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = `page-garden-${new Date().toISOString().slice(0, 10)}.json`; anchor.click()
       setTimeout(() => URL.revokeObjectURL(url), 10_000)
     })}><Download size={15} />导出备份</Button><label className={styles.importLabel()}><Upload size={15} />导入备份<input className={styles.file()} aria-label="导入备份" type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void execute(async () => { if (file.size > 15_000_000) throw new Error('备份文件过大'); let value: unknown; try { value = JSON.parse(await file.text()) } catch { throw new Error('备份格式错误，请选择有效 JSON 文件') } await importBackup(value, false) }) }} /></label></div></section>
+    <ModalPresence>{disconnectOpen && <Modal title="断开云端同步" close={() => { if (!busy) setDisconnectOpen(false) }}>
+      <p className="text-[14px] [overflow-wrap:anywhere]">确认断开云端同步？</p>
+      <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>断开后当前设备上的空间、收藏和笔记将完整保留为本地收藏库继续使用，云端网盘数据不会被删除。</p>
+      <div className="flex justify-end gap-[8px] mt-[24px]"><Button data-autofocus disabled={busy} onClick={() => setDisconnectOpen(false)}>取消</Button><Button tone="danger" disabled={busy} onClick={() => void disconnectCloud()}>{busy ? '正在断开…' : '确认断开'}</Button></div>
+    </Modal>}</ModalPresence>
     <ModalPresence>{repairOpen && <Modal title="修复夸克同步" close={() => { if (!busy) setRepairOpen(false) }}>
       <p className="text-[14px] [overflow-wrap:anywhere]">将用当前本地收藏和完整笔记正文，重建夸克中缺失的「页墟收藏」文件夹、收藏.json 和笔记 Markdown 文件。</p>
       <p className={feedbackStyles.muted({ className: 'mt-[12px]' })}>云端已有完整收藏时会进行正常同步；遇到冲突需要选择保留的版本。</p>

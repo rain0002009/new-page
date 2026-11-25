@@ -67,7 +67,7 @@ const navigation = tv({
 const nav = navigation()
 const statusDot = tv({
   base: 'w-[5px] h-[5px] rounded-full shrink-0 inline-block',
-  variants: { status: { synced: 'bg-[#9eb18b]', pending: 'bg-[#b2ad71]', syncing: 'bg-[#b2ad71]', error: 'bg-[#c99260]', conflict: 'bg-[#c99260]' } },
+  variants: { status: { synced: 'bg-[#9eb18b]', pending: 'bg-[#b2ad71]', syncing: 'bg-[#b2ad71]', error: 'bg-[#c99260]', conflict: 'bg-[#c99260]', local: 'bg-[#989e90]' } },
 })
 
 export const stateKey = ['workspace']

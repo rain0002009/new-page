@@ -12,7 +12,7 @@ export function executeImageCleanup(
   const work = imageCleanupChain.catch(() => {}).then(async () => {
     const batch = await atomic(root => {
       const source = root.sources[id]
-      if (!source || source.status !== 'synced' || source.conflicts.length) return null
+      if (!source || (source.status !== 'synced' && source.status !== 'local') || source.conflicts.length) return null
       const jobs = (root.imageCleanup ?? []).filter(
         job => job.sourceId === id && job.notBefore <= Date.now() && !imageIsReferenced(root, job.url)
       )
@@ -51,7 +51,7 @@ export function executeImageCleanup(
             !!pending &&
             pending.revision === job.revision &&
             pending.notBefore <= Date.now() &&
-            source?.status === 'synced' &&
+            (source?.status === 'synced' || source?.status === 'local') &&
             !source.conflicts.length &&
             sourceImageKey(root, id) === batch.key &&
             !imageIsReferenced(root, job.url)

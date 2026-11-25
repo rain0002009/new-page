@@ -4,7 +4,7 @@ import type { QuarkConnection } from './quark/auth'
 import type { Conflict, Document } from './model'
 export type RemoteRead = { doc: Document | null; etag: string | null; conflicts?: Conflict[] }
 export type Connection = WebDAVConnection | QuarkConnection
-export const isQuark = (config: Connection): config is QuarkConnection => 'kind' in config && config.kind === 'quark'
+export const isQuark = (config: Connection | null | undefined): config is QuarkConnection => !!config && 'kind' in config && config.kind === 'quark'
 export function normalizeRemote(config: Connection): Connection {
   if (!isQuark(config)) return normalizeConnection(config)
   if (!config.accountId || !config.folderId || /[\r\n]/.test(config.accountId + config.folderId)) throw new Error('夸克账号信息无效，请重新扫码')
