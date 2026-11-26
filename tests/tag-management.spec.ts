@@ -39,6 +39,7 @@ async function openSeededClient() {
         note: { id: 'note', kind: 'note', title: '示例笔记', parentId: 'collection', position: 2, updatedAt: 1, deletedAt: null, deletedBy: null, purged: false, body: '# 示例\n正文摘要', tagIds: ['tag-personal'] },
         'tag-work': { id: 'tag-work', kind: 'tag', title: '工作', parentId: null, position: 1, updatedAt: 1, deletedAt: null, deletedBy: null, purged: false, color: 'blue' },
         'tag-personal': { id: 'tag-personal', kind: 'tag', title: '个人', parentId: null, position: 2, updatedAt: 1, deletedAt: null, deletedBy: null, purged: false, color: 'pink' },
+        'tag-unused': { id: 'tag-unused', kind: 'tag', title: '闲置', parentId: null, position: 3, updatedAt: 1, deletedAt: null, deletedBy: null, purged: false, color: 'green' },
       },
     }
     const root = {
@@ -188,4 +189,69 @@ test('标签面板在窄窗口边缘保持可见', async () => {
     return element?.closest('[role="dialog"]')?.getAttribute('aria-label') ?? null
   }, [pickerBox!.x + pickerBox!.width / 2, pickerBox!.y + pickerBox!.height / 2])
   expect(hit).toBe('标签管理')
+})
+
+test('设置页标签管理反向查看与解绑', async () => {
+  const { page } = await openSeededClient()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '标签管理' }).click()
+
+  await expect(page.getByRole('heading', { name: '标签管理' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回设置' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '展开标签 工作' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '展开标签 工作' })).toContainText('2')
+
+  await page.getByRole('button', { name: '展开标签 工作' }).click()
+  await expect(page.getByRole('button', { name: '解绑 示例链接' })).toBeVisible()
+  await expect(page.getByText('我的空间 / 工作收藏 / 示例链接')).toBeVisible()
+
+  await page.getByRole('button', { name: '解绑 示例链接' }).click()
+  await expect(page.getByRole('button', { name: '解绑 示例链接' })).toBeHidden()
+  await expect(page.getByRole('button', { name: '收起标签 工作' })).toContainText('1')
+})
+
+test('标签管理定位具体卡片', async () => {
+  const { page } = await openSeededClient()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '标签管理' }).click()
+  await page.getByRole('button', { name: '展开标签 个人' }).click()
+  await page.getByRole('button', { name: '定位 示例笔记' }).click()
+
+  const target = page.getByRole('article', { name: '笔记 示例笔记' })
+  await expect(target).toHaveAttribute('data-located', 'true')
+  await expect(target).toBeVisible()
+  const targetBox = await target.boundingBox()
+  const viewport = page.viewportSize()
+  expect(targetBox).not.toBeNull()
+  expect(targetBox!.y).toBeGreaterThanOrEqual(0)
+  expect(targetBox!.y + targetBox!.height).toBeLessThanOrEqual(viewport!.height)
+})
+
+test('标签管理搜索颜色与闲置标签', async () => {
+  const { page } = await openSeededClient()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '标签管理' }).click()
+
+  await expect(page.getByRole('button', { name: '展开标签 闲置' })).toContainText('0 处使用')
+  await page.getByLabel('搜索标签名称').fill('个人')
+  await expect(page.getByRole('button', { name: '展开标签 工作' })).toBeHidden()
+  await expect(page.getByRole('button', { name: '展开标签 个人' })).toBeVisible()
+
+  await page.getByLabel('搜索标签名称').fill('')
+  await page.getByRole('radio', { name: '粉色' }).click()
+  await expect(page.getByRole('button', { name: '展开标签 个人' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '展开标签 工作' })).toBeHidden()
+
+  await page.getByRole('radio', { name: '任意颜色' }).click()
+  await page.getByRole('button', { name: '编辑标签 闲置' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑标签' })
+  await editor.getByRole('textbox', { name: '名称' }).fill('已编辑')
+  await editor.getByRole('radio', { name: '绿色' }).click()
+  await editor.getByRole('button', { name: '保存' }).click()
+  await expect(page.getByRole('button', { name: '展开标签 已编辑' })).toBeVisible()
+
+  await page.getByRole('button', { name: '编辑标签 已编辑' }).click()
+  await page.getByRole('dialog', { name: '编辑标签' }).getByRole('button', { name: '删除标签' }).click()
+  await page.getByRole('dialog', { name: '永久删除标签' }).getByRole('button', { name: '永久删除' }).click()
+  await expect(page.getByRole('button', { name: '展开标签 已编辑' })).toBeHidden()
 })

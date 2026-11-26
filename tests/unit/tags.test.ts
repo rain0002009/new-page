@@ -4,6 +4,7 @@ import {
   apply,
   createDocument,
   filterTagSelection,
+  tagUsages,
   readDocument,
   type Collection,
   type Document,
@@ -119,6 +120,38 @@ describe('Tag catalog', () => {
   })
 })
 
+describe('Tag usage management', () => {
+  test('derives direct tag usages without expanding tagged collection children', () => {
+    const { doc, collection, link } = fixture()
+    const noteId = 'note-usage'
+    let next = apply(doc, { type: 'add-note', parentId: collection.id, id: noteId })
+    next = apply(next, { type: 'add-tag', id: 'tag-usage', name: '用途', color: 'blue' })
+    next = apply(next, { type: 'set-tags', id: collection.id, tagIds: ['tag-usage'] })
+    next = apply(next, { type: 'set-tags', id: link.id, tagIds: ['tag-usage'] })
+    next = apply(next, { type: 'set-tags', id: noteId, tagIds: ['tag-usage'] })
+
+    const usages = tagUsages(next, 'tag-usage')
+    expect(usages.map(usage => usage.entityId)).toEqual([collection.id, link.id, noteId])
+    expect(usages[0].path).toEqual(['我的空间', '日常收藏'])
+    expect(usages[1].path).toEqual(['我的空间', '日常收藏', '示例链接'])
+    expect(usages[2].path).toEqual(['我的空间', '日常收藏', '新笔记'])
+  })
+
+  test('unbinding one direct usage preserves other tags and the tag catalog', () => {
+    const { doc, link } = fixture()
+    let next = apply(doc, { type: 'add-tag', id: 'tag-a', name: 'A', color: 'blue' })
+    next = apply(next, { type: 'add-tag', id: 'tag-b', name: 'B', color: 'red' })
+    next = apply(next, { type: 'set-tags', id: link.id, tagIds: ['tag-a', 'tag-b'] })
+
+    next = apply(next, { type: 'set-tags', id: link.id, tagIds: ['tag-b'] })
+
+    expect((next.entities[link.id] as Link).tagIds).toEqual(['tag-b'])
+    expect(next.entities['tag-a']).toBeDefined()
+    expect(tagUsages(next, 'tag-a')).toEqual([])
+    expect(tagUsages(next, 'tag-b').map(usage => usage.entityId)).toEqual([link.id])
+  })
+})
+
 describe('Tag filtering and merge semantics', () => {
   test('collection tag matches expand all cards while card matches keep only matching cards', () => {
     const { doc, collection, link } = fixture()
@@ -179,4 +212,3 @@ describe('Tag filtering and merge semantics', () => {
     expect(result.conflicts.filter(c => c.entityId === 'tag-race')).toEqual([])
   })
 })
-

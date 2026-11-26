@@ -7,6 +7,7 @@ import { active, children, filterTagSelection, type Action, type Collection, typ
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import SettingsPanel from './SettingsPanel'
+import TagManagementPanel from './TagManagementPanel'
 import RecycleBin from './RecycleBin'
 import TabInbox, { useWindowTabs } from './TabInbox'
 import { DragBoard, useDragItem } from './drag'
@@ -103,6 +104,7 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   const pendingClosures = useMemo(() => new Map<number, OpenTab>(), [data?.sourceId])
   const [collectionReveal, setCollectionReveal] = useState(0)
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  const [revealCollectionId, setRevealCollectionId] = useState<string | null>(null)
   useEffect(() => {
     setSelectedTagIds([])
   }, [selected])
@@ -203,17 +205,33 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
   }
   function locate(item: SavedItem | Collection) {
     setSearchOpen(false)
+    setSelectedTagIds([])
     if (item.kind === 'collection') {
       if (!item.parentId) return
       setSelected(item.parentId); setPage('space')
-      setTimeout(() => document.getElementById(`collection-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+      setTimeout(() => {
+        const target = document.getElementById(`collection-${item.id}`)
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        if (target) {
+          target.dataset.located = 'true'
+          window.setTimeout(() => target.removeAttribute('data-located'), 1600)
+        }
+      }, 100)
       return
     }
     const collection = doc.entities[item.parentId!]
     if (!collection) return
     setSelected(collection.parentId!); setPage('space')
-    if (collection.kind === 'collection' && collection.collapsed) void act({ type: 'edit', id: collection.id, patch: { collapsed: false } })
-    setTimeout(() => document.getElementById(`collection-${collection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+    setRevealCollectionId(collection.id)
+    window.setTimeout(() => setRevealCollectionId(current => current === collection.id ? null : current), 2200)
+    setTimeout(() => {
+      const target = document.getElementById(`item-${item.id}`) ?? document.getElementById(`collection-${collection.id}`)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      if (target) {
+        target.dataset.located = 'true'
+        window.setTimeout(() => target.removeAttribute('data-located'), 1600)
+      }
+    }, 140)
   }
   const createSpace = () => {
     setEditingId(null)
@@ -239,12 +257,13 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       <div className="mt-auto"><RecycleBin doc={doc} act={act} /><button aria-label="设置" title="设置" className={navigation({ selected: page === 'settings' }).button()} onClick={() => setPage('settings')}><Settings2 size={18} /><span className={nav.label()}>设置</span></button><button className={styles.sync()} onClick={() => setPage('settings')}><span className={statusDot({ status: data.status })} />{status}{data.status === 'syncing' && <LoaderCircle size={13} className="animate-spin" />}</button></div>
     </aside>
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
-      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <div className="order-3 basis-full pb-[6px]"><TagFilterButton doc={doc} spaceId={space.id} value={selectedTagIds} onChange={setSelectedTagIds} /></div>}{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={createCollection}><Plus size={15} />新建收藏块</Button>}</div>
+      <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : page === 'tags' ? '标签管理' : '搜索收藏'}</h1></header>{page === 'space' && space && <div className="order-3 basis-full pb-[6px]"><TagFilterButton doc={doc} spaceId={space.id} value={selectedTagIds} onChange={setSelectedTagIds} /></div>}{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={createCollection}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={filteredCollections.map(c => c.id)} strategy={verticalListSortingStrategy}>{filteredCollections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} visibleItems={selectedTagIds.length ? visibleByTag.get(collection.id) : undefined} doc={doc} act={act} edit={setEditor} isEditing={editingId === collection.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(collection.id) }} onEndEdit={() => setEditingId(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{creatingCollection && <NewCollectionDraft onSave={async title => { await act({ type: 'add-collection', parentId: space.id, title }); setCreatingCollection(false) }} onCancel={() => setCreatingCollection(false)} />}{!!filteredCollections.length && !creatingCollection && <QuickCollectionGap spaceId={space.id} />}{!filteredCollections.length && !creatingCollection && <Empty icon="collection" title={selectedTagIds.length ? '没有匹配标签的收藏块' : '暂无收藏块'} text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={createCollection}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={filteredCollections.map(c => c.id)} strategy={verticalListSortingStrategy}>{filteredCollections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} visibleItems={selectedTagIds.length ? visibleByTag.get(collection.id) : undefined} forceExpanded={revealCollectionId === collection.id} doc={doc} act={act} edit={setEditor} isEditing={editingId === collection.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(collection.id) }} onEndEdit={() => setEditingId(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{creatingCollection && <NewCollectionDraft onSave={async title => { await act({ type: 'add-collection', parentId: space.id, title }); setCreatingCollection(false) }} onCancel={() => setCreatingCollection(false)} />}{!!filteredCollections.length && !creatingCollection && <QuickCollectionGap spaceId={space.id} />}{!filteredCollections.length && !creatingCollection && <Empty icon="collection" title={selectedTagIds.length ? '没有匹配标签的收藏块' : '暂无收藏块'} text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={createCollection}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
       {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateEntity={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link' || n.kind === 'collection')) locate(n) }} />}
-      {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} />}
+      {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} onOpenTagManagement={() => setPage('tags')} />}
+      {page === 'tags' && <TagManagementPanel doc={doc} act={act} onBack={() => setPage('settings')} onLocateEntity={id => { const entity = doc.entities[id]; if (entity && (entity.kind === 'note' || entity.kind === 'link' || entity.kind === 'collection')) locate(entity) }} />}
     </ContentPanel>
     <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} groups={groups} groupAll={() => void groupTabs()} grouping={grouping} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />
     <BatchActions key={data.sourceId} doc={doc} sourceId={data.sourceId!} spaceId={space?.id} tabs={tabs} act={act} notify={setMessage} refreshTabs={refreshTabs} reveal={reveal} />

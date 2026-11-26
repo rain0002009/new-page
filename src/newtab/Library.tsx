@@ -62,7 +62,7 @@ export function Card({ link, doc, act, edit, location, locate }: { link: Link; d
   const tags = (link.tagIds ?? []).map(id => doc.entities[id]).filter((e): e is TagRecord => e?.kind === 'tag')
   const styles = linkCard({ search: !!locate })
   const drag = useDragItem(locate ? `search:${link.id}` : link.id, { kind: 'saved-item', itemKind: 'link', entityId: link.id, title: link.title }, styles.base(), !!locate)
-  return <article {...drag} data-selected={!locate && selection.isSelected('saved', link.id) || undefined} aria-label={`链接 ${link.title}`}>
+  return <article {...drag} id={`item-${link.id}`} data-selected={!locate && selection.isSelected('saved', link.id) || undefined} aria-label={`链接 ${link.title}`}>
     <div className={styles.top()}><span className={styles.icon()}>{locate ? <SiteIcon size="card" url={link.icon} title={link.title} /> : <SelectionIcon size="card" id={link.id} source="saved" title={link.title}><SiteIcon size="card" url={link.icon} title={link.title} /></SelectionIcon>}</span><SavedPageLink href={link.url} className={styles.title()}>{link.title}</SavedPageLink></div>
     <div className={styles.actions()}>
       <Tooltip content="编辑链接">
@@ -98,7 +98,7 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
     catch { setError('无法打开笔记，请重试') }
   }
   const noteIcon = <span className="grid place-items-center h-[20px] w-[20px] rounded-[5px] bg-[#eee5cb] text-[#9d8551]"><FileText size={16} /></span>
-  return <article {...drag} data-selected={!search && selection.isSelected('saved', note.id) || undefined} aria-label={`笔记 ${note.title}`}>
+  return <article {...drag} id={`item-${note.id}`} data-selected={!search && selection.isSelected('saved', note.id) || undefined} aria-label={`笔记 ${note.title}`}>
     <div className={styles.top()}><span className={styles.icon()}>{search ? noteIcon : <SelectionIcon size="card" id={note.id} source="saved" title={note.title}>{noteIcon}</SelectionIcon>}</span><a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{note.title}</a></div>
     <div className={styles.actions()}>
       {onShare && (
@@ -121,7 +121,7 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
   </article>
 }
 
-export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, visibleItems, isEditing = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; visibleItems?: SavedItem[]; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
+export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, visibleItems, forceExpanded = false, isEditing = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; visibleItems?: SavedItem[]; forceExpanded?: boolean; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
   const [collapsed, setCollapsed] = useState(collection.collapsed)
   const [prevPropCollapsed, setPrevPropCollapsed] = useState(collection.collapsed)
   const collapsedRef = useRef(collapsed)
@@ -274,7 +274,7 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
       )}
       <TagActionMenu doc={doc} target={collection} label={collection.title} act={act} onDelete={() => edit({ kind: 'delete', entity: collection })} deleteLabel="删除收藏块" placement="collection" />
     </div>}</div>
-    <MotionRegion open={!collapsed || !!placeholder}>
+    <MotionRegion open={forceExpanded || !collapsed || !!placeholder}>
       {savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
         <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} doc={doc} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
       </SortableContext> : <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">

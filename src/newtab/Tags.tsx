@@ -78,7 +78,7 @@ function tagNameLength(value: string) {
   return Array.from(value).length
 }
 
-function TagChip({ tag, className = '' }: { tag: TagRecord; className?: string }) {
+export function TagChip({ tag, className = '' }: { tag: TagRecord; className?: string }) {
   return <span className={`${tagChip({ color: tag.color })} ${className}`} title={tag.title}>{tag.title}</span>
 }
 
@@ -123,7 +123,7 @@ export function TagList({ tags, label, className = '' }: { tags: TagRecord[]; la
   </span>
 }
 
-function ColorPicker({ value, onChange, allowTransparent = true }: { value: TagColorChoice; onChange: (value: TagColorChoice) => void; allowTransparent?: boolean }) {
+export function ColorPicker({ value, onChange, allowTransparent = true }: { value: TagColorChoice; onChange: (value: TagColorChoice) => void; allowTransparent?: boolean }) {
   const options = allowTransparent ? tagColorOptions : tagColorOptions.filter(option => option.value !== 'transparent')
   return <div className={styles.colors()} role="radiogroup" aria-label="标签颜色">
     {options.map(option => <button

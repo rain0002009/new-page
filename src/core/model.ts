@@ -93,9 +93,42 @@ export function normalizeTagName(value: string) {
 export function tagKey(tag: { title: string; color: TagColor }) {
   return `${tag.title}\u0000${tag.color}`
 }
+export type TagUsage = {
+  entityId: string
+  entityKind: 'collection' | 'link' | 'note'
+  title: string
+  spaceId: string
+  collectionId?: string
+  path: string[]
+}
+
 export function tagIds(entity: TaggedEntity): string[] {
   return entity.tagIds ? [...new Set(entity.tagIds)] : []
 }
+export function tagUsagesByTag(doc: Document): Map<string, TagUsage[]> {
+  const result = new Map<string, TagUsage[]>()
+  const add = (usage: TagUsage, ids: string[]) => {
+    for (const id of ids) {
+      const list = result.get(id) ?? []
+      list.push(usage)
+      result.set(id, list)
+    }
+  }
+  for (const space of children(doc, null).filter((e): e is Extract<Entity, { kind: 'space' }> => e.kind === 'space')) {
+    for (const collection of children(doc, space.id).filter((e): e is Collection => e.kind === 'collection')) {
+      add({ entityId: collection.id, entityKind: 'collection', title: collection.title, spaceId: space.id, path: [space.title, collection.title] }, tagIds(collection))
+      for (const item of children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')) {
+        add({ entityId: item.id, entityKind: item.kind, title: item.title, spaceId: space.id, collectionId: collection.id, path: [space.title, collection.title, item.title] }, tagIds(item))
+      }
+    }
+  }
+  return result
+}
+
+export function tagUsages(doc: Document, tagId: string): TagUsage[] {
+  return tagUsagesByTag(doc).get(tagId) ?? []
+}
+
 export function filterTagSelection(doc: Document, spaceId: string, selectedTagIds: string[]) {
   const selected = new Set(selectedTagIds)
   const result = new Map<string, SavedItem[]>()

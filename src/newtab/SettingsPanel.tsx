@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Cloud, Download, Upload, RotateCcw, AlertTriangle, Unlink } from 'lucide-react'
+import { Cloud, Download, Upload, RotateCcw, AlertTriangle, Unlink, Tag } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { type Entity, type Conflict, type Document } from '../core/model'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
@@ -36,7 +36,7 @@ const conflictStyles = tv({
 })()
 const fields = formStyles()
 
-export default function SettingsPanel({ data, act, receive, onError }: { data: Snapshot & { document: Document }; act: Act; receive: (data: Snapshot) => void; onError: (error: string) => void }) {
+export default function SettingsPanel({ data, act, receive, onError, onOpenTagManagement }: { data: Snapshot & { document: Document }; act: Act; receive: (data: Snapshot) => void; onError: (error: string) => void; onOpenTagManagement?: () => void }) {
   const [nickname, setNickname] = useState(data.document.entities.profile.title)
   const [pending, setPending] = useState<{ data: unknown; message: string } | null>(null)
   const [repairOpen, setRepairOpen] = useState(false)
@@ -76,6 +76,7 @@ export default function SettingsPanel({ data, act, receive, onError }: { data: S
   const profile = data.document.entities.profile
 
   return <>
+    <section className={styles.card()}><h2 className={styles.title()}><Tag size={16} />标签管理</h2><p className={styles.description()}>查看全收藏库中每个标签的直接用途，并进行定位、解绑、编辑或永久删除。</p><Button onClick={onOpenTagManagement} disabled={!onOpenTagManagement}><Tag size={15} />打开标签管理</Button></section>
     <section className={styles.card()}><h2 className={styles.title()}>s.ee 服务配置</h2><p className={styles.description()}>配置 s.ee 服务的访问凭据，供图片上传等功能使用。API Key 随收藏库同步，并包含在导出备份中。</p><SeeSettings key={data.sourceId} value={profile.kind === 'profile' ? profile.seeApiKey ?? '' : ''} onSave={value => act({ type: 'edit', id: 'profile', patch: { seeApiKey: value } })} /></section>
     <section className={styles.card()}><h2 className={styles.title()}>个人偏好</h2>
       <div className="flex flex-col gap-[16px] mt-[16px]">
