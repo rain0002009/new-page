@@ -24,7 +24,7 @@ export const tagColorOptions: { value: TagColorChoice; label: string; swatch: st
   { value: 'purple', label: '紫色', swatch: 'bg-[#a081d5]' },
   { value: 'cyan', label: '青色', swatch: 'bg-[#56a6b4]' },
   { value: 'orange', label: '橙色', swatch: 'bg-[#d79351]' },
-  { value: 'transparent', label: '任意颜色', swatch: 'relative bg-[#f6f8f3] border border-solid border-[#879580] before:content-empty before:absolute before:inset-[3px] before:rounded-full before:bg-[conic-gradient(#68c5db,#5d6fe6,#c55bd8,#ef5f91,#f3aa55,#f1df63,#79c77b,#68c5db)]' },
+  { value: 'transparent', label: '任意颜色', swatch: 'bg-[conic-gradient(#68c5db,#5d6fe6,#c55bd8,#ef5f91,#f3aa55,#f1df63,#79c77b,#68c5db)] border border-solid border-[#879580] shadow-[inset_0_0_0_1px_#ffffff80]' },
 ]
 
 const tagChip = tv({
@@ -48,7 +48,7 @@ const panel = tv({
     label: 'block text-[10px] font-semibold text-form-label mb-[6px]',
     input: 'w-full rounded-[8px] border border-solid border-form-line bg-form-surface px-[10px] py-[8px] text-[11px] text-form-ink outline-none focus:border-form-focus focus:shadow-[0_0_0_3px_#eaf0df]',
     colors: 'flex flex-wrap gap-[4px] mt-[10px]',
-    color: 'h-[20px] w-[20px] rounded-[6px] border border-solid border-transparent p-0',
+    color: 'h-[20px] w-[20px] rounded-full border border-solid border-transparent p-0',
     list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-[6px]',
     row: 'grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[4px] min-h-[36px] text-[11px] hover:bg-[#f2f5ed]',
     empty: 'px-[8px] py-[12px] text-[10px] text-ui-muted',
