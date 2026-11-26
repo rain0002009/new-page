@@ -73,7 +73,7 @@ export function Card({ link, doc, act, edit, location, locate }: { link: Link; d
       </Tooltip>
       <TagActionMenu doc={doc} target={link} label={link.title} act={act} onDelete={() => void act({ type: 'delete', id: link.id })} deleteLabel="删除链接" />
     </div>
-    {tags.length ? <TagList tags={tags} label={link.title} /> : <p className={styles.note()}>{link.note}</p>}
+    {tags.length ? <TagList tags={tags} label={link.title} className="mt-[6px] min-h-[17px]" /> : <p className={styles.note()}>{link.note}</p>}
     {(location || locate) && <div className={styles.bottom()}>{location && <span className={styles.location()} title={location}><Folder size={10} />{location}</span>}<div className={styles.secondary()}>
       {locate && (
         <Tooltip content="定位收藏">
@@ -117,7 +117,7 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
       <TagActionMenu doc={doc} target={note} label={note.title} act={act} onDelete={() => void act({ type: 'delete', id: note.id })} deleteLabel="删除笔记" />
     </div>
     <span className={styles.domain()}>Markdown 笔记</span>
-    {tags.length ? <TagList tags={tags} label={note.title} /> : <p className={styles.note()}>{markdownDescription(note.body)}</p>}<Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
+    {tags.length ? <TagList tags={tags} label={note.title} className="mt-[6px] min-h-[17px]" /> : <p className={styles.note()}>{markdownDescription(note.body)}</p>}<Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>
 }
 
@@ -238,7 +238,7 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
         >
           <span className="truncate">{collection.title}</span>
           <span className={collectionStyles.count()} aria-hidden="true">{savedItems.length}</span>
-          <TagList tags={collectionTags} label={collection.title} />
+          <TagList tags={collectionTags} label={collection.title} className="ml-[4px] max-w-[160px]" />
           <Pencil size={12} className="opacity-0 group-hover/col-title:opacity-60 transition-opacity text-[#71865b] shrink-0 ml-[2px]" aria-hidden="true" />
         </h2>
       )}

@@ -47,10 +47,10 @@ const panel = tv({
     card: 'w-[286px] rounded-[12px] border border-solid border-[#d7e2cc] bg-[#fffffdec] p-[12px] shadow-[0_18px_50px_#334c2b2b]',
     label: 'block text-[10px] font-semibold text-form-label mb-[6px]',
     input: 'w-full rounded-[8px] border border-solid border-form-line bg-form-surface px-[10px] py-[8px] text-[11px] text-form-ink outline-none focus:border-form-focus focus:shadow-[0_0_0_3px_#eaf0df]',
-    colors: 'flex flex-wrap gap-[6px] mt-[10px]',
-    color: 'h-[22px] w-[22px] rounded-[6px] border border-solid border-transparent p-0',
-    list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-[3px]',
-    row: 'flex items-center gap-[7px] rounded-[7px] px-[8px] py-[7px] text-[11px] hover:bg-[#edf3e4]',
+    colors: 'flex flex-wrap gap-[4px] mt-[10px]',
+    color: 'h-[20px] w-[20px] rounded-[6px] border border-solid border-transparent p-0',
+    list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-[6px]',
+    row: 'grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[4px] min-h-[36px] text-[11px] hover:bg-[#f2f5ed]',
     empty: 'px-[8px] py-[12px] text-[10px] text-ui-muted',
     hint: 'mt-[8px] text-[9px] text-ui-muted leading-[1.5]',
     filterButton: 'flex items-center gap-[6px] rounded-[8px] border border-solid border-[#d7e2cc] bg-[#fffffbc4] px-[9px] py-[7px] text-[10px] text-[#61744f] hover:border-[#aabd92] hover:bg-[#f4f8ee]',
@@ -81,7 +81,7 @@ function TagChip({ tag, className = '' }: { tag: TagRecord; className?: string }
   return <span className={`${tagChip({ color: tag.color })} ${className}`} title={tag.title}>{tag.title}</span>
 }
 
-export function TagList({ tags, label }: { tags: TagRecord[]; label: string }) {
+export function TagList({ tags, label, className = '' }: { tags: TagRecord[]; label: string; className?: string }) {
   const [open, setOpen] = useState(false)
   const [overflowing, setOverflowing] = useState(false)
   const rootRef = useRef<HTMLSpanElement>(null)
@@ -100,7 +100,7 @@ export function TagList({ tags, label }: { tags: TagRecord[]; label: string }) {
   if (!tags.length) return null
   return <span
     ref={rootRef}
-    className="group/tags relative inline-flex min-w-0 max-w-full overflow-hidden whitespace-nowrap align-middle text-[10px]"
+    className={`group/tags relative inline-flex min-w-0 max-w-full overflow-hidden whitespace-nowrap align-middle text-[10px] ${className}`}
     aria-label={`${label}标签`}
     tabIndex={0}
     onFocus={() => setOpen(true)}
@@ -235,21 +235,19 @@ export function TagPicker({
       {results.length ? results.map((tag, index) => {
         const selected = assigned.includes(tag.id)
         const active = index === activeIndex
-        return <div key={tag.id} className={`${styles.row()} ${active ? 'bg-[#edf3e4] outline outline-1 outline-[#aac094]' : ''} ${selected ? 'bg-[#e3edda] text-[#3e5a2c]' : ''}`}>
-          <button
-            id={`tag-option-${target.id}-${tag.id}`}
-            type="button"
-            role="option"
-            aria-selected={selected}
-            data-active={active}
-            className="flex min-w-0 flex-1 items-center gap-[7px] bg-transparent border-0 p-0 text-left"
-            onMouseMove={() => setActiveIndex(index)}
-            onClick={() => void setAssigned(tag)}
-          >
-            <span className="grid h-[14px] w-[14px] shrink-0 place-items-center">{selected && <Check size={13} className="text-[#557240]" />}</span>
-            <TagChip tag={tag} />
-          </button>
-          <Button size="custom" className="h-[24px] w-[24px] shrink-0 p-0 text-[#7b8970] hover:bg-[#e3ebda]" aria-label={`编辑标签 ${tag.title}`} onClick={() => setEditing(tag)}><Pencil size={12} /></Button>
+        return <div
+          key={tag.id}
+          id={`tag-option-${target.id}-${tag.id}`}
+          role="option"
+          aria-selected={selected}
+          data-active={active}
+          className={`${styles.row()} ${active ? 'bg-[#f3f6ef] shadow-[inset_0_0_0_1px_#c7d5b8]' : ''} ${selected ? 'bg-[#e6eeda] text-[#425636]' : ''}`}
+          onMouseMove={() => setActiveIndex(index)}
+          onClick={() => void setAssigned(tag)}
+        >
+          <span className="grid h-[16px] w-[16px] shrink-0 place-items-center">{selected && <Check size={14} className="text-[#557240]" />}</span>
+          <span className="min-w-0 truncate"><TagChip tag={tag} /></span>
+          <Button size="custom" className="h-[24px] w-[24px] shrink-0 p-0 text-[#7b8970] hover:bg-[#e3ebda]" aria-label={`编辑标签 ${tag.title}`} onClick={event => { event.stopPropagation(); setEditing(tag) }}><Pencil size={12} /></Button>
         </div>
       }) : <p className={styles.empty()}>{normalizedQuery ? '回车即可创建标签' : '暂无标签'}</p>}
     </div>
@@ -424,24 +422,24 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
         />
       </div>
       <ColorPicker value={color} onChange={setColor} />
-      <div id="space-filter-tags" className="mt-[10px] max-h-[220px] overflow-y-auto space-y-[3px]" role="listbox" aria-label="标签选项">
+      <div id="space-filter-tags" className="mt-[10px] max-h-[220px] overflow-y-auto space-y-[6px]" role="listbox" aria-label="标签选项">
         {tags.length ? tags.map((tag, index) => {
           const selected = value.includes(tag.id)
           const active = index === activeIndex
-          return <button
+          return <div
             key={tag.id}
             id={`space-filter-tag-${tag.id}`}
-            type="button"
             role="option"
             aria-selected={selected}
             data-active={active}
-            className={`flex w-full items-center gap-[7px] rounded-[7px] border-0 px-[7px] py-[7px] text-left hover:bg-[#edf3e4] ${active ? 'bg-[#edf3e4] outline outline-1 outline-[#aac094]' : ''} ${selected ? 'bg-[#e3edda] text-[#3e5a2c]' : 'bg-transparent'}`}
+            className={`${styles.row()} ${active ? 'bg-[#f3f6ef] shadow-[inset_0_0_0_1px_#c7d5b8]' : ''} ${selected ? 'bg-[#e6eeda] text-[#425636]' : ''}`}
             onMouseMove={() => setActiveIndex(index)}
             onClick={() => toggleTag(tag)}
           >
-            <span className="grid h-[14px] w-[14px] shrink-0 place-items-center">{selected && <Check size={13} className="text-[#557240]" />}</span>
-            <TagChip tag={tag} />
-          </button>
+            <span className="grid h-[16px] w-[16px] shrink-0 place-items-center">{selected && <Check size={14} className="text-[#557240]" />}</span>
+            <span className="min-w-0 truncate"><TagChip tag={tag} /></span>
+            <span />
+          </div>
         }) : <p className={styles.empty()}>没有匹配标签</p>}
       </div>
     </div>}
