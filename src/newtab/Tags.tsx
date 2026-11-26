@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, Filter, MoreHorizontal, Pencil, Search, Tag, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import {
@@ -326,24 +327,75 @@ export function TagActionMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
+  const [pickerPosition, setPickerPosition] = useState({ left: 0, top: 0 })
   const rootRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const pickerRef = useRef<HTMLDivElement>(null)
+
+  const updatePositions = useCallback(() => {
+    const trigger = rootRef.current?.querySelector('button')
+    if (!trigger) return
+    const rect = trigger.getBoundingClientRect()
+    const menuWidth = 150
+    const menuHeight = 150
+    const pickerWidth = 286
+    const pickerHeight = 380
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const menuLeft = Math.max(8, Math.min(rect.right - menuWidth, viewportWidth - menuWidth - 8))
+    const menuTop = Math.max(8, Math.min(rect.bottom + 5, viewportHeight - menuHeight - 8))
+    let pickerLeft = rect.right + 8
+    if (pickerLeft + pickerWidth > viewportWidth - 8) pickerLeft = rect.left - pickerWidth - 8
+    pickerLeft = Math.max(8, Math.min(pickerLeft, viewportWidth - pickerWidth - 8))
+    const pickerTop = Math.max(8, Math.min(rect.top, viewportHeight - pickerHeight - 8))
+    setMenuPosition({ left: menuLeft, top: menuTop })
+    setPickerPosition({ left: pickerLeft, top: pickerTop })
+  }, [])
+
   useEffect(() => {
-    const close = (event: MouseEvent) => { if (!rootRef.current?.contains(event.target as Node)) { setOpen(false); setTagOpen(false) } }
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(false); setTagOpen(false) } }
+    const close = (event: MouseEvent) => {
+      const node = event.target as Node
+      if (!rootRef.current?.contains(node) && !menuRef.current?.contains(node) && !pickerRef.current?.contains(node)) {
+        setOpen(false)
+        setTagOpen(false)
+      }
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        setTagOpen(false)
+      }
+    }
     window.addEventListener('click', close)
     window.addEventListener('keydown', escape)
-    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', escape) }
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', escape)
+    }
   }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    updatePositions()
+    window.addEventListener('resize', updatePositions)
+    window.addEventListener('scroll', updatePositions, true)
+    return () => {
+      window.removeEventListener('resize', updatePositions)
+      window.removeEventListener('scroll', updatePositions, true)
+    }
+  }, [open, tagOpen, updatePositions])
+
   return <div ref={rootRef} className="relative z-[40] cursor-default" data-tag-menu-open={open ? '' : undefined} onPointerDownCapture={event => event.stopPropagation()} onMouseDownCapture={event => event.stopPropagation()} onTouchStartCapture={event => event.stopPropagation()} onDragStartCapture={event => event.stopPropagation()}>
     <Button tone="custom" size="custom" className={actionTrigger({ placement })} aria-label={`更多操作 ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><MoreHorizontal size={16} /></Button>
-    {open && <div role="menu" aria-label={`${label}操作`} className="absolute right-0 top-[calc(100%+5px)] z-[90] w-[150px] cursor-default rounded-[10px] border border-solid border-[#d7e2cc] bg-[#fffffd] p-[5px] shadow-[0_18px_44px_#334c2b2b]">
+    {open && createPortal(<div ref={menuRef} role="menu" aria-label={`${label}操作`} className="w-[150px] cursor-default rounded-[10px] border border-solid border-[#d7e2cc] bg-[#fffffd] p-[5px] shadow-[0_18px_44px_#334c2b2b]" style={{ position: 'fixed', left: menuPosition.left, top: menuPosition.top, zIndex: 2147483000 }} onPointerDownCapture={event => event.stopPropagation()} onMouseDownCapture={event => event.stopPropagation()} onTouchStartCapture={event => event.stopPropagation()}>
       <button type="button" role="menuitem" className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-ui-ink hover:bg-[#edf3e4]" onMouseEnter={() => setTagOpen(true)} onFocus={() => setTagOpen(true)} onClick={() => setTagOpen(true)}><Tag size={13} />标签</button>
       {children}
       <button type="button" role="menuitem" className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-action-danger hover:bg-action-danger-hover" onClick={() => { setOpen(false); onDelete() }}><Trash2 size={13} />{deleteLabel}</button>
-    </div>}
-    {open && tagOpen && <div className="absolute left-[calc(100%+8px)] top-0 z-[100]" onMouseEnter={() => setTagOpen(true)}>
+    </div>, document.body)}
+    {open && tagOpen && createPortal(<div ref={pickerRef} className="cursor-default" style={{ position: 'fixed', left: pickerPosition.left, top: pickerPosition.top, zIndex: 2147483000, maxHeight: 'calc(100vh - 16px)', overflowY: 'auto' }} onPointerDownCapture={event => event.stopPropagation()} onMouseDownCapture={event => event.stopPropagation()} onTouchStartCapture={event => event.stopPropagation()} onMouseEnter={() => setTagOpen(true)}>
       <TagPicker doc={doc} target={target} act={act} />
-    </div>}
+    </div>, document.body)}
   </div>
 }
 

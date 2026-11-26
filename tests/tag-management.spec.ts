@@ -169,3 +169,23 @@ test('标签面板阻止卡片拖拽并覆盖其它卡片', async () => {
   await expect(source).not.toHaveAttribute('data-dragging', 'true')
   await page.mouse.up()
 })
+
+test('标签面板在窄窗口边缘保持可见', async () => {
+  const { page } = await openSeededClient()
+  await page.setViewportSize({ width: 885, height: 445 })
+  await page.getByRole('button', { name: '更多操作 工作收藏' }).click()
+  await page.getByRole('menuitem', { name: '标签' }).hover()
+  const picker = page.getByRole('dialog', { name: '标签管理' })
+  const pickerBox = await picker.boundingBox()
+  expect(pickerBox).not.toBeNull()
+  expect(pickerBox!.x).toBeGreaterThanOrEqual(0)
+  expect(pickerBox!.x + pickerBox!.width).toBeLessThanOrEqual(885)
+  expect(pickerBox!.y).toBeGreaterThanOrEqual(0)
+  expect(pickerBox!.y + pickerBox!.height).toBeLessThanOrEqual(445)
+
+  const hit = await page.evaluate(([x, y]) => {
+    const element = document.elementFromPoint(x, y)
+    return element?.closest('[role="dialog"]')?.getAttribute('aria-label') ?? null
+  }, [pickerBox!.x + pickerBox!.width / 2, pickerBox!.y + pickerBox!.height / 2])
+  expect(hit).toBe('标签管理')
+})
