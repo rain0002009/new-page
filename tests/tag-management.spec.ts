@@ -127,7 +127,7 @@ test('空间标签筛选支持搜索和颜色过滤', async () => {
   await expect(filter.getByRole('option', { name: /工作/ })).toBeVisible()
   await expect(filter.getByRole('option', { name: /个人/ })).toBeHidden()
 
-  await filter.getByRole('radio', { name: '透明' }).click()
+  await filter.getByRole('radio', { name: '任意颜色' }).click()
   await filter.getByRole('option', { name: /个人/ }).click()
   await expect(page.getByRole('article', { name: '笔记 示例笔记' })).toBeVisible()
   await expect(page.getByRole('article', { name: '链接 示例链接' })).toBeHidden()

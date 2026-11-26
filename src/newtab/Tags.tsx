@@ -24,7 +24,7 @@ export const tagColorOptions: { value: TagColorChoice; label: string; swatch: st
   { value: 'purple', label: '紫色', swatch: 'bg-[#a081d5]' },
   { value: 'cyan', label: '青色', swatch: 'bg-[#56a6b4]' },
   { value: 'orange', label: '橙色', swatch: 'bg-[#d79351]' },
-  { value: 'transparent', label: '透明', swatch: 'bg-[repeating-conic-gradient(#eef1eb_0_25%,#c8d0c5_0_50%)] bg-[length:8px_8px] border border-solid border-[#879580]' },
+  { value: 'transparent', label: '任意颜色', swatch: 'bg-[conic-gradient(#89929e,#598beb,#df6d67,#d6ad39,#5fa875,#d780b5,#a081d5,#56a6b4,#d79351,#89929e)] border border-solid border-[#879580]' },
 ]
 
 const tagChip = tv({
@@ -230,7 +230,7 @@ export function TagPicker({
       />
     </div>
     <ColorPicker value={color} onChange={setColor} />
-    {normalizedQuery && !exact && <p className={styles.hint()}>按回车创建「{normalizedQuery}」{color === 'transparent' ? '，透明时使用灰色' : ''}。</p>}
+    {normalizedQuery && !exact && <p className={styles.hint()}>按回车创建「{normalizedQuery}」{color === 'transparent' ? '，任意颜色时使用灰色' : ''}。</p>}
     <div id={`tag-options-${target.id}`} className={styles.list()} role="listbox" aria-label="可选标签">
       {results.length ? results.map((tag, index) => {
         const selected = assigned.includes(tag.id)
