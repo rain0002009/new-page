@@ -28,7 +28,7 @@ export const tagColorOptions: { value: TagColorChoice; label: string; swatch: st
 ]
 
 const tagChip = tv({
-  base: 'inline-flex max-w-[120px] min-w-0 items-center gap-[4px] rounded-[5px] border border-solid px-[6px] py-0 text-[10px] font-medium leading-[17px] truncate align-middle',
+  base: 'inline-flex max-w-[120px] min-w-0 items-center gap-[4px] rounded-[5px] border border-solid px-[6px] py-0 text-[12px] font-medium leading-[17px] truncate align-middle',
   variants: { color: {
     grey: 'bg-[#e7e9e8] border-[#c5cbd0] text-[#53606b]',
     blue: 'bg-[#e4edff] border-[#b8cdf8] text-[#366bc8]',
@@ -49,8 +49,8 @@ const panel = tv({
     input: 'w-full rounded-[8px] border border-solid border-form-line bg-form-surface px-[10px] py-[8px] text-[11px] text-form-ink outline-none focus:border-form-focus focus:shadow-[0_0_0_3px_#eaf0df]',
     colors: 'flex flex-wrap gap-[4px] mt-[10px]',
     color: 'h-[20px] w-[20px] rounded-full border border-solid border-transparent p-0',
-    list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-[2px]',
-    row: 'group/tag-option grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[2px] min-h-[32px] text-[11px] hover:bg-[#f2f5ed]',
+    list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-0',
+    row: 'group/tag-option grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[2px] min-h-[28px] text-[11px] hover:bg-[#f2f5ed]',
     empty: 'px-[8px] py-[12px] text-[10px] text-ui-muted',
     hint: 'mt-[8px] text-[9px] text-ui-muted leading-[1.5]',
     filterButton: 'flex items-center gap-[6px] rounded-[8px] border border-solid border-[#d7e2cc] bg-[#fffffbc4] px-[9px] py-[7px] text-[10px] text-[#61744f] hover:border-[#aabd92] hover:bg-[#f4f8ee]',
@@ -428,7 +428,7 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
         />
       </div>
       <ColorPicker value={color} onChange={setColor} />
-      <div id="space-filter-tags" className="mt-[10px] max-h-[220px] overflow-y-auto space-y-[2px]" role="listbox" aria-label="标签选项">
+      <div id="space-filter-tags" className="mt-[10px] max-h-[220px] overflow-y-auto space-y-0" role="listbox" aria-label="标签选项">
         {tags.length ? tags.map((tag, index) => {
           const selected = value.includes(tag.id)
           const active = index === activeIndex
