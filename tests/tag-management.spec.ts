@@ -135,3 +135,37 @@ test('空间标签筛选支持搜索和颜色过滤', async () => {
   await expect(page.getByRole('article', { name: '链接 示例链接' })).toBeHidden()
 })
 
+
+
+test('标签面板阻止卡片拖拽并覆盖其它卡片', async () => {
+  const { page } = await openSeededClient()
+  const picker = await openTagPicker(page)
+  const source = page.getByRole('article', { name: '链接 示例链接' })
+  const target = page.getByRole('article', { name: '笔记 示例笔记' })
+  const pickerBox = await picker.boundingBox()
+  const targetBox = await target.boundingBox()
+  expect(pickerBox).not.toBeNull()
+  expect(targetBox).not.toBeNull()
+
+  const targetActionBox = await page.getByRole('button', { name: '更多操作 示例笔记' }).boundingBox()
+  expect(targetActionBox).not.toBeNull()
+  const hit = await page.evaluate(([x, y]) => {
+    const element = document.elementFromPoint(x, y)
+    return { dialog: element?.closest('[role="dialog"]')?.getAttribute('aria-label') ?? null, tag: element?.tagName, cls: element?.className, label: element?.getAttribute('aria-label') }
+  }, [targetActionBox!.x + targetActionBox!.width / 2, targetActionBox!.y + targetActionBox!.height / 2])
+  expect(hit.dialog).toBe('标签管理')
+  expect(await picker.evaluate(element => getComputedStyle(element).backgroundColor)).not.toContain('rgba')
+  const menuBox = await page.getByRole('menuitem', { name: '标签' }).boundingBox()
+  expect(menuBox).not.toBeNull()
+  await page.mouse.move(menuBox!.x + menuBox!.width / 2, menuBox!.y + menuBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 8 })
+  await expect(source).not.toHaveAttribute('data-dragging', 'true')
+  await page.mouse.up()
+
+  await page.mouse.move(pickerBox!.x + pickerBox!.width / 2, pickerBox!.y + pickerBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 8 })
+  await expect(source).not.toHaveAttribute('data-dragging', 'true')
+  await page.mouse.up()
+})

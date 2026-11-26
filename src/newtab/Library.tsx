@@ -26,7 +26,7 @@ const cardAction = tv({
 const collectionTool = 'h-[32px] w-[32px] shrink-0 p-0 rounded-[6px] border border-solid border-transparent bg-transparent text-[#8c9a7f] hover:bg-action-ghost-surface [@media(max-width:650px)]:w-[20px]'
 const collectionStyle = tv({
   slots: {
-    base: 'collection relative pt-[4px] pb-[8px] rounded-[16px]',
+    base: 'collection relative pt-[4px] pb-[8px] rounded-[16px] [&:has([data-tag-menu-open])]:z-[1000]',
     header: 'flex items-center justify-between min-h-[42px] mb-[10px] gap-[10px] py-[5px]',
     heading: 'flex items-center min-w-0 gap-0',
     title: 'text-[16px] font-semibold flex items-center gap-[7px] min-w-0 truncate text-[#485b3d] [@media(max-width:650px)]:max-w-[170px]',

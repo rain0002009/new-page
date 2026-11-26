@@ -2,7 +2,7 @@ import { tv } from 'tailwind-variants/lite'
 
 export const linkCard = tv({
   slots: {
-    base: 'link-card group/card relative min-w-0 min-h-[104px] px-[16px] py-[14px] rounded-[12px] border border-solid border-[#ffffffb3] shadow-[0_3px_12px_#43503806] [transition:box-shadow_.2s,border-color_.2s,background_.2s] hover:border-[#c7d8b1] hover:shadow-[0_7px_18px_#4350380d]',
+    base: 'link-card group/card relative min-w-0 [&:has([data-tag-menu-open])]:z-[1000] min-h-[104px] px-[16px] py-[14px] rounded-[12px] border border-solid border-[#ffffffb3] shadow-[0_3px_12px_#43503806] [transition:box-shadow_.2s,border-color_.2s,background_.2s] hover:border-[#c7d8b1] hover:shadow-[0_7px_18px_#4350380d]',
     top: 'min-h-[36px] text-[12px] [line-height:18px] line-clamp-2 [overflow-wrap:anywhere]',
     icon: 'absolute',
     actions: 'absolute top-[13px] right-[11px] z-[30] flex gap-[1px] rounded-[10px] bg-transparent transition-opacity duration-150 group-hover/card:bg-[#fafff1ed] group-focus-within/card:bg-ui-surface',
