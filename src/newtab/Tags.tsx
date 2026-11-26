@@ -50,7 +50,7 @@ const panel = tv({
     colors: 'flex flex-wrap gap-[4px] mt-[10px]',
     color: 'h-[20px] w-[20px] rounded-full border border-solid border-transparent p-0',
     list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-0',
-    row: 'group/tag-option grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[2px] min-h-[28px] text-[11px] hover:bg-[#f2f5ed]',
+    row: 'group/tag-option grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[2px] min-h-[28px] text-[11px] cursor-pointer hover:bg-[#f2f5ed]',
     empty: 'px-[8px] py-[12px] text-[10px] text-ui-muted',
     hint: 'mt-[8px] text-[9px] text-ui-muted leading-[1.5]',
     filterButton: 'flex items-center gap-[6px] rounded-[8px] border border-solid border-[#d7e2cc] bg-[#fffffbc4] px-[9px] py-[7px] text-[10px] text-[#61744f] hover:border-[#aabd92] hover:bg-[#f4f8ee]',
@@ -208,7 +208,7 @@ export function TagPicker({
     })
   }
 
-  return <div className={`${styles.card({ embedded })} ${className}`} role="dialog" aria-label="标签管理" onPointerDownCapture={event => event.stopPropagation()} onMouseDownCapture={event => event.stopPropagation()} onTouchStartCapture={event => event.stopPropagation()} onDragStartCapture={event => event.stopPropagation()}>
+  return <div className={`${styles.card({ embedded })} ${className} cursor-default`} role="dialog" aria-label="标签管理" onPointerDownCapture={event => event.stopPropagation()} onMouseDownCapture={event => event.stopPropagation()} onTouchStartCapture={event => event.stopPropagation()} onDragStartCapture={event => event.stopPropagation()}>
     <label className={styles.label()} htmlFor={`tag-search-${target.id}`}>搜索或创建标签</label>
     <div className="relative">
       <Search size={13} className="absolute left-[9px] top-[9px] text-[#91a084]" />
@@ -334,9 +334,9 @@ export function TagActionMenu({
     window.addEventListener('keydown', escape)
     return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', escape) }
   }, [])
-  return <div ref={rootRef} className="relative z-[40]" data-tag-menu-open={open ? '' : undefined} onPointerDownCapture={event => event.stopPropagation()} onMouseDownCapture={event => event.stopPropagation()} onTouchStartCapture={event => event.stopPropagation()} onDragStartCapture={event => event.stopPropagation()}>
+  return <div ref={rootRef} className="relative z-[40] cursor-default" data-tag-menu-open={open ? '' : undefined} onPointerDownCapture={event => event.stopPropagation()} onMouseDownCapture={event => event.stopPropagation()} onTouchStartCapture={event => event.stopPropagation()} onDragStartCapture={event => event.stopPropagation()}>
     <Button tone="custom" size="custom" className={actionTrigger({ placement })} aria-label={`更多操作 ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><MoreHorizontal size={16} /></Button>
-    {open && <div role="menu" aria-label={`${label}操作`} className="absolute right-0 top-[calc(100%+5px)] z-[90] w-[150px] rounded-[10px] border border-solid border-[#d7e2cc] bg-[#fffffd] p-[5px] shadow-[0_18px_44px_#334c2b2b]">
+    {open && <div role="menu" aria-label={`${label}操作`} className="absolute right-0 top-[calc(100%+5px)] z-[90] w-[150px] cursor-default rounded-[10px] border border-solid border-[#d7e2cc] bg-[#fffffd] p-[5px] shadow-[0_18px_44px_#334c2b2b]">
       <button type="button" role="menuitem" className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-ui-ink hover:bg-[#edf3e4]" onMouseEnter={() => setTagOpen(true)} onFocus={() => setTagOpen(true)} onClick={() => setTagOpen(true)}><Tag size={13} />标签</button>
       {children}
       <button type="button" role="menuitem" className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-action-danger hover:bg-action-danger-hover" onClick={() => { setOpen(false); onDelete() }}><Trash2 size={13} />{deleteLabel}</button>
@@ -400,7 +400,7 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
       <Filter size={14} />
       {value.length > 0 && <span className="rounded-[5px] bg-[#dfe9d4] px-[5px] py-[2px] text-[9px]">{value.length}</span>}
     </button>
-    {open && <div role="dialog" aria-label="筛选收藏" className="absolute left-0 top-[calc(100%+6px)] z-[80] w-[286px] rounded-[12px] border border-solid border-[#d7e2cc] bg-[#fffffd] p-[12px] shadow-[0_18px_50px_#334c2b2b]">
+    {open && <div role="dialog" aria-label="筛选收藏" className="absolute left-0 top-[calc(100%+6px)] z-[80] w-[286px] cursor-default rounded-[12px] border border-solid border-[#d7e2cc] bg-[#fffffd] p-[12px] shadow-[0_18px_50px_#334c2b2b]">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold text-form-label">筛选标签</span>
         {value.length > 0 && <Button size="custom" className="px-[5px] py-[3px] text-[9px]" onClick={() => onChange([])}>清空</Button>}
