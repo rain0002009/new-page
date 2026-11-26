@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, Folder, Link2, LocateFixed, Pencil, Search, Unlink } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Folder, Link2, LocateFixed, Pencil, Search, Tag, Unlink } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { active, tagUsagesByTag, type Document, type TaggedEntity, type TagUsage, type Tag as TagRecord } from '../core/model'
 import type { Act } from './Editor'
@@ -13,6 +13,8 @@ const styles = tv({
     toolbar: 'flex items-center gap-[10px] mb-[18px] [@media(max-width:650px)]:flex-col [@media(max-width:650px)]:items-stretch',
     search: 'relative flex-1 min-w-0',
     searchInput: 'w-full rounded-[10px] border border-solid border-form-line bg-form-surface py-[9px] pl-[34px] pr-[12px] text-[12px] text-form-ink outline-none focus:border-form-focus focus:shadow-[0_0_0_3px_#eaf0df]',
+    section: 'p-[25px] border border-solid border-white rounded-[13px] bg-ui-dialog mb-[20px] backdrop-blur-[25px] shadow-[0_10px_35px_#4c683410] [@media(max-width:650px)]:p-[18px]',
+    sectionHeader: 'flex w-full items-center gap-[8px] rounded-[8px] border-0 bg-transparent p-0 text-left text-[15px] font-semibold text-ui-ink cursor-pointer',
     list: 'space-y-[8px]',
     tag: 'rounded-[12px] border border-solid border-[#e1e8d8] bg-[#fffffbd9] overflow-hidden',
     tagHeader: 'flex min-h-[52px] items-center gap-[10px] px-[14px] py-[10px]',
@@ -40,7 +42,8 @@ function UsageIcon({ kind }: { kind: 'collection' | 'link' | 'note' }) {
   return <FileText size={15} />
 }
 
-export default function TagManagementPanel({ doc, act, onBack, onLocateEntity }: { doc: Document; act: Act; onBack: () => void; onLocateEntity: (id: string) => void }) {
+export default function TagManagementPanel({ doc, act, onLocateEntity }: { doc: Document; act: Act; onLocateEntity: (id: string) => void }) {
+  const [collapsed, setCollapsed] = useState(false)
   const [query, setQuery] = useState('')
   const [color, setColor] = useState<TagColorChoice>('transparent')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
@@ -72,7 +75,13 @@ export default function TagManagementPanel({ doc, act, onBack, onLocateEntity }:
     await act({ type: 'set-tags', id: target.id, tagIds: (target.tagIds ?? []).filter(id => id !== tagId) })
   }
 
-  return <section aria-label="标签管理内容">
+  return <section className={panelStyles.section()} aria-label="标签管理内容">
+    <button type="button" className={panelStyles.sectionHeader()} aria-expanded={!collapsed} aria-label={`${collapsed ? '展开' : '收起'}标签管理`} onClick={() => setCollapsed(value => !value)}>
+      {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+      <Tag size={16} />
+      <span>标签管理</span>
+    </button>
+    {!collapsed && <>
     <div className={panelStyles.toolbar()}>
       <div className={panelStyles.search()}>
         <Search size={15} className="absolute left-[11px] top-[10px] text-[#8d9b82]" />
@@ -125,11 +134,8 @@ export default function TagManagementPanel({ doc, act, onBack, onLocateEntity }:
       }) : <p className={panelStyles.empty()}>没有匹配的标签。</p>}
     </div>
 
-    <div className="mt-[18px]">
-      <Button onClick={onBack}>返回设置</Button>
-    </div>
-
     {editing && <TagEditModal tag={editing} doc={doc} act={act} close={() => setEditing(null)} />}
+    </>}
   </section>
 }
 

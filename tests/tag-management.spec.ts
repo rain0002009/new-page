@@ -194,10 +194,11 @@ test('标签面板在窄窗口边缘保持可见', async () => {
 test('设置页标签管理反向查看与解绑', async () => {
   const { page } = await openSeededClient()
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByRole('button', { name: '标签管理' }).click()
-
-  await expect(page.getByRole('heading', { name: '标签管理' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '返回设置' })).toBeVisible()
+  const sectionToggle = page.getByRole('button', { name: '收起标签管理' })
+  await expect(sectionToggle).toBeVisible()
+  await sectionToggle.click()
+  await expect(page.getByRole('button', { name: '展开标签管理' })).toBeVisible()
+  await page.getByRole('button', { name: '展开标签管理' }).click()
   await expect(page.getByRole('button', { name: '展开标签 工作' })).toBeVisible()
   await expect(page.getByRole('button', { name: '展开标签 工作' })).toContainText('2')
 
@@ -213,7 +214,6 @@ test('设置页标签管理反向查看与解绑', async () => {
 test('标签管理定位具体卡片', async () => {
   const { page } = await openSeededClient()
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByRole('button', { name: '标签管理' }).click()
   await page.getByRole('button', { name: '展开标签 个人' }).click()
   await page.getByRole('button', { name: '定位 示例笔记' }).click()
 
@@ -230,8 +230,6 @@ test('标签管理定位具体卡片', async () => {
 test('标签管理搜索颜色与闲置标签', async () => {
   const { page } = await openSeededClient()
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByRole('button', { name: '标签管理' }).click()
-
   await expect(page.getByRole('button', { name: '展开标签 闲置' })).toContainText('0 处使用')
   await page.getByLabel('搜索标签名称').fill('个人')
   await expect(page.getByRole('button', { name: '展开标签 工作' })).toBeHidden()
