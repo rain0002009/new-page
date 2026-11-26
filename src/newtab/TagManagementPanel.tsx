@@ -10,7 +10,7 @@ type TagColorChoice = TagRecord['color'] | 'transparent'
 
 const styles = tv({
   slots: {
-    toolbar: 'flex items-center gap-[10px] mb-[18px] [@media(max-width:650px)]:flex-col [@media(max-width:650px)]:items-stretch',
+    toolbar: 'flex items-center gap-[10px] mt-[16px] mb-[18px] [@media(max-width:650px)]:flex-col [@media(max-width:650px)]:items-stretch',
     search: 'relative flex-1 min-w-0',
     searchInput: 'w-full rounded-[10px] border border-solid border-form-line bg-form-surface py-[9px] pl-[34px] pr-[12px] text-[12px] text-form-ink outline-none focus:border-form-focus focus:shadow-[0_0_0_3px_#eaf0df]',
     section: 'p-[25px] border border-solid border-white rounded-[13px] bg-ui-dialog mb-[20px] backdrop-blur-[25px] shadow-[0_10px_35px_#4c683410] [@media(max-width:650px)]:p-[18px]',
@@ -138,4 +138,3 @@ export default function TagManagementPanel({ doc, act, onLocateEntity }: { doc: 
     </>}
   </section>
 }
-
