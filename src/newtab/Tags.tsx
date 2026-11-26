@@ -28,7 +28,7 @@ export const tagColorOptions: { value: TagColorChoice; label: string; swatch: st
 ]
 
 const tagChip = tv({
-  base: 'inline-flex max-w-[120px] min-w-0 items-center gap-[4px] rounded-[5px] border border-solid px-[6px] py-[2px] text-[9px] font-medium leading-[14px] truncate align-middle',
+  base: 'inline-flex max-w-[120px] min-w-0 items-center gap-[4px] rounded-[5px] border border-solid px-[6px] py-0 text-[10px] font-medium leading-[17px] truncate align-middle',
   variants: { color: {
     grey: 'bg-[#e7e9e8] border-[#c5cbd0] text-[#53606b]',
     blue: 'bg-[#e4edff] border-[#b8cdf8] text-[#366bc8]',
@@ -49,8 +49,8 @@ const panel = tv({
     input: 'w-full rounded-[8px] border border-solid border-form-line bg-form-surface px-[10px] py-[8px] text-[11px] text-form-ink outline-none focus:border-form-focus focus:shadow-[0_0_0_3px_#eaf0df]',
     colors: 'flex flex-wrap gap-[4px] mt-[10px]',
     color: 'h-[20px] w-[20px] rounded-full border border-solid border-transparent p-0',
-    list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-[6px]',
-    row: 'grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[4px] min-h-[36px] text-[11px] hover:bg-[#f2f5ed]',
+    list: 'mt-[10px] max-h-[220px] overflow-y-auto space-y-[2px]',
+    row: 'group/tag-option grid grid-cols-[18px_minmax(0,1fr)_28px] items-center gap-[6px] rounded-[8px] px-[8px] py-[2px] min-h-[32px] text-[11px] hover:bg-[#f2f5ed]',
     empty: 'px-[8px] py-[12px] text-[10px] text-ui-muted',
     hint: 'mt-[8px] text-[9px] text-ui-muted leading-[1.5]',
     filterButton: 'flex items-center gap-[6px] rounded-[8px] border border-solid border-[#d7e2cc] bg-[#fffffbc4] px-[9px] py-[7px] text-[10px] text-[#61744f] hover:border-[#aabd92] hover:bg-[#f4f8ee]',
@@ -160,7 +160,7 @@ export function TagPicker({
   const currentTarget = (doc.entities[target.id] as TaggedEntity | undefined) ?? target
   const [query, setQuery] = useState('')
   const [color, setColor] = useState<TagColorChoice>('transparent')
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(-1)
   const [editing, setEditing] = useState<TagRecord | null>(null)
   const assigned = currentTarget.tagIds ?? []
   const tags = activeTags(doc)
@@ -173,7 +173,7 @@ export function TagPicker({
   const exact = tags.find(tag => tag.title === normalizedQuery && tag.color === createColor)
 
   useEffect(() => {
-    setActiveIndex(0)
+    setActiveIndex(-1)
   }, [normalizedQuery, color, results.length])
 
   async function setAssigned(tag: TagRecord) {
@@ -202,7 +202,10 @@ export function TagPicker({
 
   function moveActive(delta: number) {
     if (!results.length) return
-    setActiveIndex(index => (index + delta + results.length) % results.length)
+    setActiveIndex(index => {
+      if (index < 0) return delta > 0 ? 0 : results.length - 1
+      return (index + delta + results.length) % results.length
+    })
   }
 
   return <div className={`${styles.card({ embedded })} ${className}`} role="dialog" aria-label="标签管理">
@@ -216,7 +219,7 @@ export function TagPicker({
         role="combobox"
         aria-expanded="true"
         aria-controls={`tag-options-${target.id}`}
-        aria-activedescendant={results[activeIndex] ? `tag-option-${target.id}-${results[activeIndex].id}` : undefined}
+        aria-activedescendant={activeIndex >= 0 && results[activeIndex] ? `tag-option-${target.id}-${results[activeIndex].id}` : undefined}
         onChange={e => { if (tagNameLength(e.target.value) <= 20) setQuery(e.target.value) }}
         onKeyDown={e => {
           if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1) }
@@ -241,13 +244,13 @@ export function TagPicker({
           role="option"
           aria-selected={selected}
           data-active={active}
-          className={`${styles.row()} ${active ? 'bg-[#f3f6ef] shadow-[inset_0_0_0_1px_#c7d5b8]' : ''} ${selected ? 'bg-[#e6eeda] text-[#425636]' : ''}`}
+          className={`${styles.row()} ${active ? 'bg-[#f3f6ef]' : ''}`}
           onMouseMove={() => setActiveIndex(index)}
           onClick={() => void setAssigned(tag)}
         >
           <span className="grid h-[16px] w-[16px] shrink-0 place-items-center">{selected && <Check size={14} className="text-[#557240]" />}</span>
           <span className="min-w-0 truncate"><TagChip tag={tag} /></span>
-          <Button size="custom" className="h-[24px] w-[24px] shrink-0 p-0 text-[#7b8970] hover:bg-[#e3ebda]" aria-label={`编辑标签 ${tag.title}`} onClick={event => { event.stopPropagation(); setEditing(tag) }}><Pencil size={12} /></Button>
+          <Button size="custom" className={`h-[24px] w-[24px] shrink-0 p-0 text-[#7b8970] hover:bg-[#e3ebda] ${active ? 'visible' : 'invisible group-hover/tag-option:visible group-focus-within/tag-option:visible'}`} aria-label={`编辑标签 ${tag.title}`} onClick={event => { event.stopPropagation(); setEditing(tag) }}><Pencil size={12} /></Button>
         </div>
       }) : <p className={styles.empty()}>{normalizedQuery ? '回车即可创建标签' : '暂无标签'}</p>}
     </div>
@@ -348,7 +351,7 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [color, setColor] = useState<TagColorChoice>('transparent')
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(-1)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -377,7 +380,7 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
   )
 
   useEffect(() => {
-    setActiveIndex(0)
+    setActiveIndex(-1)
   }, [query, color, tags.length])
 
   function toggleTag(tag: TagRecord) {
@@ -386,7 +389,10 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
 
   function moveActive(delta: number) {
     if (!tags.length) return
-    setActiveIndex(index => (index + delta + tags.length) % tags.length)
+    setActiveIndex(index => {
+      if (index < 0) return delta > 0 ? 0 : tags.length - 1
+      return (index + delta + tags.length) % tags.length
+    })
   }
 
   return <div ref={rootRef} className="relative">
@@ -407,7 +413,7 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
           role="combobox"
           aria-expanded="true"
           aria-controls="space-filter-tags"
-          aria-activedescendant={tags[activeIndex] ? `space-filter-tag-${tags[activeIndex].id}` : undefined}
+          aria-activedescendant={activeIndex >= 0 && tags[activeIndex] ? `space-filter-tag-${tags[activeIndex].id}` : undefined}
           value={query}
           onChange={event => { if (tagNameLength(event.target.value) <= 20) setQuery(event.target.value) }}
           onKeyDown={event => {
@@ -422,7 +428,7 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
         />
       </div>
       <ColorPicker value={color} onChange={setColor} />
-      <div id="space-filter-tags" className="mt-[10px] max-h-[220px] overflow-y-auto space-y-[6px]" role="listbox" aria-label="标签选项">
+      <div id="space-filter-tags" className="mt-[10px] max-h-[220px] overflow-y-auto space-y-[2px]" role="listbox" aria-label="标签选项">
         {tags.length ? tags.map((tag, index) => {
           const selected = value.includes(tag.id)
           const active = index === activeIndex
@@ -432,7 +438,7 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
             role="option"
             aria-selected={selected}
             data-active={active}
-            className={`${styles.row()} ${active ? 'bg-[#f3f6ef] shadow-[inset_0_0_0_1px_#c7d5b8]' : ''} ${selected ? 'bg-[#e6eeda] text-[#425636]' : ''}`}
+            className={`${styles.row()} ${active ? 'bg-[#f3f6ef]' : ''}`}
             onMouseMove={() => setActiveIndex(index)}
             onClick={() => toggleTag(tag)}
           >

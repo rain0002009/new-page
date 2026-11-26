@@ -71,6 +71,8 @@ test('标签下拉保持打开并支持键盘选择', async () => {
 
   await search.fill('')
   await search.pressSequentially('个人')
+  await expect(picker.getByRole('option', { name: /个人/ })).toHaveAttribute('data-active', 'false')
+  await expect(picker.getByRole('button', { name: '编辑标签 个人' })).toBeHidden()
   await search.press('ArrowDown')
   await expect(picker.getByRole('option', { name: /个人/ })).toHaveAttribute('data-active', 'true')
   await search.press('Enter')

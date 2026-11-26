@@ -73,7 +73,7 @@ export function Card({ link, doc, act, edit, location, locate }: { link: Link; d
       </Tooltip>
       <TagActionMenu doc={doc} target={link} label={link.title} act={act} onDelete={() => void act({ type: 'delete', id: link.id })} deleteLabel="删除链接" />
     </div>
-    {tags.length ? <TagList tags={tags} label={link.title} className="mt-[6px] min-h-[17px]" /> : <p className={styles.note()}>{link.note}</p>}
+    {tags.length ? <TagList tags={tags} label={link.title} className="mt-[6px] min-h-[17px] leading-[17px]" /> : <p className={styles.note()}>{link.note}</p>}
     {(location || locate) && <div className={styles.bottom()}>{location && <span className={styles.location()} title={location}><Folder size={10} />{location}</span>}<div className={styles.secondary()}>
       {locate && (
         <Tooltip content="定位收藏">
