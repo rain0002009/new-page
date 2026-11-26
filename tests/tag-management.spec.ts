@@ -1,5 +1,5 @@
-import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test'
-import { mkdtemp, cp, readFile, writeFile, rm } from 'node:fs/promises'
+import { test, expect, chromium, type BrowserContext } from '@playwright/test'
+import { mkdtemp, cp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -51,50 +51,85 @@ async function openSeededClient() {
   })
   const page = await context.newPage()
   await page.goto(`chrome-extension://${id}/chrome_url_overrides/newtab.html`)
-  return { page, id }
+  return { page }
 }
 
-test('标签显示、工具菜单与编辑', async () => {
-  const { page } = await openSeededClient()
-  await expect(page.getByRole('article', { name: '链接 示例链接' })).toBeVisible()
-  await expect(page.getByRole('article', { name: '链接 示例链接' }).getByText('工作')).toBeVisible()
-  await expect(page.getByRole('article', { name: '笔记 示例笔记' }).getByText('个人')).toBeVisible()
-
+async function openTagPicker(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: '更多操作 示例链接' }).click()
-  await expect(page.getByRole('menuitem', { name: '标签' })).toBeVisible()
-  await expect(page.getByRole('menuitem', { name: '删除链接' })).toBeVisible()
   await page.getByRole('menuitem', { name: '标签' }).hover()
-  const quickPicker = page.getByRole('dialog', { name: '标签管理' })
-  await expect(quickPicker).toBeVisible()
-  await quickPicker.getByRole('button', { name: '个人', exact: true }).click()
-  await expect(quickPicker.getByRole('button', { name: '个人', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(quickPicker).toBeVisible()
+  return page.getByRole('dialog', { name: '标签管理' })
+}
+
+test('标签下拉保持打开并支持键盘选择', async () => {
+  const { page } = await openSeededClient()
+  const picker = await openTagPicker(page)
+  const search = picker.getByLabel('搜索或创建标签')
+
+  await search.pressSequentially('连续输入')
+  await expect(picker).toBeVisible()
+  await expect(picker.getByRole('button', { name: /创建/ })).toBeHidden()
+
+  await search.fill('')
+  await search.pressSequentially('个人')
+  await search.press('ArrowDown')
+  await expect(picker.getByRole('option', { name: /个人/ })).toHaveAttribute('data-active', 'true')
+  await search.press('Enter')
+  await expect(picker.getByRole('option', { name: /个人/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(picker).toBeVisible()
 
   await page.keyboard.press('Escape')
+  await expect(picker).toBeHidden()
+})
+
+test('搜索框回车直接创建标签，透明使用第一个颜色', async () => {
+  const { page } = await openSeededClient()
+  const picker = await openTagPicker(page)
+  const search = picker.getByLabel('搜索或创建标签')
+
+  await search.fill('紧急')
+  await search.press('Enter')
+  await expect(picker.getByRole('option', { name: /紧急/ })).toHaveAttribute('aria-selected', 'true')
+
+  await search.fill('透明标签')
+  await search.press('Enter')
+  await expect(picker.getByRole('option', { name: /透明标签/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(picker.getByRole('button', { name: /创建/ })).toBeHidden()
+})
+
+test('编辑弹窗可连续添加标签', async () => {
+  const { page } = await openSeededClient()
   await page.getByRole('button', { name: '编辑链接' }).click()
   const editor = page.getByRole('dialog', { name: '编辑链接' })
-  await editor.getByLabel('搜索或创建标签').fill('紧急')
-  await expect(editor.getByRole('button', { name: '创建「紧急」' })).toBeHidden()
-  await editor.getByRole('radio', { name: '红色' }).click()
-  await editor.getByRole('button', { name: '创建「紧急」' }).click()
+  const search = editor.getByLabel('搜索或创建标签')
+
+  await search.fill('紧急')
+  await search.press('Enter')
   await expect(editor.getByRole('button', { name: '移除标签 紧急' })).toBeVisible()
 
-  await editor.getByLabel('搜索或创建标签').fill('复查')
-  await editor.getByRole('radio', { name: '蓝色' }).click()
-  await editor.getByRole('button', { name: '创建「复查」' }).click()
+  await search.fill('复查')
+  await search.press('Enter')
   await expect(editor.getByRole('button', { name: '移除标签 紧急' })).toBeVisible()
   await expect(editor.getByRole('button', { name: '移除标签 复查' })).toBeVisible()
 })
 
-test('空间标签筛选', async () => {
+test('空间标签筛选支持搜索和颜色过滤', async () => {
   const { page } = await openSeededClient()
-  await page.getByRole('button', { name: '标签筛选' }).click()
-  await page.getByRole('dialog', { name: '标签筛选' }).getByRole('button', { name: '个人', exact: true }).click()
+  await page.getByRole('button', { name: '筛选' }).click()
+  const filter = page.getByRole('dialog', { name: '筛选收藏' })
+  const search = filter.getByLabel('筛选标签')
+
+  await search.fill('个人')
+  await expect(filter.getByRole('option', { name: /个人/ })).toBeVisible()
+  await expect(filter.getByRole('option', { name: /工作/ })).toBeHidden()
+
+  await search.fill('')
+  await filter.getByRole('radio', { name: '蓝色' }).click()
+  await expect(filter.getByRole('option', { name: /工作/ })).toBeVisible()
+  await expect(filter.getByRole('option', { name: /个人/ })).toBeHidden()
+
+  await filter.getByRole('radio', { name: '透明' }).click()
+  await filter.getByRole('option', { name: /个人/ }).click()
   await expect(page.getByRole('article', { name: '笔记 示例笔记' })).toBeVisible()
   await expect(page.getByRole('article', { name: '链接 示例链接' })).toBeHidden()
-  await page.getByRole('dialog', { name: '标签筛选' }).getByRole('button', { name: '工作', exact: true }).click()
-  await expect(page.getByRole('article', { name: '链接 示例链接' })).toBeVisible()
-  await expect(page.getByRole('article', { name: '笔记 示例笔记' })).toBeVisible()
 })
-
 

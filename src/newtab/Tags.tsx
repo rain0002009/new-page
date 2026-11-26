@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Check, MoreHorizontal, Pencil, Plus, Search, Tag, Trash2, X } from 'lucide-react'
+import { Check, Filter, MoreHorizontal, Pencil, Search, Tag, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import {
   active,
@@ -160,6 +160,7 @@ export function TagPicker({
   const currentTarget = (doc.entities[target.id] as TaggedEntity | undefined) ?? target
   const [query, setQuery] = useState('')
   const [color, setColor] = useState<TagColorChoice>('transparent')
+  const [activeIndex, setActiveIndex] = useState(0)
   const [editing, setEditing] = useState<TagRecord | null>(null)
   const assigned = currentTarget.tagIds ?? []
   const tags = activeTags(doc)
@@ -168,7 +169,12 @@ export function TagPicker({
     (!normalizedQuery || tag.title.toLocaleLowerCase().includes(normalizedQuery.toLocaleLowerCase())) &&
     (color === 'transparent' || tag.color === color)
   )
-  const exact = tags.find(tag => tag.title === normalizedQuery && tag.color === color)
+  const createColor: TagColor = color === 'transparent' ? tagColorOptions[0].value as TagColor : color
+  const exact = tags.find(tag => tag.title === normalizedQuery && tag.color === createColor)
+
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [normalizedQuery, color, results.length])
 
   async function setAssigned(tag: TagRecord) {
     const next = assigned.includes(tag.id) ? assigned.filter(id => id !== tag.id) : [...assigned, tag.id]
@@ -176,16 +182,27 @@ export function TagPicker({
   }
 
   async function createTag() {
-    if (!normalizedQuery || color === 'transparent') return
-    const existing = tags.find(tag => tag.title === normalizedQuery && tag.color === color)
+    if (!normalizedQuery) return
+    const existing = tags.find(tag => tag.title === normalizedQuery && tag.color === createColor)
     if (existing) {
-      await setAssigned(existing)
+      if (!assigned.includes(existing.id)) await act({ type: 'set-tags', id: currentTarget.id, tagIds: [...assigned, existing.id] })
       setQuery('')
       return
     }
     const id = crypto.randomUUID()
-    if (await act({ type: 'add-tag', id, name: normalizedQuery, color: color as TagColor }) &&
+    if (await act({ type: 'add-tag', id, name: normalizedQuery, color: createColor }) &&
         await act({ type: 'set-tags', id: currentTarget.id, tagIds: [...assigned, id] })) setQuery('')
+  }
+
+  async function submitSearch() {
+    const highlighted = results[activeIndex]
+    if (highlighted) await setAssigned(highlighted)
+    else await createTag()
+  }
+
+  function moveActive(delta: number) {
+    if (!results.length) return
+    setActiveIndex(index => (index + delta + results.length) % results.length)
   }
 
   return <div className={`${styles.card({ embedded })} ${className}`} role="dialog" aria-label="标签管理">
@@ -196,23 +213,45 @@ export function TagPicker({
         id={`tag-search-${target.id}`}
         className={`${styles.input()} pl-[28px]`}
         value={query}
+        role="combobox"
+        aria-expanded="true"
+        aria-controls={`tag-options-${target.id}`}
+        aria-activedescendant={results[activeIndex] ? `tag-option-${target.id}-${results[activeIndex].id}` : undefined}
         onChange={e => { if (tagNameLength(e.target.value) <= 20) setQuery(e.target.value) }}
-        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createTag() } }}
-        placeholder="输入标签名称"
+        onKeyDown={e => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1) }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1) }
+          else if (e.key === 'Home') { e.preventDefault(); setActiveIndex(0) }
+          else if (e.key === 'End') { e.preventDefault(); setActiveIndex(Math.max(0, results.length - 1)) }
+          else if (e.key === 'Enter') { e.preventDefault(); void submitSearch() }
+        }}
+        placeholder="输入标签名称，回车创建或选中"
         autoFocus={autoFocus}
       />
     </div>
     <ColorPicker value={color} onChange={setColor} />
-    {normalizedQuery && color !== 'transparent' && !exact && <Button size="custom" className="mt-[9px] w-full justify-center gap-[5px] px-[10px] py-[7px] text-[10px]" onClick={() => void createTag()}><Plus size={13} />创建「{normalizedQuery}」</Button>}
-    {normalizedQuery && color === 'transparent' && <p className={styles.hint()}>透明仅用于忽略颜色搜索，选择具体颜色后才能创建标签。</p>}
-    <div className={styles.list()}>
-      {results.length ? results.map(tag => <div key={tag.id} className={styles.row()}>
-        <button type="button" className="flex min-w-0 flex-1 items-center gap-[7px] bg-transparent border-0 p-0 text-left" aria-pressed={assigned.includes(tag.id)} onClick={() => void setAssigned(tag)}>
-          <span className={`h-[14px] w-[14px] shrink-0 rounded-[4px] border border-solid ${assigned.includes(tag.id) ? 'bg-[#65814e] border-[#65814e] text-white' : tagColorOptions.find(option => option.value === tag.color)?.swatch ?? ''}`}>{assigned.includes(tag.id) && <Check size={11} />}</span>
-          <TagChip tag={tag} />
-        </button>
-        <Button size="custom" className="h-[24px] w-[24px] shrink-0 p-0 text-[#7b8970] hover:bg-[#e3ebda]" aria-label={`编辑标签 ${tag.title}`} onClick={() => setEditing(tag)}><Pencil size={12} /></Button>
-      </div>) : <p className={styles.empty()}>{normalizedQuery ? '没有匹配标签' : '暂无标签'}</p>}
+    {normalizedQuery && !exact && <p className={styles.hint()}>按回车创建「{normalizedQuery}」{color === 'transparent' ? '，透明时使用灰色' : ''}。</p>}
+    <div id={`tag-options-${target.id}`} className={styles.list()} role="listbox" aria-label="可选标签">
+      {results.length ? results.map((tag, index) => {
+        const selected = assigned.includes(tag.id)
+        const active = index === activeIndex
+        return <div key={tag.id} className={`${styles.row()} ${active ? 'bg-[#edf3e4] outline outline-1 outline-[#aac094]' : ''} ${selected ? 'bg-[#e3edda] text-[#3e5a2c]' : ''}`}>
+          <button
+            id={`tag-option-${target.id}-${tag.id}`}
+            type="button"
+            role="option"
+            aria-selected={selected}
+            data-active={active}
+            className="flex min-w-0 flex-1 items-center gap-[7px] bg-transparent border-0 p-0 text-left"
+            onMouseMove={() => setActiveIndex(index)}
+            onClick={() => void setAssigned(tag)}
+          >
+            <span className="grid h-[14px] w-[14px] shrink-0 place-items-center">{selected && <Check size={13} className="text-[#557240]" />}</span>
+            <TagChip tag={tag} />
+          </button>
+          <Button size="custom" className="h-[24px] w-[24px] shrink-0 p-0 text-[#7b8970] hover:bg-[#e3ebda]" aria-label={`编辑标签 ${tag.title}`} onClick={() => setEditing(tag)}><Pencil size={12} /></Button>
+        </div>
+      }) : <p className={styles.empty()}>{normalizedQuery ? '回车即可创建标签' : '暂无标签'}</p>}
     </div>
     {editing && <TagEditModal tag={editing} doc={doc} act={act} close={() => setEditing(null)} />}
   </div>
@@ -288,20 +327,20 @@ export function TagActionMenu({
   const [tagOpen, setTagOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const close = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) { setOpen(false); setTagOpen(false) } }
+    const close = (event: MouseEvent) => { if (!rootRef.current?.contains(event.target as Node)) { setOpen(false); setTagOpen(false) } }
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(false); setTagOpen(false) } }
-    window.addEventListener('pointerdown', close)
+    window.addEventListener('click', close)
     window.addEventListener('keydown', escape)
-    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape) }
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', escape) }
   }, [])
-  return <div ref={rootRef} className="relative" onMouseLeave={() => setTagOpen(false)}>
+  return <div ref={rootRef} className="relative z-[40]">
     <Button tone="custom" size="custom" className={actionTrigger({ placement })} aria-label={`更多操作 ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><MoreHorizontal size={16} /></Button>
-    {open && <div role="menu" aria-label={`${label}操作`} className="absolute right-0 top-[calc(100%+5px)] z-50 w-[150px] rounded-[10px] border border-solid border-[#d7e2cc] bg-[#fffffdec] p-[5px] shadow-[0_18px_44px_#334c2b2b]">
+    {open && <div role="menu" aria-label={`${label}操作`} className="absolute right-0 top-[calc(100%+5px)] z-[90] w-[150px] rounded-[10px] border border-solid border-[#d7e2cc] bg-[#fffffdec] p-[5px] shadow-[0_18px_44px_#334c2b2b]">
       <button type="button" role="menuitem" className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-ui-ink hover:bg-[#edf3e4]" onMouseEnter={() => setTagOpen(true)} onFocus={() => setTagOpen(true)} onClick={() => setTagOpen(true)}><Tag size={13} />标签</button>
       {children}
       <button type="button" role="menuitem" className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-action-danger hover:bg-action-danger-hover" onClick={() => { setOpen(false); onDelete() }}><Trash2 size={13} />{deleteLabel}</button>
     </div>}
-    {open && tagOpen && <div className="absolute left-[calc(100%+8px)] top-0 z-50" onMouseEnter={() => setTagOpen(true)}>
+    {open && tagOpen && <div className="absolute left-[calc(100%+8px)] top-0 z-[100]" onMouseEnter={() => setTagOpen(true)}>
       <TagPicker doc={doc} target={target} act={act} />
     </div>}
   </div>
@@ -309,14 +348,19 @@ export function TagActionMenu({
 
 export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Document; spaceId: string; value: string[]; onChange: (ids: string[]) => void }) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [color, setColor] = useState<TagColorChoice>('transparent')
+  const [activeIndex, setActiveIndex] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
-    const close = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false) }
+    const close = (event: MouseEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false) }
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
-    window.addEventListener('pointerdown', close)
+    window.addEventListener('click', close)
     window.addEventListener('keydown', escape)
-    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape) }
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', escape) }
   }, [])
+
   const usedIds = useMemo(() => {
     const ids = new Set<string>()
     for (const entity of active(doc)) {
@@ -327,15 +371,78 @@ export function TagFilterButton({ doc, spaceId, value, onChange }: { doc: Docume
     }
     return ids
   }, [doc, spaceId])
-  const tags = activeTags(doc).filter(tag => usedIds.has(tag.id))
+
+  const tags = activeTags(doc).filter(tag =>
+    usedIds.has(tag.id) &&
+    (!query.trim() || tag.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) &&
+    (color === 'transparent' || tag.color === color)
+  )
+
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query, color, tags.length])
+
+  function toggleTag(tag: TagRecord) {
+    onChange(value.includes(tag.id) ? value.filter(id => id !== tag.id) : [...value, tag.id])
+  }
+
+  function moveActive(delta: number) {
+    if (!tags.length) return
+    setActiveIndex(index => (index + delta + tags.length) % tags.length)
+  }
+
   return <div ref={rootRef} className="relative">
-    <button type="button" className={styles.filterButton()} aria-label="标签筛选" aria-expanded={open} onClick={() => setOpen(value => !value)}><Tag size={13} />标签筛选{value.length > 0 && <span className="rounded-[5px] bg-[#dfe9d4] px-[5px] py-[2px] text-[9px]">{value.length}</span>}</button>
-    {open && <div role="dialog" aria-label="标签筛选" className="absolute left-0 top-[calc(100%+6px)] z-40 w-[230px] rounded-[12px] border border-solid border-[#d7e2cc] bg-[#fffffdec] p-[10px] shadow-[0_18px_44px_#334c2b2b]">
-      <div className="flex items-center justify-between"><span className="text-[10px] font-semibold text-form-label">当前空间标签</span>{value.length > 0 && <Button size="custom" className="px-[5px] py-[3px] text-[9px]" onClick={() => onChange([])}>清空</Button>}</div>
-      <div className="mt-[8px] max-h-[220px] overflow-y-auto space-y-[3px]">
-        {tags.length ? tags.map(tag => <button key={tag.id} type="button" className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[7px] py-[7px] text-left hover:bg-[#edf3e4]" aria-pressed={value.includes(tag.id)} onClick={() => onChange(value.includes(tag.id) ? value.filter(id => id !== tag.id) : [...value, tag.id])}>
-          <span className={`h-[13px] w-[13px] rounded-[4px] border border-solid ${value.includes(tag.id) ? 'bg-[#65814e] border-[#65814e]' : ''}`}>{value.includes(tag.id) && <Check size={10} />}</span><TagChip tag={tag} />
-        </button>) : <p className={styles.empty()}>当前空间暂无标签</p>}
+    <button type="button" className={styles.filterButton()} aria-label="筛选" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <Filter size={14} />
+      {value.length > 0 && <span className="rounded-[5px] bg-[#dfe9d4] px-[5px] py-[2px] text-[9px]">{value.length}</span>}
+    </button>
+    {open && <div role="dialog" aria-label="筛选收藏" className="absolute left-0 top-[calc(100%+6px)] z-[80] w-[286px] rounded-[12px] border border-solid border-[#d7e2cc] bg-[#fffffdec] p-[12px] shadow-[0_18px_50px_#334c2b2b]">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold text-form-label">筛选标签</span>
+        {value.length > 0 && <Button size="custom" className="px-[5px] py-[3px] text-[9px]" onClick={() => onChange([])}>清空</Button>}
+      </div>
+      <div className="relative mt-[8px]">
+        <Search size={13} className="absolute left-[9px] top-[9px] text-[#91a084]" />
+        <input
+          className={`${styles.input()} pl-[28px]`}
+          aria-label="筛选标签"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="space-filter-tags"
+          aria-activedescendant={tags[activeIndex] ? `space-filter-tag-${tags[activeIndex].id}` : undefined}
+          value={query}
+          onChange={event => { if (tagNameLength(event.target.value) <= 20) setQuery(event.target.value) }}
+          onKeyDown={event => {
+            if (event.key === 'ArrowDown') { event.preventDefault(); moveActive(1) }
+            else if (event.key === 'ArrowUp') { event.preventDefault(); moveActive(-1) }
+            else if (event.key === 'Home') { event.preventDefault(); setActiveIndex(0) }
+            else if (event.key === 'End') { event.preventDefault(); setActiveIndex(Math.max(0, tags.length - 1)) }
+            else if (event.key === 'Enter' && tags[activeIndex]) { event.preventDefault(); toggleTag(tags[activeIndex]) }
+          }}
+          placeholder="搜索标签"
+          autoFocus
+        />
+      </div>
+      <ColorPicker value={color} onChange={setColor} />
+      <div id="space-filter-tags" className="mt-[10px] max-h-[220px] overflow-y-auto space-y-[3px]" role="listbox" aria-label="标签选项">
+        {tags.length ? tags.map((tag, index) => {
+          const selected = value.includes(tag.id)
+          const active = index === activeIndex
+          return <button
+            key={tag.id}
+            id={`space-filter-tag-${tag.id}`}
+            type="button"
+            role="option"
+            aria-selected={selected}
+            data-active={active}
+            className={`flex w-full items-center gap-[7px] rounded-[7px] border-0 px-[7px] py-[7px] text-left hover:bg-[#edf3e4] ${active ? 'bg-[#edf3e4] outline outline-1 outline-[#aac094]' : ''} ${selected ? 'bg-[#e3edda] text-[#3e5a2c]' : 'bg-transparent'}`}
+            onMouseMove={() => setActiveIndex(index)}
+            onClick={() => toggleTag(tag)}
+          >
+            <span className="grid h-[14px] w-[14px] shrink-0 place-items-center">{selected && <Check size={13} className="text-[#557240]" />}</span>
+            <TagChip tag={tag} />
+          </button>
+        }) : <p className={styles.empty()}>没有匹配标签</p>}
       </div>
     </div>}
   </div>
