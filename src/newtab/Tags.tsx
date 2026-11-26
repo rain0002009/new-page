@@ -24,7 +24,7 @@ export const tagColorOptions: { value: TagColorChoice; label: string; swatch: st
   { value: 'purple', label: '紫色', swatch: 'bg-[#a081d5]' },
   { value: 'cyan', label: '青色', swatch: 'bg-[#56a6b4]' },
   { value: 'orange', label: '橙色', swatch: 'bg-[#d79351]' },
-  { value: 'transparent', label: '透明', swatch: 'bg-transparent border border-solid border-[#aeb9a7]' },
+  { value: 'transparent', label: '透明', swatch: 'bg-[repeating-conic-gradient(#eef1eb_0_25%,#c8d0c5_0_50%)] bg-[length:8px_8px] border border-solid border-[#879580]' },
 ]
 
 const tagChip = tv({
