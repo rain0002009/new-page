@@ -29,6 +29,8 @@ export type Request =
   | { type: 'resolve'; sourceId: string; conflictId: string; side: 'local' | 'remote' }
   | { type: 'export'; sourceId: string }
   | { type: 'import'; sourceId: string; data: unknown; confirmed: boolean }
+  | { type: 'upload-book-quark'; sourceId: string; bookId: string }
+  | { type: 'download-book-quark'; sourceId: string; bookId: string }
 export type Result = { ok: true; file?: { body: string; url: string }; originalUrl?: string; editor?: boolean; snapshot?: Snapshot; confirmation?: string; backup?: Document; qr?: QrState; config?: QuarkConnection } | { ok: false; error: string }
 export async function rpc(request: Request): Promise<Extract<Result, { ok: true }>> {
   const response = await chrome.runtime.sendMessage(request) as Result

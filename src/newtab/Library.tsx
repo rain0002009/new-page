@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
-import { ArrowUpDown, Bookmark, Check, ChevronDown, ChevronRight, Edit3, FilePlus2, FileText, Folder, LocateFixed, Pencil, Plus, Search, Share2, X } from 'lucide-react'
+import { ArrowUpDown, Bookmark, BookOpen, Check, ChevronDown, ChevronRight, CloudUpload, Edit3, FilePlus2, FileText, Folder, LocateFixed, Pencil, Plus, Search, Share2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord, type Tag as TagRecord } from '../core/model'
-import { documentUrl, markdownDescription } from '../core/markdown'
+import { active, children, isSavedItem, type Book, type Collection, type Document, type Entity, type Link, type Note, type SavedItem, type ShareRecord, type Tag as TagRecord } from '../core/model'
+import { droppedEpubFiles } from '../core/epub'
+import { documentUrl, markdownDescription, readerUrl } from '../core/markdown'
 import { useInlineTitleEdit } from './useInlineTitleEdit'
 import { readLocalSnapshot } from '../core/local-workspace'
 import { Button, ModalPresence, SiteIcon, Tooltip } from './ui'
@@ -87,7 +88,7 @@ export function Card({ link, doc, act, edit, location, locate }: { link: Link; d
 function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc: Document; act: Act; search?: boolean; onShare?: (note: Note, share?: ShareRecord) => void }) {
   const selection = useSelection()
   const tags = (note.tagIds ?? []).map(id => doc.entities[id]).filter((e): e is TagRecord => e?.kind === 'tag')
-  const styles = linkCard({ note: true, search })
+  const styles = linkCard({ kind: 'note', search })
   const drag = useDragItem(search ? `search:${note.id}` : note.id, { kind: 'saved-item', itemKind: 'note', entityId: note.id, title: note.title }, styles.base(), search)
   const [error, setError] = useState('')
   const share = Object.values(doc.entities).find(
@@ -120,7 +121,120 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
   </article>
 }
 
-export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, visibleItems, forceExpanded = false, isEditing = false, onStartEdit, onEndEdit }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; visibleItems?: SavedItem[]; forceExpanded?: boolean; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void }) {
+function BookCard({
+  book,
+  doc,
+  act,
+  edit,
+  search = false,
+  quarkConnected = false,
+  uploading = false,
+  onUploadQuark,
+  location,
+  locate,
+}: {
+  book: Book
+  doc: Document
+  act: Act
+  edit: (state: EditorState) => void
+  search?: boolean
+  quarkConnected?: boolean
+  uploading?: boolean
+  onUploadQuark?: (book: Book) => void
+  location?: string
+  locate?: () => void
+}) {
+  const selection = useSelection()
+  const tags = (book.tagIds ?? []).map(id => doc.entities[id]).filter((e): e is TagRecord => e?.kind === 'tag')
+  const styles = linkCard({ kind: 'book', search })
+  const drag = useDragItem(search ? `search:${book.id}` : book.id, { kind: 'saved-item', itemKind: 'book', entityId: book.id, title: book.title }, styles.base(), search)
+  const [error, setError] = useState('')
+
+  async function open() {
+    try {
+      const data = await readLocalSnapshot()
+      await chrome.tabs.create({ url: readerUrl({ book: book.id, source: data.sourceId! }) })
+    } catch {
+      setError('无法打开电子书，请重试')
+    }
+  }
+
+  const progress = Math.max(0, Math.min(100, Math.round(book.progress)))
+  const bookIcon = (
+    <span className="grid place-items-center h-[20px] w-[20px] rounded-[5px] bg-[#d6e2ec] text-[#4c6b85]">
+      <BookOpen size={15} />
+    </span>
+  )
+
+  return (
+    <article {...drag} id={`item-${book.id}`} data-selected={!search && selection.isSelected('saved', book.id) || undefined} aria-label={`电子书 ${book.title}`}>
+      <div className={styles.top()}>
+        <span className={styles.icon()}>
+          {search ? bookIcon : <SelectionIcon size="card" id={book.id} source="saved" title={book.title}>{bookIcon}</SelectionIcon>}
+        </span>
+        <a className={styles.title()} href="#" onClick={event => { event.preventDefault(); void open() }}>{book.title}</a>
+      </div>
+      <div className={styles.actions()}>
+        <TagActionMenu doc={doc} target={book} label={book.title} act={act} onDelete={() => void act({ type: 'delete', id: book.id })} deleteLabel="删除电子书">
+          <button
+            type="button"
+            role="menuitem"
+            data-close-menu
+            className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-ui-ink hover:bg-[#edf3e4]"
+            onClick={() => edit({ kind: 'rename', entity: book })}
+          >
+            <Pencil size={13} />重命名
+          </button>
+          {book.storage === 'local' && quarkConnected && onUploadQuark && (
+            <button
+              type="button"
+              role="menuitem"
+              data-close-menu
+              disabled={uploading}
+              className="flex w-full items-center gap-[7px] rounded-[7px] border-0 bg-transparent px-[8px] py-[8px] text-left text-[11px] text-ui-ink hover:bg-[#edf3e4] disabled:opacity-50"
+              onClick={() => onUploadQuark(book)}
+            >
+              <CloudUpload size={13} />上传到夸克网盘
+            </button>
+          )}
+        </TagActionMenu>
+      </div>
+      {tags.length > 0 && <TagList tags={tags} label={book.title} className="mt-[6px] min-h-[17px]" />}
+      <div className="relative z-2 mt-[6px] flex items-center gap-[8px]">
+        <div
+          role="progressbar"
+          aria-label="阅读进度"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="h-[5px] flex-1 overflow-hidden rounded-full bg-[#c9d8e4]"
+        >
+          <div className="h-full rounded-full bg-[#5b82a1] transition-[width] duration-200" style={{ width: `${progress}%` }} />
+        </div>
+        <span className="shrink-0 text-[11px] font-medium text-[#536b7f] tabular-nums">
+          {uploading ? '上传中…' : `${progress}%`}
+        </span>
+      </div>
+      {(location || locate) && (
+        <div className={styles.bottom()}>
+          {location && <span className={styles.location()} title={location}><Folder size={10} />{location}</span>}
+          <div className={styles.secondary()}>
+            {locate && (
+              <Tooltip content="定位收藏">
+                <Button size="custom" className="h-[21px] w-[23px] shrink-0 p-0" aria-label="定位收藏" onClick={locate}>
+                  <LocateFixed size={13} />
+                </Button>
+              </Tooltip>
+            )}
+          </div>
+        </div>
+      )}
+      <Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
+    </article>
+  )
+}
+
+export function CollectionSection({ collection, doc, act, edit, onShare, onShareCollection, visibleItems, forceExpanded = false, isEditing = false, onStartEdit, onEndEdit, quarkConnected = false, uploadingBookIds, onUploadBookQuark, onDropEpub }: { collection: Collection; doc: Document; act: Act; edit: (state: EditorState) => void; onShare?: (note: Note, share?: ShareRecord) => void; onShareCollection?: (collection: Collection, share?: ShareRecord) => void; visibleItems?: SavedItem[]; forceExpanded?: boolean; isEditing?: boolean; onStartEdit?: () => void; onEndEdit?: () => void; quarkConnected?: boolean; uploadingBookIds?: Set<string>; onUploadBookQuark?: (book: Book) => void; onDropEpub?: (collectionId: string, files: File[]) => void }) {
   const [collapsed, setCollapsed] = useState(collection.collapsed)
   const [prevPropCollapsed, setPrevPropCollapsed] = useState(collection.collapsed)
   const collapsedRef = useRef(collapsed)
@@ -156,7 +270,8 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
     }
   }, [collection.id, act])
 
-  const savedItems = visibleItems ?? children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+  const savedItems = visibleItems ?? children(doc, collection.id).filter(isSavedItem)
+  const [fileDropOver, setFileDropOver] = useState(false)
   const collectionTags = (collection.tagIds ?? []).map(id => doc.entities[id]).filter((e): e is TagRecord => e?.kind === 'tag')
   const collectionShare = Object.values(doc.entities).find(
     (e): e is ShareRecord => e.kind === 'share' && !e.purged && e.entityKind === 'collection' && e.entityId === collection.id
@@ -188,7 +303,28 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
     }, 400)
   }
 
-  return <section {...drag} aria-label={`收藏块 ${collection.title}`} id={`collection-${collection.id}`}>
+  return <section
+    {...drag}
+    className={`${drag.className} ${fileDropOver ? '[outline:2px_dashed_#6b8aa3] bg-[#e4ecf24d]' : ''}`}
+    aria-label={`收藏块 ${collection.title}`}
+    id={`collection-${collection.id}`}
+    onDragOver={event => {
+      if (!event.dataTransfer.types.includes('Files')) return
+      event.preventDefault()
+      setFileDropOver(true)
+    }}
+    onDragLeave={event => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node)) setFileDropOver(false)
+    }}
+    onDrop={event => {
+      setFileDropOver(false)
+      const epubs = droppedEpubFiles(event.dataTransfer)
+      if (!epubs.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      onDropEpub?.(collection.id, epubs)
+    }}
+  >
     <div className={collectionStyles.header()}><div className={collectionStyles.heading()}>
       <Tooltip content={collapsed ? '展开收藏块' : '折叠收藏块'}>
         <Button size="custom" className="h-[26px] w-[24px] shrink-0 p-0 ml-[-5px]" aria-label={`${collapsed ? '展开' : '折叠'} ${collection.title}`} onClick={toggleCollapsed}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</Button>
@@ -275,7 +411,7 @@ export function CollectionSection({ collection, doc, act, edit, onShare, onShare
     </div>}</div>
     <MotionRegion open={forceExpanded || !collapsed || !!placeholder}>
       {savedItems.length || placeholder ? <SortableContext items={savedItems.map(item => item.id)} strategy={rectSortingStrategy}>
-        <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : <Card link={item} doc={doc} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
+        <div className={cardGrid}>{savedItems.map(item => <Fragment key={item.id}>{placeholder?.beforeId === item.id && marker}{item.kind === 'note' ? <NoteCard note={item} doc={doc} act={act} onShare={onShare} /> : item.kind === 'book' ? <BookCard book={item} doc={doc} act={act} edit={edit} quarkConnected={quarkConnected} uploading={uploadingBookIds?.has(item.id)} onUploadQuark={onUploadBookQuark} /> : <Card link={item} doc={doc} act={act} edit={edit} />}</Fragment>)}{!placeholder?.beforeId && marker}</div>
       </SortableContext> : <div className="min-h-[104px] flex items-center justify-center gap-[16px] px-[18px] py-[20px] border border-dashed border-[#baca9e85] rounded-[12px] bg-[#fafcf34d]">
         <Folder size={32} strokeWidth={1.1} className="shrink-0 text-[#9eae88]" />
         <div><h3 className="text-[13px] font-medium text-[#6b7d5c]">暂无收藏</h3><p className="mt-[6px] text-[11px] text-[#839478]">从右侧拖入网页</p></div>
@@ -391,13 +527,13 @@ export function NewCollectionDraft({
   )
 }
 
-export function SearchView({ doc, act, edit, locate, onShare }: { doc: Document; act: Act; edit: (state: EditorState) => void; locate: (link: Link) => void; onShare?: (note: Note, share?: ShareRecord) => void }) {
+export function SearchView({ doc, act, edit, locate, onShare, quarkConnected = false, uploadingBookIds, onUploadBookQuark }: { doc: Document; act: Act; edit: (state: EditorState) => void; locate: (item: SavedItem) => void; onShare?: (note: Note, share?: ShareRecord) => void; quarkConnected?: boolean; uploadingBookIds?: Set<string>; onUploadBookQuark?: (book: Book) => void }) {
   const [term, setTerm] = useState('')
-  const savedItems = active(doc).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
-  const result = term.trim() ? savedItems.filter(item => `${item.title}\n${item.kind === 'note' ? item.body : item.url + '\n' + item.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
-  return <><div className={searchStyles.field()}><Search size={19} /><input className={searchStyles.input()} aria-label="搜索全部收藏" type="search" placeholder="搜索标题、正文、网址或备注…" value={term} onChange={e => setTerm(e.target.value)} autoFocus data-autofocus /><kbd className={searchStyles.shortcut()}>全部空间</kbd></div>
+  const savedItems = active(doc).filter(isSavedItem)
+  const result = term.trim() ? savedItems.filter(item => `${item.title}\n${item.kind === 'note' ? item.body : item.kind === 'book' ? item.fileName : item.url + '\n' + item.note}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase())) : []
+  return <><div className={searchStyles.field()}><Search size={19} /><input className={searchStyles.input()} aria-label="搜索全部收藏" type="search" placeholder="搜索标题、正文、书名、网址或备注…" value={term} onChange={e => setTerm(e.target.value)} autoFocus data-autofocus /><kbd className={searchStyles.shortcut()}>全部空间</kbd></div>
     <p className={searchStyles.count()}>{term ? `找到 ${result.length} 个收藏` : `共 ${savedItems.length} 个收藏`}</p>
-    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(item => item.kind === 'note' ? <NoteCard key={item.id} note={item} doc={doc} act={act} search onShare={onShare} /> : <Card key={item.id} link={item} doc={doc} act={act} edit={edit} location={locationName(doc, item)} locate={() => locate(item)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
+    <div className={searchStyles.results()}>{result.length ? <div className={cardGrid}>{result.map(item => item.kind === 'note' ? <NoteCard key={item.id} note={item} doc={doc} act={act} search onShare={onShare} /> : item.kind === 'book' ? <BookCard key={item.id} book={item} doc={doc} act={act} edit={edit} search quarkConnected={quarkConnected} uploading={uploadingBookIds?.has(item.id)} onUploadQuark={onUploadBookQuark} location={locationName(doc, item)} locate={() => locate(item)} /> : <Card key={item.id} link={item} doc={doc} act={act} edit={edit} location={locationName(doc, item)} locate={() => locate(item)} />)}</div> : <Empty icon="search" title={term ? '没有匹配的收藏' : '搜索收藏'} text={term ? '请尝试其他关键词' : ''} />}</div>
   </>
 }
 export function locationName(doc: Document, entity: Entity) {

@@ -1,6 +1,6 @@
 import type { LinkInput, SavedItem } from '../core/model'
 import { savedUrl } from '../core/model'
-import { documentUrl, isMarkdownUrl } from '../core/markdown'
+import { documentUrl, isMarkdownUrl, readerUrl } from '../core/markdown'
 import { readLocalSnapshot } from '../core/local-workspace'
 import type { OpenCollectionStrategy } from './OpenCollectionModal'
 
@@ -251,6 +251,8 @@ export async function openCollection(items: SavedItem[], strategy: OpenCollectio
     let url: string
     if (item.kind === 'note') {
       url = documentUrl({ note: item.id, source: sourceId })
+    } else if (item.kind === 'book') {
+      url = readerUrl({ book: item.id, source: sourceId })
     } else {
       url = isMarkdownUrl(item.url) ? documentUrl({ url: item.url }) : savedUrl(item.url)
     }

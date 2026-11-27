@@ -3,7 +3,11 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Check, Folder, Layers3, Leaf, LoaderCircle, Pencil, Plus, Search, Settings2, Share2, Trash2, X } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
-import { active, children, filterTagSelection, type Action, type Collection, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
+import { active, children, filterTagSelection, isSavedItem, type Action, type Collection, type Entity, type Link, type Note, type SavedItem, type ShareRecord } from '../core/model'
+import { droppedEpubFiles, isEpubName, parseEpub } from '../core/epub'
+import { putBookBytes } from '../core/epub-storage'
+import { readEpubDropMode, saveEpubDropMode } from '../core/epub-preferences'
+import { EpubDropModal, type EpubModeChoice } from './EpubDropModal'
 import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import SettingsPanel from './SettingsPanel'
@@ -121,6 +125,15 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
       const hasMarkdown =
         files.some(file => markdownName(file.name)) ||
         items.some(item => item.kind === 'file' && markdownName(item.getAsFile()?.name ?? ''))
+
+      const hasEpub =
+        files.some(file => isEpubName(file.name)) ||
+        items.some(item => item.kind === 'file' && isEpubName(item.getAsFile()?.name ?? ''))
+
+      // EPUB 文件交由页面内的收藏块与快捷建块落点处理
+      if (hasEpub) {
+        return
+      }
 
       // 不是 md 文件时，不拦截也不报错，放行给浏览器或页面触发原有逻辑（如原生拖放打开）
       if (!hasMarkdown) {
@@ -243,7 +256,102 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     setCreatingSpace(false)
     setCreatingCollection(true)
   }
-  return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(item => item.kind === 'link' || item.kind === 'note').map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
+  type StagedEpubBook = { id: string; title: string; fileName: string; fileSize: number; bytes: Uint8Array }
+  type EpubDropTarget = { kind: 'collection'; collectionId: string } | { kind: 'new-collection'; spaceId: string; beforeId?: string }
+
+  const [pendingEpubDrop, setPendingEpubDrop] = useState<{
+    target: EpubDropTarget
+    books: StagedEpubBook[]
+    fallbackReason?: string
+  } | null>(null)
+  const [epubBusy, setEpubBusy] = useState(false)
+  const [uploadingBookIds, setUploadingBookIds] = useState<Set<string>>(() => new Set())
+
+  const quarkConnected = data.connection?.kind === 'quark'
+
+  async function uploadBookToQuarkClient(bookId: string) {
+    if (!data?.sourceId) return
+    setUploadingBookIds(prev => new Set(prev).add(bookId))
+    try {
+      const response = await rpc({ type: 'upload-book-quark', sourceId: data.sourceId, bookId })
+      if (response.snapshot) receive(response.snapshot)
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : '上传到夸克网盘失败，已保留本地副本')
+    } finally {
+      setUploadingBookIds(prev => {
+        const next = new Set(prev)
+        next.delete(bookId)
+        return next
+      })
+    }
+  }
+
+  async function commitEpubDrop(target: EpubDropTarget, books: StagedEpubBook[], mode: EpubModeChoice) {
+    setEpubBusy(true)
+    try {
+      for (const book of books) {
+        await putBookBytes(book.id, book.bytes)
+      }
+      const inputs = books.map(book => ({
+        id: book.id,
+        title: book.title,
+        storage: 'local' as const,
+        fileName: book.fileName,
+        fileSize: book.fileSize,
+      }))
+      const ok = await act(
+        target.kind === 'collection'
+          ? { type: 'add-books', parentId: target.collectionId, books: inputs }
+          : { type: 'create-collection-with-books', parentId: target.spaceId, beforeId: target.beforeId, title: collectionTitle(), books: inputs },
+      )
+      if (!ok) return
+      setPendingEpubDrop(null)
+      if (mode === 'quark') {
+        void (async () => {
+          for (const book of books) {
+            await uploadBookToQuarkClient(book.id)
+          }
+        })()
+      }
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : '保存电子书失败，请重试')
+    } finally {
+      setEpubBusy(false)
+    }
+  }
+
+  async function handleEpubDrop(target: EpubDropTarget, files: File[]) {
+    try {
+      const books: StagedEpubBook[] = []
+      for (const file of files) {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const parsed = parseEpub(bytes, file.name)
+        books.push({
+          id: crypto.randomUUID(),
+          title: parsed.title,
+          fileName: file.name,
+          fileSize: bytes.byteLength,
+          bytes,
+        })
+      }
+      const mode = await readEpubDropMode()
+      if (mode === 'local') {
+        await commitEpubDrop(target, books, 'local')
+      } else if (mode === 'quark' && quarkConnected) {
+        await commitEpubDrop(target, books, 'quark')
+      } else {
+        setPendingEpubDrop({
+          target,
+          books,
+          fallbackReason: mode === 'quark' && !quarkConnected ? '已设置自动上传夸克网盘，但当前未连接夸克账号，请先在设置中连接或改用本地阅读' : undefined,
+        })
+      }
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : '读取 EPUB 文件失败，请确认文件格式正确')
+    }
+  }
+
+  return <SelectionProvider key={data.sourceId} pendingClosures={pendingClosures} externalBusy={collecting || grouping} scope={`${page}:${space?.id ?? ''}:${searchOpen}`} orders={{ tabs: tabs.map(tab => String(tab.tabId)), saved: collections.flatMap(collection => children(doc, collection.id).filter(isSavedItem).map(item => item.id)) }}><DragBoard doc={doc} tabs={tabs} refreshTabs={refreshTabs} act={act} notify={setMessage} moveTab={async (source, target) => { try { return await moveOpenTab(source, target, setMessage) } finally { refreshTabs() } }}><div className={styles.shell()} onDragOver={event => event.preventDefault()} onDrop={event => { const epubs = droppedEpubFiles(event.dataTransfer); event.preventDefault(); if (epubs.length) setMessage('请将 EPUB 文件拖入空间下的收藏块中') }}>
     {notices}
     <aside className={styles.sidebar()}><SidebarIdentity nickname={nickname} reserve />
       <div className={styles.createSection()}><span className={styles.sectionTitle()}>我的空间</span><Tooltip content="新建空间"><Button size="custom" className="h-[22px] w-[22px] shrink-0 p-0" aria-label="新建空间" onClick={createSpace}><Plus size={15} /></Button></Tooltip></div>
@@ -258,14 +366,15 @@ function Workbench({ data, error }: { data: Snapshot | undefined; error: Error |
     <ContentPanel scrollKey={`${page}:${space?.id ?? ''}:${collectionReveal}`} header={<>
       <div className={styles.heading()}><header className={styles.pageHeader()}><h1 className={styles.title()}>{page === 'space' ? space?.title ?? '我的空间' : page === 'todo' ? 'Todo' : page === 'shares' ? '分享管理' : page === 'settings' ? '设置' : '搜索收藏'}</h1></header>{page === 'space' && space && <div className="order-3 basis-full pb-[6px]"><TagFilterButton doc={doc} spaceId={space.id} value={selectedTagIds} onChange={setSelectedTagIds} /></div>}{page === 'space' && space && <Button tone="primary" size="custom" className="px-[12px] py-[10px] text-[10px] [@media(max-width:650px)]:text-[0px] [@media(max-width:650px)]:w-[30px] [@media(max-width:650px)]:h-[30px] [@media(max-width:650px)]:p-0 [@media(max-width:650px)]:shrink-0 [@media(max-width:650px)]:mt-[24px] [@media(max-width:650px)]:[&_svg]:w-[16px]" aria-label="新建收藏块" onClick={createCollection}><Plus size={15} />新建收藏块</Button>}</div>
     </>}>
-      {page === 'space' && <SortableContext items={filteredCollections.map(c => c.id)} strategy={verticalListSortingStrategy}>{filteredCollections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} /><CollectionSection collection={collection} visibleItems={selectedTagIds.length ? visibleByTag.get(collection.id) : undefined} forceExpanded={revealCollectionId === collection.id} doc={doc} act={act} edit={setEditor} isEditing={editingId === collection.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(collection.id) }} onEndEdit={() => setEditingId(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} /></Fragment>)}{creatingCollection && <NewCollectionDraft onSave={async title => { await act({ type: 'add-collection', parentId: space.id, title }); setCreatingCollection(false) }} onCancel={() => setCreatingCollection(false)} />}{!!filteredCollections.length && !creatingCollection && <QuickCollectionGap spaceId={space.id} />}{!filteredCollections.length && !creatingCollection && <Empty icon="collection" title={selectedTagIds.length ? '没有匹配标签的收藏块' : '暂无收藏块'} text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={createCollection}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
+      {page === 'space' && <SortableContext items={filteredCollections.map(c => c.id)} strategy={verticalListSortingStrategy}>{filteredCollections.map(collection => <Fragment key={collection.id}><QuickCollectionGap spaceId={space.id} beforeId={collection.id} onDropEpubFiles={files => void handleEpubDrop({ kind: 'new-collection', spaceId: space.id, beforeId: collection.id }, files)} /><CollectionSection collection={collection} visibleItems={selectedTagIds.length ? visibleByTag.get(collection.id) : undefined} forceExpanded={revealCollectionId === collection.id} doc={doc} act={act} edit={setEditor} isEditing={editingId === collection.id} onStartEdit={() => { setCreatingSpace(false); setCreatingCollection(false); setEditingId(collection.id) }} onEndEdit={() => setEditingId(null)} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} onShareCollection={(collection, share) => setSharingTarget({ kind: 'collection', collection, share })} quarkConnected={quarkConnected} uploadingBookIds={uploadingBookIds} onUploadBookQuark={book => void uploadBookToQuarkClient(book.id)} onDropEpub={(collectionId, files) => void handleEpubDrop({ kind: 'collection', collectionId }, files)} /></Fragment>)}{creatingCollection && <NewCollectionDraft onSave={async title => { await act({ type: 'add-collection', parentId: space.id, title }); setCreatingCollection(false) }} onCancel={() => setCreatingCollection(false)} />}{!!filteredCollections.length && !creatingCollection && <QuickCollectionGap spaceId={space.id} onDropEpubFiles={files => void handleEpubDrop({ kind: 'new-collection', spaceId: space.id }, files)} />}{!filteredCollections.length && !creatingCollection && <Empty icon="collection" title={selectedTagIds.length ? '没有匹配标签的收藏块' : '暂无收藏块'} text=""><Button tone="primary" size="custom" className="mt-[21px] px-[13px] py-[9px] text-[11px]" onClick={createCollection}><Plus size={15} />创建收藏块</Button></Empty>}</SortableContext>}
       {page === 'todo' && <TodoList doc={doc} act={act} />}
-      {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateEntity={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link' || n.kind === 'collection')) locate(n) }} />}
-      {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} onLocateEntity={id => { const entity = doc.entities[id]; if (entity && (entity.kind === 'note' || entity.kind === 'link' || entity.kind === 'collection')) locate(entity) }} />}
+      {page === 'shares' && <ShareManagementPanel doc={doc} act={act} onLocateEntity={id => { const n = doc.entities[id]; if (n && (n.kind === 'note' || n.kind === 'link' || n.kind === 'book' || n.kind === 'collection')) locate(n) }} />}
+      {page === 'settings' && <SettingsPanel key={data.sourceId} data={{ ...data, document: doc }} act={act} receive={receive} onError={setMessage} onLocateEntity={id => { const entity = doc.entities[id]; if (entity && (entity.kind === 'note' || entity.kind === 'link' || entity.kind === 'book' || entity.kind === 'collection')) locate(entity) }} />}
     </ContentPanel>
     <Button tone="primary" className="[@media(min-width:1000.01px)]:hidden fixed right-[18px] bottom-[18px] z-21 [box-shadow:0_5px_22px_#40552d33]" aria-label="打开待选网页" onClick={() => setInboxOpen(value => !value)}><Layers3 size={16} />待选网页 {tabs.length}</Button><TabInbox tabs={tabs} groups={groups} groupAll={() => void groupTabs()} grouping={grouping} error={tabError} open={inboxOpen} close={() => setInboxOpen(false)} collect={() => void collectTabs()} collecting={collecting} notify={setMessage} />
     <BatchActions key={data.sourceId} doc={doc} sourceId={data.sourceId!} spaceId={space?.id} tabs={tabs} act={act} notify={setMessage} refreshTabs={refreshTabs} reveal={reveal} />
-    <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} /></Modal>}</ModalPresence>
+    <ModalPresence>{searchOpen && <Modal title="搜索收藏" close={() => setSearchOpen(false)} size="search"><SearchView doc={doc} act={act} edit={setEditor} locate={locate} onShare={(note, share) => setSharingTarget({ kind: 'note', note, share })} quarkConnected={quarkConnected} uploadingBookIds={uploadingBookIds} onUploadBookQuark={book => void uploadBookToQuarkClient(book.id)} /></Modal>}</ModalPresence>
+    <ModalPresence>{pendingEpubDrop && <EpubDropModal fileNames={pendingEpubDrop.books.map(book => book.fileName)} quarkConnected={quarkConnected} fallbackReason={pendingEpubDrop.fallbackReason} busy={epubBusy} onClose={() => setPendingEpubDrop(null)} onConfirm={(mode, remember) => { void (async () => { if (remember) await saveEpubDropMode(mode); await commitEpubDrop(pendingEpubDrop.target, pendingEpubDrop.books, mode) })() }} />}</ModalPresence>
     <ModalPresence>{editor && <Editor key={'entity' in editor ? editor.entity.id : editor.kind} state={editor} doc={doc} act={act} close={() => setEditor(null)} />}</ModalPresence>
     <ModalPresence>{sharingTarget && <ShareModal target={sharingTarget} share={sharingTarget.share} doc={doc} act={act} close={() => setSharingTarget(null)} onNavigateToShares={() => { setSharingTarget(null); setPage('shares') }} onNavigateToSettings={() => { setSharingTarget(null); setPage('settings') }} />}</ModalPresence>
   </div></DragBoard></SelectionProvider>

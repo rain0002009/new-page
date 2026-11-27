@@ -1,4 +1,4 @@
-export { documentUrl, isMarkdownUrl } from './document-address'
+export { documentUrl, isMarkdownUrl, readerUrl } from './document-address'
 export function downloadMarkdown(title: string, body: string) {
   const url = URL.createObjectURL(new Blob([body], { type: 'text/markdown;charset=utf-8' }))
   const anchor = document.createElement('a')

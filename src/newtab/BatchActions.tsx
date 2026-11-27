@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BookmarkPlus, FolderInput, Group, LoaderCircle, Trash2, X } from 'lucide-react'
-import { active, children, type Collection, type Document, type SavedItem } from '../core/model'
-import { documentUrl, isMarkdownUrl } from '../core/markdown'
+import { active, children, isSavedItem, type Collection, type Document, type SavedItem } from '../core/model'
+import { documentUrl, isMarkdownUrl, readerUrl } from '../core/markdown'
 import type { Act } from './Editor'
 import { Button, Modal, ModalPresence } from './ui'
 import { useSelection } from './Selection'
@@ -18,8 +18,10 @@ export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify
   useEffect(() => { if (!selection.ids.length) setDialog(null) }, [selection.ids.length])
   const saved = selection.source === 'saved'
   const selectedTabs = tabs.filter(tab => selection.ids.includes(String(tab.tabId)))
-  const selectedItems = selection.ids.map(id => doc.entities[id]).filter((item): item is SavedItem => !!item && (item.kind === 'link' || item.kind === 'note'))
+  const selectedItems = selection.ids.map(id => doc.entities[id]).filter(isSavedItem)
   const notes = selectedItems.filter(item => item.kind === 'note').length
+  const books = selectedItems.filter(item => item.kind === 'book').length
+  const permanentCount = notes + books
   const spaces = active(doc).filter(item => item.kind === 'space' && (!saved || item.id === spaceId))
   const targets = children(doc, targetSpace).filter((item): item is Collection => item.kind === 'collection')
   async function run(operation: () => Promise<void>) {
@@ -62,7 +64,7 @@ export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify
           if (!actual || actual.windowId !== currentWindow.id) { opened.current.delete(item.id); previous = undefined }
         }
         if (!previous) {
-          const address = item.kind === 'note' ? documentUrl({ note: item.id, source: sourceId }) : isMarkdownUrl(item.url) ? documentUrl({ url: item.url }) : item.url
+          const address = item.kind === 'note' ? documentUrl({ note: item.id, source: sourceId }) : item.kind === 'book' ? readerUrl({ book: item.id, source: sourceId }) : isMarkdownUrl(item.url) ? documentUrl({ url: item.url }) : item.url
           const created = await chrome.tabs.create({ windowId: currentWindow.id, url: address, active: false })
           previous = { tabId: created.id!, windowId: created.windowId, index: created.index, pinned: false, groupId: created.groupId, title: item.title, url: created.pendingUrl || created.url || address, icon: item.kind === 'link' ? item.icon : '' }
           opened.current.set(item.id, previous)
@@ -105,7 +107,7 @@ export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify
       <Button disabled={selection.busy} title={saved ? '在新分组中打开' : '将所选标签加入新分组'} onClick={() => void run(group)}><Group size={16} />分组</Button>
       <Button disabled={selection.busy} onClick={() => { setTargetSpace(spaceId ?? spaces[0]?.id ?? ''); setTargetCollection(''); setDialog('target') }}><FolderInput size={16} />{saved ? '移动到收藏块' : '添加到对应收藏'}</Button>
       <Button disabled={selection.busy || !spaceId} onClick={() => void run(() => collect())}><BookmarkPlus size={16} />快速收藏</Button>
-      <Button tone="danger" disabled={selection.busy} onClick={() => saved && notes ? setDialog('delete') : void run(remove)}><Trash2 size={16} />删除</Button>
+      <Button tone="danger" disabled={selection.busy} onClick={() => saved && permanentCount ? setDialog('delete') : void run(remove)}><Trash2 size={16} />删除</Button>
       <Button size="icon" aria-label="取消选择" title="取消选择" disabled={selection.busy} onClick={selection.clear}>{selection.busy ? <LoaderCircle size={16} className="animate-spin" /> : <X size={16} />}</Button>
     </div>
     <ModalPresence>{dialog === 'target' && <Modal title={saved ? '移动到收藏块' : '添加到对应收藏'} close={() => { if (!selection.busy) setDialog(null) }}>
@@ -116,6 +118,6 @@ export default function BatchActions({ doc, sourceId, spaceId, tabs, act, notify
         <div className="flex justify-end gap-[8px]"><Button disabled={selection.busy} onClick={() => setDialog(null)}>取消</Button><Button tone="primary" disabled={selection.busy || !targets.some(item => item.id === targetCollection)} onClick={() => void run(() => collect(targetCollection))}>确认{saved ? '移动' : '收藏'}</Button></div>
       </div>
     </Modal>}</ModalPresence>
-    <ModalPresence>{dialog === 'delete' && <Modal title="删除所选内容" close={() => { if (!selection.busy) setDialog(null) }}><p className="text-[13px]">将永久删除 {notes} 篇笔记，无法从回收站恢复。所选链接将进入回收站。</p><div className="mt-[20px] flex justify-end gap-[8px]"><Button disabled={selection.busy} onClick={() => setDialog(null)}>取消</Button><Button tone="danger" disabled={selection.busy} onClick={() => void run(remove)}>确认删除所选</Button></div></Modal>}</ModalPresence>
+    <ModalPresence>{dialog === 'delete' && <Modal title="删除所选内容" close={() => { if (!selection.busy) setDialog(null) }}><p className="text-[13px]">将永久删除 {notes ? `${notes} 篇笔记` : ''}{notes && books ? '和 ' : ''}{books ? `${books} 本电子书` : ''}，无法从回收站恢复。所选链接将进入回收站。</p><div className="mt-[20px] flex justify-end gap-[8px]"><Button disabled={selection.busy} onClick={() => setDialog(null)}>取消</Button><Button tone="danger" disabled={selection.busy} onClick={() => void run(remove)}>确认删除所选</Button></div></Modal>}</ModalPresence>
   </>
 }

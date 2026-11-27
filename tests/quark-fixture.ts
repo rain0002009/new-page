@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-type File = { fid: string; parent: string; name: string; directory: boolean; body: string; account: string }
-type Upload = { fid: string; parent: string; name: string; account: string; body?: string; committed?: boolean; md5?: string; sha1?: string }
+type File = { fid: string; parent: string; name: string; directory: boolean; body: string; rawBody?: Buffer; account: string }
+type Upload = { fid: string; parent: string; name: string; account: string; parts: Map<number, Buffer>; body?: Buffer; committed?: boolean; md5?: string; sha1?: string }
 export class QuarkFixture {
   files = new Map<string, File>()
   uploads = new Map<string, Upload>()
   tokens = new Map<string, string>()
   sessions = new Map<string, string>()
   nextAccount = 'rain'
+  partSize = 10_000_000
   unavailable = false
   failUpload = false
   failRename = false
@@ -83,12 +84,15 @@ export class QuarkFixture {
       for await (const chunk of req) chunks.push(Buffer.from(chunk))
       const body = Buffer.concat(chunks)
       if (req.method === 'PUT') {
-        if (createHash('md5').update(body).digest('hex') !== upload.md5 || createHash('sha1').update(body).digest('hex') !== upload.sha1) return send({ message: 'Upload content hash mismatch' }, 400)
-        upload.body = body.toString('utf8')
-        res.setHeader('ETag', '"fixture-part"')
+        const partNumber = Number(url.searchParams.get('partNumber') ?? '1')
+        upload.parts.set(partNumber, body)
+        res.setHeader('ETag', `"fixture-part-${partNumber}"`)
         res.writeHead(200).end(); return true
       }
       if (req.headers['content-md5'] !== createHash('md5').update(body).digest('base64')) return send({ message: 'Multipart MD5 mismatch' }, 400)
+      const assembled = Buffer.concat([...upload.parts.entries()].sort((a, b) => a[0] - b[0]).map(([, chunk]) => chunk))
+      if (createHash('md5').update(assembled).digest('hex') !== upload.md5 || createHash('sha1').update(assembled).digest('hex') !== upload.sha1) return send({ message: 'Upload content hash mismatch' }, 400)
+      upload.body = assembled
       upload.committed = true
       res.writeHead(200).end(); return true
     }
@@ -107,14 +111,14 @@ export class QuarkFixture {
       const file = this.files.get(path.slice('/quark-content/'.length))
       if (!file || file.account !== account) return send({}, 404)
       if (this.files.get(file.parent)?.name === '笔记') this.noteDownloads++
-      res.writeHead(200, { 'content-type': 'application/json' }).end(this.downloadsCorrupt ? '{broken' : file.body)
+      res.writeHead(200, { 'content-type': 'application/json' }).end(this.downloadsCorrupt ? '{broken' : (file.rawBody ?? file.body))
       return true
     }
     let body: Record<string, any> = {}
     if (req.method === 'POST') { let text = ''; for await (const chunk of req) text += chunk; body = text ? JSON.parse(text) : {} }
     if (path.endsWith('/file/sort')) {
       if (this.files.get(url.searchParams.get('pdir_fid') ?? '')?.name === '笔记') this.noteDirectoryLists++
-      const list = [...this.files.values()].filter(file => file.account === account && file.parent === url.searchParams.get('pdir_fid') && !this.hiddenVersions.has(file.fid)).map(file => ({ fid: file.fid, file_name: file.name, pdir_fid: file.parent, dir: file.directory, size: Buffer.byteLength(file.body) }))
+      const list = [...this.files.values()].filter(file => file.account === account && file.parent === url.searchParams.get('pdir_fid') && !this.hiddenVersions.has(file.fid)).map(file => ({ fid: file.fid, file_name: file.name, pdir_fid: file.parent, dir: file.directory, size: Buffer.byteLength(file.rawBody ?? file.body) }))
       const page = Number(url.searchParams.get('_page') ?? 1), size = Number(url.searchParams.get('_size') ?? 200)
       return ok({ list: list.slice((page - 1) * size, page * size) })
     }
@@ -126,8 +130,8 @@ export class QuarkFixture {
     if (path.endsWith('/upload/pre')) {
       if (this.files.get(body.pdir_fid)?.name === '笔记') this.noteUploads++
       const task = randomUUID(), fid = randomUUID()
-      this.uploads.set(task, { fid, name: body.file_name, parent: body.pdir_fid, account })
-      return send({ status: 200, data: { task_id: task, fid, bucket: 'fixture', auth_info: 'fixture-auth', upload_url: `localhost:${new URL(origin).port}`, upload_id: task, obj_key: `objects/${task}` }, metadata: { part_size: 10_000_000 } })
+      this.uploads.set(task, { fid, name: body.file_name, parent: body.pdir_fid, account, parts: new Map() })
+      return send({ status: 200, data: { task_id: task, fid, bucket: 'fixture', auth_info: 'fixture-auth', upload_url: `localhost:${new URL(origin).port}`, upload_id: task, obj_key: `objects/${task}` }, metadata: { part_size: this.partSize } })
     }
     if (path.endsWith('/update/hash')) {
       const upload = this.uploads.get(body.task_id)!
@@ -138,7 +142,7 @@ export class QuarkFixture {
     if (path.endsWith('/upload/finish')) {
       const upload = this.uploads.get(body.task_id)!
       if (!upload.committed || upload.body === undefined) return send({ message: 'Upload not committed' }, 400)
-      this.files.set(upload.fid, { fid: upload.fid, parent: upload.parent, name: upload.name, directory: false, body: upload.body, account })
+      this.files.set(upload.fid, { fid: upload.fid, parent: upload.parent, name: upload.name, directory: false, body: upload.body.toString('utf8'), rawBody: upload.name.endsWith('.epub') ? upload.body : undefined, account })
       return ok()
     }
     if (path.endsWith('/file/download')) {

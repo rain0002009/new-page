@@ -16,6 +16,18 @@ const entitySchema = z.discriminatedUnion('kind', [
   z.object({ ...base, kind: z.literal('space') }),
   z.object({ ...base, ...taggedFields, kind: z.literal('collection'), collapsed: z.boolean() }),
   z.object({ ...base, ...taggedFields, kind: z.literal('note'), body: z.string() }),
+  z.object({
+    ...base,
+    ...taggedFields,
+    kind: z.literal('book'),
+    storage: z.enum(['local', 'quark']),
+    fileName: z.string().max(1000),
+    fileSize: z.number().finite().nonnegative().optional(),
+    quarkFid: z.string().max(500).optional(),
+    progress: z.number().finite().min(0).max(100),
+    chapterIndex: z.number().int().nonnegative(),
+    scrollRatio: z.number().finite().min(0).max(1),
+  }),
   z.object({ ...base, ...taggedFields, kind: z.literal('link'), url: z.string().max(10_000), icon: z.string().max(250_000), note: z.string().max(20_000), todo: z.boolean(), todoPosition: z.number().finite().optional() }),
   z.object({
     ...base,
@@ -38,11 +50,18 @@ const documentSchema = z.object({
 export type Entity = z.infer<typeof entitySchema>
 export type Link = Extract<Entity, { kind: 'link' }>
 export type Note = Extract<Entity, { kind: 'note' }>
+export type Book = Extract<Entity, { kind: 'book' }>
 export type ShareRecord = Extract<Entity, { kind: 'share' }>
-export type SavedItem = Link | Note
+export type SavedItem = Link | Note | Book
 export type Collection = Extract<Entity, { kind: 'collection' }>
 export type Tag = Extract<Entity, { kind: 'tag' }>
-export type TaggedEntity = Collection | Link | Note
+export type TaggedEntity = Collection | Link | Note | Book
+export function isSavedItem(entity: Entity | undefined | null): entity is SavedItem {
+  return entity?.kind === 'link' || entity?.kind === 'note' || entity?.kind === 'book'
+}
+export function isTaggedEntity(entity: Entity | undefined | null): entity is TaggedEntity {
+  return entity?.kind === 'collection' || isSavedItem(entity)
+}
 export type Document = z.infer<typeof documentSchema>
 export type Conflict = {
   id: string; entityId: string; fields: string[]
@@ -51,14 +70,25 @@ export type Conflict = {
   localSpace?: Entity; remoteSpace?: Entity
 }
 export type LinkInput = { title: string; url: string; icon?: string; note?: string }
+export type BookInput = {
+  id: string
+  title: string
+  storage: 'local' | 'quark'
+  fileName: string
+  fileSize?: number
+  quarkFid?: string
+}
 export type Action =
   | { type: 'add-space'; title: string; id?: string }
   | { type: 'add-collection'; parentId: string; title: string; id?: string }
   | { type: 'add-note'; parentId: string; id: string }
+  | { type: 'add-book'; parentId: string; beforeId?: string } & BookInput
+  | { type: 'add-books'; parentId: string; books: BookInput[]; beforeId?: string }
+  | { type: 'create-collection-with-books'; parentId: string; title?: string; beforeId?: string; books: BookInput[] }
   | { type: 'add-links'; parentId: string; links: LinkInput[]; beforeId?: string }
   | { type: 'collect-tabs'; parentId: string; title: string; links: LinkInput[]; beforeId?: string; placement?: 'top' | 'end' }
   | { type: 'create-collection-with-link'; parentId: string; beforeId?: string; source: { kind: 'link'; id: string } | { kind: 'new'; link: LinkInput } }
-  | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; body?: string; collapsed?: boolean; seeApiKey?: string; fluidAnimation?: boolean } }
+  | { type: 'edit'; id: string; patch: { title?: string; url?: string; note?: string; body?: string; collapsed?: boolean; seeApiKey?: string; fluidAnimation?: boolean; storage?: 'local' | 'quark'; quarkFid?: string; fileName?: string; fileSize?: number; progress?: number; chapterIndex?: number; scrollRatio?: number } }
   | { type: 'todo'; id: string; value: boolean }
   | { type: 'sort-todo'; id: string; beforeId?: string }
   | { type: 'move'; id: string; parentId: string | null; beforeId?: string }
@@ -95,7 +125,7 @@ export function tagKey(tag: { title: string; color: TagColor }) {
 }
 export type TagUsage = {
   entityId: string
-  entityKind: 'collection' | 'link' | 'note'
+  entityKind: 'collection' | 'link' | 'note' | 'book'
   title: string
   spaceId: string
   collectionId?: string
@@ -117,7 +147,7 @@ export function tagUsagesByTag(doc: Document): Map<string, TagUsage[]> {
   for (const space of children(doc, null).filter((e): e is Extract<Entity, { kind: 'space' }> => e.kind === 'space')) {
     for (const collection of children(doc, space.id).filter((e): e is Collection => e.kind === 'collection')) {
       add({ entityId: collection.id, entityKind: 'collection', title: collection.title, spaceId: space.id, path: [space.title, collection.title] }, tagIds(collection))
-      for (const item of children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')) {
+      for (const item of children(doc, collection.id).filter(isSavedItem)) {
         add({ entityId: item.id, entityKind: item.kind, title: item.title, spaceId: space.id, collectionId: collection.id, path: [space.title, collection.title, item.title] }, tagIds(item))
       }
     }
@@ -133,7 +163,7 @@ export function filterTagSelection(doc: Document, spaceId: string, selectedTagId
   const selected = new Set(selectedTagIds)
   const result = new Map<string, SavedItem[]>()
   for (const collection of children(doc, spaceId).filter((e): e is Collection => e.kind === 'collection')) {
-    const items = children(doc, collection.id).filter((e): e is SavedItem => e.kind === 'link' || e.kind === 'note')
+    const items = children(doc, collection.id).filter(isSavedItem)
     if (!selected.size) {
       if (items.length) result.set(collection.id, items)
       continue
@@ -179,7 +209,7 @@ export function readDocument(value: unknown): Document {
         activeTagKeys.add(key)
       }
     }
-    if ((entity.kind === 'collection' || entity.kind === 'link' || entity.kind === 'note') && entity.tagIds) {
+    if (isTaggedEntity(entity) && entity.tagIds) {
       entity.tagIds = [...new Set(entity.tagIds)].filter(tagId => {
         const tag = doc.entities[tagId]
         return tag?.kind === 'tag' && isActive(doc, tag)
@@ -191,7 +221,7 @@ export function readDocument(value: unknown): Document {
       entity.todoPosition ??= entity.position
     }
     const parent = entity.parentId ? doc.entities[entity.parentId] : null
-    if (((entity.kind === 'link' || entity.kind === 'note') && parent?.kind !== 'collection') ||
+    if ((isSavedItem(entity) && parent?.kind !== 'collection') ||
         (entity.kind === 'collection' && parent?.kind !== 'space') ||
         (['profile', 'space', 'share'].includes(entity.kind) && entity.parentId !== null)) throw new Error('数据的空间与收藏块关系无效')
   }
@@ -237,16 +267,30 @@ function requireTag(doc: Document, id: string) {
 }
 function requireTagged(doc: Document, id: string): TaggedEntity {
   const entity = requireEntity(doc, id)
-  if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note') throw new Error('此内容不能添加标签')
+  if (!isTaggedEntity(entity)) throw new Error('此内容不能添加标签')
   return entity
 }
 function requireSavedItems(doc: Document, ids: string[]): SavedItem[] {
   if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string')) throw new Error('请选择要操作的收藏内容')
   return [...new Set(ids)].map(id => {
     const entity = requireEntity(doc, id)
-    if (entity.kind !== 'link' && entity.kind !== 'note') throw new Error('请选择收藏链接或笔记')
+    if (!isSavedItem(entity)) throw new Error('请选择收藏链接、笔记或电子书')
     return entity
   })
+}
+function createBookEntity(input: BookInput, parentId: string, position: number): Book {
+  return {
+    ...common('book', input.title || input.fileName.replace(/\.epub$/i, ''), parentId, position),
+    id: input.id,
+    kind: 'book',
+    storage: input.storage,
+    fileName: input.fileName,
+    fileSize: input.fileSize,
+    quarkFid: input.quarkFid,
+    progress: 0,
+    chapterIndex: 0,
+    scrollRatio: 0,
+  }
 }
 function appendPosition(doc: Document, parentId: string | null, kind: Entity['kind']) { return Math.max(0, ...children(doc, parentId).filter(e => e.kind === kind).map(e => e.position)) + 1024 }
 function insertionPosition(siblings: Entity[], beforeId: string | undefined, now: number) {
@@ -289,6 +333,30 @@ export function apply(doc: Document, action: Action): Document {
       collection.collapsed = false; collection.updatedAt = now
       break
     }
+    case 'add-book': {
+      const collection = requireEntity(next, action.parentId, 'collection') as Collection
+      if (next.entities[action.id]) throw new Error('此电子书已存在，请重新创建')
+      next.entities[action.id] = createBookEntity(action, collection.id, insertionPosition(children(next, collection.id), action.beforeId, now))
+      collection.collapsed = false; collection.updatedAt = now
+      break
+    }
+    case 'add-books': {
+      if (!action.books.length) throw new Error('请选择要添加的电子书')
+      const collection = requireEntity(next, action.parentId, 'collection') as Collection
+      for (const input of action.books) {
+        if (next.entities[input.id]) throw new Error('此电子书已存在，请重新创建')
+        const position = insertionPosition(children(next, collection.id), action.beforeId, now)
+        next.entities[input.id] = createBookEntity(input, collection.id, position)
+      }
+      collection.collapsed = false; collection.updatedAt = now
+      break
+    }
+    case 'create-collection-with-books': {
+      if (!action.books.length) throw new Error('请选择要添加的电子书')
+      if (!children(next, action.parentId).some(e => e.kind === 'collection')) throw new Error('请先创建一个收藏块')
+      const collection = insertCollection(action.parentId, action.title ?? '新收藏', action.beforeId)
+      return apply(next, { type: 'add-books', parentId: collection.id, books: action.books })
+    }
     case 'collect-tabs': {
       if (!action.links.length) throw new Error('当前窗口没有可收藏的网页')
       const first = children(next, action.parentId).find(e => e.kind === 'collection')
@@ -328,6 +396,15 @@ export function apply(doc: Document, action: Action): Document {
       }
       if (entity.kind === 'collection' && action.patch.collapsed !== undefined) entity.collapsed = action.patch.collapsed
       if (entity.kind === 'note' && action.patch.body !== undefined) entity.body = action.patch.body
+      if (entity.kind === 'book') {
+        if (action.patch.storage !== undefined) entity.storage = action.patch.storage
+        if (action.patch.quarkFid !== undefined) entity.quarkFid = action.patch.quarkFid || undefined
+        if (action.patch.fileName !== undefined) entity.fileName = action.patch.fileName
+        if (action.patch.fileSize !== undefined) entity.fileSize = action.patch.fileSize
+        if (action.patch.progress !== undefined) entity.progress = Math.max(0, Math.min(100, Math.round(action.patch.progress)))
+        if (action.patch.chapterIndex !== undefined) entity.chapterIndex = Math.max(0, Math.floor(action.patch.chapterIndex))
+        if (action.patch.scrollRatio !== undefined) entity.scrollRatio = Math.max(0, Math.min(1, action.patch.scrollRatio))
+      }
       if (entity.kind === 'profile') {
         if (action.patch.seeApiKey !== undefined) entity.seeApiKey = action.patch.seeApiKey.trim()
         if (action.patch.fluidAnimation !== undefined) entity.fluidAnimation = action.patch.fluidAnimation
@@ -367,14 +444,14 @@ export function apply(doc: Document, action: Action): Document {
     case 'move': {
       const entity = requireEntity(next, action.id)
       if (entity.kind === 'profile') throw new Error('此内容不能移动')
-      if (entity.kind === 'link' || entity.kind === 'note') {
-        if (!action.parentId || next.entities[action.parentId]?.kind !== 'collection') throw new Error('请拖入当前空间的收藏块，链接不能跨空间移动')
+      if (entity.kind === 'link' || entity.kind === 'note' || entity.kind === 'book') {
+        if (!action.parentId || next.entities[action.parentId]?.kind !== 'collection') throw new Error('请拖入当前空间的收藏块，内容不能跨空间移动')
         const target = requireEntity(next, action.parentId!, 'collection') as Collection
         const source = next.entities[entity.parentId!]
-        if (source.parentId !== target.parentId) throw new Error('链接不能跨空间移动')
+        if (source.parentId !== target.parentId) throw new Error('内容不能跨空间移动')
         target.collapsed = false
       } else if (entity.parentId !== action.parentId) throw new Error('只能在原有区域内排序')
-      const siblings = children(next, action.parentId).filter(e => (e.kind === entity.kind || (['link', 'note'].includes(entity.kind) && ['link', 'note'].includes(e.kind))) && e.id !== entity.id)
+      const siblings = children(next, action.parentId).filter(e => (e.kind === entity.kind || (['link', 'note', 'book'].includes(entity.kind) && ['link', 'note', 'book'].includes(e.kind))) && e.id !== entity.id)
       entity.position = insertionPosition(siblings, action.beforeId, now)
       entity.parentId = action.parentId; entity.updatedAt = now
       break
@@ -417,7 +494,7 @@ export function apply(doc: Document, action: Action): Document {
       const items = requireSavedItems(next, action.ids)
       for (const item of items) {
         item.deletedAt = now; item.deletedBy = item.id; item.updatedAt = now
-        if (item.kind === 'note') purgeEntity(item, now)
+        if (item.kind === 'note' || item.kind === 'book') purgeEntity(item, now)
       }
       break
     }
@@ -428,7 +505,7 @@ export function apply(doc: Document, action: Action): Document {
       if (entity.kind === 'space' && active(next).filter(e => e.kind === 'space').length <= 1) throw new Error('请至少保留一个空间')
       const affected = active(next).filter(e => e.id === entity.id || parents(next, e).some(p => p.id === entity.id))
       for (const item of affected) { item.deletedAt = now; item.deletedBy = entity.id; item.updatedAt = now }
-      if (entity.kind === 'note') purgeEntity(entity, now)
+      if (entity.kind === 'note' || entity.kind === 'book') purgeEntity(entity, now)
       break
     }
     case 'restore': {
@@ -514,7 +591,7 @@ export function apply(doc: Document, action: Action): Document {
       source.updatedAt = now
       if (target) {
         for (const entity of Object.values(next.entities)) {
-          if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note') continue
+          if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note' && entity.kind !== 'book') continue
           entity.tagIds = [...new Set((entity.tagIds ?? []).map(id => id === target.id ? source.id : id))]
         }
         delete next.entities[target.id]
@@ -527,7 +604,7 @@ export function apply(doc: Document, action: Action): Document {
       tag.deletedBy = tag.id
       purgeEntity(tag, now)
       for (const entity of Object.values(next.entities)) {
-        if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note') continue
+        if (entity.kind !== 'collection' && entity.kind !== 'link' && entity.kind !== 'note' && entity.kind !== 'book') continue
         entity.tagIds = (entity.tagIds ?? []).filter(id => id !== tag.id)
       }
       break
@@ -557,6 +634,7 @@ function purgeEntity(entity: Entity, now: number) {
   if (entity.kind !== 'tag') entity.title = ''
   if (entity.kind === 'link') { entity.url = ''; entity.icon = ''; entity.note = ''; entity.todo = false; entity.tagIds = [] }
   if (entity.kind === 'note') entity.tagIds = []
+  if (entity.kind === 'book') { entity.tagIds = []; entity.fileName = ''; entity.fileSize = undefined; entity.quarkFid = undefined; entity.progress = 0; entity.chapterIndex = 0; entity.scrollRatio = 0 }
   if (entity.kind === 'collection') entity.tagIds = []
 
   if (entity.kind === 'note') entity.body = ''

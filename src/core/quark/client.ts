@@ -154,6 +154,8 @@ type QuarkQrStatusEnvelope = {
   }
 }
 
+export const MAX_QUARK_EPUB_BYTES = 200 * 1024 * 1024
+
 export class QuarkClient {
   private cookie: string
   private readonly onCookiesUpdated?: (cookieUpdates: string[]) => void | Promise<void>
@@ -256,7 +258,7 @@ export class QuarkClient {
     return null
   }
 
-  async downloadFileText(fid: string): Promise<string> {
+  async downloadFileBytes(fid: string): Promise<Uint8Array> {
     const link = await this.getDownloadUrl(fid)
     const response = await quarkFetch(link.url, {
       method: 'GET',
@@ -271,7 +273,11 @@ export class QuarkClient {
       )
     }
 
-    return await response.text()
+    return new Uint8Array(await response.arrayBuffer())
+  }
+
+  async downloadFileText(fid: string): Promise<string> {
+    return new TextDecoder().decode(await this.downloadFileBytes(fid))
   }
 
   async getAccountInfo(): Promise<{ nickname?: string; userId?: string }> {
@@ -627,7 +633,7 @@ export class QuarkClient {
     return payload.data.auth_key
   }
 
-  async uploadSinglePart(args: {
+  async uploadPart(args: {
     authKey: string
     mimeType: string
     utcTime: string
@@ -635,9 +641,10 @@ export class QuarkClient {
     uploadUrl: string
     objectKey: string
     uploadId: string
+    partNumber: number
     bytes: Uint8Array
   }): Promise<string> {
-    const url = `https://${args.bucket}.${args.uploadUrl}//${args.objectKey}?partNumber=1&uploadId=${args.uploadId}`
+    const url = `https://${args.bucket}.${args.uploadUrl}//${args.objectKey}?partNumber=${args.partNumber}&uploadId=${args.uploadId}`
     const response = await quarkFetch(url, {
       method: 'PUT',
       headers: {
@@ -662,8 +669,8 @@ export class QuarkClient {
     return etag
   }
 
-  async commitSinglePartUpload(args: {
-    etag: string
+  async commitMultipartUpload(args: {
+    parts: { partNumber: number; etag: string }[]
     callback: { callbackUrl: string; callbackBody: string }
     bucket: string
     objectKey: string
@@ -672,7 +679,8 @@ export class QuarkClient {
     taskId: string
     uploadUrl: string
   }): Promise<void> {
-    const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>\n<CompleteMultipartUpload>\n<Part>\n<PartNumber>1</PartNumber>\n<ETag>${args.etag}</ETag>\n</Part>\n</CompleteMultipartUpload>`
+    const partLines = args.parts.map(part => `<Part>\n<PartNumber>${part.partNumber}</PartNumber><ETag>${part.etag}</ETag>\n</Part>`)
+    const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>\n<CompleteMultipartUpload>\n${partLines.join('\n')}\n</CompleteMultipartUpload>`
     const contentMd5 = await digestToBase64('MD5', new TextEncoder().encode(xmlBody))
     const callbackBase64 = toBase64(JSON.stringify(args.callback))
     const time = new Date().toUTCString()
@@ -708,6 +716,32 @@ export class QuarkClient {
     }
   }
 
+  async uploadSinglePart(args: {
+    authKey: string
+    mimeType: string
+    utcTime: string
+    bucket: string
+    uploadUrl: string
+    objectKey: string
+    uploadId: string
+    bytes: Uint8Array
+  }): Promise<string> {
+    return this.uploadPart({ ...args, partNumber: 1 })
+  }
+
+  async commitSinglePartUpload(args: {
+    etag: string
+    callback: { callbackUrl: string; callbackBody: string }
+    bucket: string
+    objectKey: string
+    uploadId: string
+    authInfo: string
+    taskId: string
+    uploadUrl: string
+  }): Promise<void> {
+    await this.commitMultipartUpload({ ...args, parts: [{ partNumber: 1, etag: args.etag }] })
+  }
+
   async finishUpload(objectKey: string, taskId: string): Promise<void> {
     const url = new URL('/1/clouddrive/file/upload/finish', QUARK_API_BASE)
     for (const [key, value] of Object.entries(DEFAULT_QUERY)) {
@@ -728,6 +762,73 @@ export class QuarkClient {
     if (!response.ok || payload?.status !== 200) {
       throw new QuarkApiError(this.getErrorMessage(payload, response.status), response.status)
     }
+  }
+
+  async uploadFile(args: {
+    fileName: string
+    parentFid: string
+    bytes: Uint8Array
+    mimeType: string
+  }): Promise<{ created: boolean; fid: string }> {
+    if (args.bytes.byteLength > MAX_QUARK_EPUB_BYTES) {
+      throw new QuarkApiError('电子书文件超过 200MB 上传限制，请改用本地阅读', 413)
+    }
+    const ticket = await this.prepareUpload(args.fileName, args.bytes.byteLength, args.parentFid, args.mimeType)
+    if (ticket.alreadyFinished) {
+      return { created: true, fid: ticket.fileId }
+    }
+
+    const md5 = await digestToHex('MD5', args.bytes)
+    const sha1 = await digestToHex('SHA-1', args.bytes)
+    const finishedByHash = await this.updateUploadHash(md5, sha1, ticket.taskId)
+    if (finishedByHash) {
+      return { created: true, fid: ticket.fileId }
+    }
+
+    if (!ticket.uploadId) {
+      throw new QuarkApiError('Quark upload preflight did not return an uploadId for multipart upload.', 502)
+    }
+
+    const partSize = Math.max(1, ticket.partSize)
+    const parts: { partNumber: number; etag: string }[] = []
+    for (let offset = 0, partNumber = 1; offset < args.bytes.byteLength || (args.bytes.byteLength === 0 && partNumber === 1); offset += partSize, partNumber += 1) {
+      const chunk = args.bytes.subarray(offset, Math.min(args.bytes.byteLength, offset + partSize))
+      const utcTime = new Date().toUTCString()
+      const authMeta = buildUploadPartAuthMeta({
+        mimeType: ticket.mimeType,
+        utcTime,
+        bucket: ticket.bucket,
+        objectKey: ticket.objectKey,
+        uploadId: ticket.uploadId,
+        partNumber,
+      })
+      const authKey = await this.authenticateUpload(ticket.authInfo, authMeta, ticket.taskId)
+      const etag = await this.uploadPart({
+        authKey,
+        mimeType: ticket.mimeType,
+        utcTime,
+        bucket: ticket.bucket,
+        uploadUrl: ticket.uploadUrl,
+        objectKey: ticket.objectKey,
+        uploadId: ticket.uploadId,
+        partNumber,
+        bytes: chunk,
+      })
+      parts.push({ partNumber, etag })
+      if (args.bytes.byteLength === 0) break
+    }
+    await this.commitMultipartUpload({
+      parts,
+      callback: ticket.callback,
+      bucket: ticket.bucket,
+      objectKey: ticket.objectKey,
+      uploadId: ticket.uploadId,
+      authInfo: ticket.authInfo,
+      taskId: ticket.taskId,
+      uploadUrl: ticket.uploadUrl,
+    })
+    await this.finishUpload(ticket.objectKey, ticket.taskId)
+    return { created: true, fid: ticket.fileId }
   }
 
   async uploadSmallFile(args: {
@@ -919,6 +1020,7 @@ function buildUploadPartAuthMeta(args: {
   bucket: string
   objectKey: string
   uploadId: string
+  partNumber?: number
 }): string {
   return [
     'PUT',
@@ -927,7 +1029,7 @@ function buildUploadPartAuthMeta(args: {
     args.utcTime,
     `x-oss-date:${args.utcTime}`,
     'x-oss-user-agent:aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit',
-    `/${args.bucket}/${args.objectKey}?partNumber=1&uploadId=${args.uploadId}`,
+    `/${args.bucket}/${args.objectKey}?partNumber=${args.partNumber ?? 1}&uploadId=${args.uploadId}`,
   ].join('\n')
 }
 

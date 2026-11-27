@@ -9,7 +9,7 @@ import { canSortTabs, closeSavedTabs, moveTabsToSlot, moveWholeGroup, saveTabsBe
 import type { QuickCollectionTarget } from './QuickCollectionGap'
 import { useSelection } from './Selection'
 
-type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string } | { kind: 'tab-group'; groupId: number; windowId: number; lastIndex: number; title: string }
+type DragItem = { kind: 'space' | 'collection' | 'todo'; entityId: string; title: string } | { kind: 'saved-item'; itemKind: 'link' | 'note' | 'book'; entityId: string; title: string } | { kind: 'tab'; tab: OpenTab; title: string } | { kind: 'tab-group'; groupId: number; windowId: number; lastIndex: number; title: string }
 type DragTarget = DragItem | { kind: 'content' } | { kind: 'trash' } | QuickCollectionTarget | ({ kind: 'tab-slot' } & TabSlot)
 type DropDestination = { kind: 'existing' | 'trash' } | { kind: 'new-link'; collectionId?: string }
 type TabProjection = { tabs: OpenTab[]; height: number; width: number; slot?: TabSlot; target?: DragTarget }
@@ -236,7 +236,7 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
       return
     }
     if (target.kind === 'new-collection') {
-      if ((source.kind !== 'saved-item' && source.kind !== 'tab') || (source.kind === 'saved-item' && source.itemKind === 'note' && batch.current.ids.length < 2)) { resolve(original); return }
+      if ((source.kind !== 'saved-item' && source.kind !== 'tab') || (source.kind === 'saved-item' && (source.itemKind === 'note' || source.itemKind === 'book') && batch.current.ids.length < 2)) { resolve(original); return }
       if (batch.current.ids.length > 1) {
         const success = source.kind === 'saved-item' ? await act({ type: 'collect-items', ids: batch.current.ids, parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end' }) : await saveTabsBeforeClosing(batch.current.tabs, selection.pendingClosures, unsaved => act({ type: 'collect-tabs', parentId: target.spaceId, title: '新收藏', beforeId: target.beforeId, placement: 'end', links: unsaved.map(tabLink) }))
         await settle(success, source.kind === 'tab' ? { kind: 'new-link' } : { kind: 'existing' })
@@ -287,7 +287,7 @@ export function DragBoard({ doc, tabs, refreshTabs, act, notify, moveTab, childr
       return
     }
     if (source.kind === target.kind) {
-      const success = await act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind || (source.kind === 'saved-item' && ['link', 'note'].includes(e.kind))), moving.id, entity.id) })
+      const success = await act({ type: 'move', id: moving.id, parentId: entity.parentId, beforeId: beforeId(children(doc, entity.parentId).filter(e => e.kind === moving.kind || (source.kind === 'saved-item' && ['link', 'note', 'book'].includes(e.kind))), moving.id, entity.id) })
       if (success && source.kind === 'saved-item') selection.clear()
       await settle(success)
     } else if (source.kind === 'saved-item' && (target.kind === 'collection' || target.kind === 'space')) {

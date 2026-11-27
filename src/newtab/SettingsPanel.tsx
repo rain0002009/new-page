@@ -6,10 +6,12 @@ import { rpc, syncStatusLabels, type Snapshot } from '../core/protocol'
 import ConnectionForm from './ConnectionForm'
 import SeeSettings from './SeeSettings'
 import Switch from './Switch'
+import { Select } from './Select'
 import type { Act } from './Editor'
 import { Button, Modal, ModalPresence } from './ui'
 import { feedbackStyles, formStyles } from './form-styles'
 import TagManagementPanel from './TagManagementPanel'
+import { defaultEpubDropMode, readEpubDropMode, saveEpubDropMode, type EpubDropMode } from '../core/epub-preferences'
 
 const styles = tv({
   slots: {
@@ -45,7 +47,14 @@ export default function SettingsPanel({ data, act, receive, onError, onLocateEnt
   const repairRunning = useRef(false)
   const [busy, setBusy] = useState(false)
   const [takeover, setTakeover] = useState(true)
-  useEffect(() => { void chrome.storage.local.get(['markdownTakeover', 'markdownTakeoverError']).then(value => { setTakeover(value.markdownTakeover !== false); if (value.markdownTakeoverError) onError(String(value.markdownTakeoverError)) }) }, [])
+  const [epubDropMode, setEpubDropMode] = useState<EpubDropMode>(defaultEpubDropMode)
+  useEffect(() => {
+    void chrome.storage.local.get(['markdownTakeover', 'markdownTakeoverError']).then(value => {
+      setTakeover(value.markdownTakeover !== false)
+      if (value.markdownTakeoverError) onError(String(value.markdownTakeoverError))
+    })
+    void readEpubDropMode().then(setEpubDropMode)
+  }, [])
   async function execute(work: () => Promise<void>) {
     setBusy(true)
     try { await work() } catch (error) { onError(error instanceof Error ? error.message : '操作失败，请重试') }
@@ -83,6 +92,25 @@ export default function SettingsPanel({ data, act, receive, onError, onLocateEnt
       <div className="flex flex-col gap-[16px] mt-[16px]">
         <Switch label="自动接管 Markdown 地址" checked={takeover} disabled={busy} onChange={enabled => { void execute(async () => { await rpc({ type: 'markdown-takeover', enabled }); setTakeover(enabled) }) }} />
         <Switch label="流体背景动画" checked={profile.kind !== 'profile' || profile.fluidAnimation !== false} disabled={busy} onChange={enabled => { void execute(async () => { await act({ type: 'edit', id: 'profile', patch: { fluidAnimation: enabled } }) }) }} />
+        <div className="flex items-center justify-between gap-[16px] [@media(max-width:650px)]:flex-col [@media(max-width:650px)]:items-stretch">
+          <div className="min-w-0">
+            <span className="block text-[13px] font-medium text-ui-ink">拖入本地 EPUB 时</span>
+            <span className="block text-[11px] text-ui-muted mt-[2px]">控制把本地电子书拖入收藏块时的保存与阅读方式</span>
+          </div>
+          <Select
+            size="control"
+            className="w-[180px] shrink-0 [@media(max-width:650px)]:w-full"
+            label="拖入本地 EPUB 时"
+            value={epubDropMode}
+            disabled={busy}
+            options={[
+              { value: 'ask', label: '每次询问' },
+              { value: 'local', label: '本地直接阅读' },
+              { value: 'quark', label: '上传到夸克网盘' },
+            ]}
+            onChange={mode => { void execute(async () => { await saveEpubDropMode(mode); setEpubDropMode(mode) }) }}
+          />
+        </div>
       </div>
       <label className={fields.label({ className: 'mt-[22px]' })}>显示昵称<input className={fields.control()} aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label>
     </section>
@@ -109,10 +137,10 @@ export default function SettingsPanel({ data, act, receive, onError, onLocateEnt
   </>
 }
 function ConflictChoice({ conflict, busy, choose }: { conflict: Conflict; busy: boolean; choose: (side: 'local' | 'remote') => void }) {
-  const labels: Record<string, string> = { title: '标题', body: '正文', url: '网址', note: '备注', todo: '待办', todoPosition: '待办顺序', position: '顺序', parentId: '位置', collapsed: '折叠状态', seeApiKey: 's.ee API Key', fluidAnimation: '流体背景动画' }
+  const labels: Record<string, string> = { title: '标题', body: '正文', url: '网址', note: '备注', todo: '待办', todoPosition: '待办顺序', position: '顺序', parentId: '位置', collapsed: '折叠状态', seeApiKey: 's.ee API Key', fluidAnimation: '流体背景动画', storage: '存储方式', quarkFid: '夸克文件', progress: '阅读进度', chapterIndex: '章节位置', scrollRatio: '章内滚动', fileName: '文件名' }
   return <article className={conflictStyles.item()} aria-label={`冲突 ${conflict.local?.title || conflict.remote?.title || '已删除内容'}`}><h3 className={conflictStyles.title()}>{conflict.local?.title || conflict.remote?.title || '已删除内容'}</h3><p className={feedbackStyles.muted()}>冲突内容：{conflict.fields.map(field => labels[field] || field).join('、')}</p><div className={conflictStyles.versions()}>{(['local', 'remote'] as const).map(side => <div key={side} className={conflictStyles.version()}><span className={conflictStyles.eyebrow()}>{side === 'local' ? '本地版本' : '远端版本'}</span><Version entity={conflict[side]} /><Button disabled={busy} tone="primary" onClick={() => choose(side)}>{side === 'local' ? '保留本地版本' : '保留远端版本'}</Button></div>)}</div></article>
 }
 function Version({ entity }: { entity: Entity | null }) {
   if (!entity || entity.deletedAt !== null || entity.purged) return <p className={conflictStyles.deleted()}>已删除</p>
-  return <div className={conflictStyles.content()}><strong>{entity.title}</strong>{entity.kind === 'profile' && <><span className={conflictStyles.metadata()}>s.ee API Key：{entity.seeApiKey ? `已配置（末尾 ${entity.seeApiKey.slice(-4)}）` : '未配置'}</span><span className={conflictStyles.metadata()}>流体背景动画：{entity.fluidAnimation !== false ? '开启' : '关闭'}</span></>}{entity.kind === 'note' && <p className={conflictStyles.note()}>{entity.body}</p>}{entity.kind === 'link' && <><span className={conflictStyles.metadata()}>{entity.url}</span>{entity.note && <p className={conflictStyles.note()}>{entity.note}</p>}<small className={conflictStyles.metadata()}>{entity.todo ? '已加入 Todo' : '未加入 Todo'}</small>{entity.todo && <small className={conflictStyles.metadata()}>待办顺序：{entity.todoPosition ?? entity.position}</small>}</>}<small className={conflictStyles.metadata()}>位置顺序：{entity.position}</small></div>
+  return <div className={conflictStyles.content()}><strong>{entity.title}</strong>{entity.kind === 'profile' && <><span className={conflictStyles.metadata()}>s.ee API Key：{entity.seeApiKey ? `已配置（末尾 ${entity.seeApiKey.slice(-4)}）` : '未配置'}</span><span className={conflictStyles.metadata()}>流体背景动画：{entity.fluidAnimation !== false ? '开启' : '关闭'}</span></>}{entity.kind === 'note' && <p className={conflictStyles.note()}>{entity.body}</p>}{entity.kind === 'book' && <><span className={conflictStyles.metadata()}>文件名：{entity.fileName}</span><span className={conflictStyles.metadata()}>存储：{entity.storage === 'quark' ? '夸克网盘' : '本机阅读'} · 进度 {entity.progress}%</span></>}{entity.kind === 'link' && <><span className={conflictStyles.metadata()}>{entity.url}</span>{entity.note && <p className={conflictStyles.note()}>{entity.note}</p>}<small className={conflictStyles.metadata()}>{entity.todo ? '已加入 Todo' : '未加入 Todo'}</small>{entity.todo && <small className={conflictStyles.metadata()}>待办顺序：{entity.todoPosition ?? entity.position}</small>}</>}<small className={conflictStyles.metadata()}>位置顺序：{entity.position}</small></div>
 }

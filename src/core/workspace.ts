@@ -3,8 +3,9 @@ import { emptyDocument, merge, refreshConflicts, resolveConflict } from './merge
 import type { ConnectRequest, Request, Result } from './protocol'
 import { RevisionChanged } from './webdav'
 import { normalizeRemote, remoteKey, remoteStore, isQuark, type Connection, type RemoteRead } from './remote'
-import { startQr, pollQr, repairFolder } from './quark/auth'
+import { startQr, pollQr, repairFolder, accountClient } from './quark/auth'
 import { QuarkStore } from './quark/store'
+import { uploadBookToQuark } from './quark/epub-files'
 import { quarkOrigins } from './quark/transport'
 import type { LoginProgress } from './quark/progress'
 import { ensureLocalWorkspace, storageKey, workspaceSnapshot as snapshot, type StoredWorkspace as Root, type WorkspaceSource } from './local-workspace'
@@ -12,8 +13,11 @@ import { configureMarkdownNavigation, openOriginalMarkdown } from './markdown-na
 import { queueDocumentImageChanges, updateLocalImageDocument } from './hosted-images'
 import { executeImageCleanup } from './hosted-image-cleaner'
 import { normalizeImageUrl } from './image-references'
+import { getBookBytes, putBookBytes } from './epub-storage'
+import { executeBookCleanup, queueBookChanges } from './book-cleaner'
 
 let chain: Promise<unknown> = Promise.resolve()
+let bookUploadChain: Promise<unknown> = Promise.resolve()
 const syncing = new Set<string>()
 const inFlight = new Map<string, Promise<void>>()
 const scheduled = new Map<string, ReturnType<typeof setTimeout>>()
@@ -33,6 +37,9 @@ function atomic<T>(work: (root: Root) => T | Promise<T>): Promise<T> {
 function broadcast() { void chrome.runtime.sendMessage({ type: 'changed' }).catch(() => undefined) }
 function cleanupImages(id: string): Promise<unknown> {
   return executeImageCleanup(id, atomic, broadcast)
+}
+function cleanupBooks(id: string): Promise<unknown> {
+  return executeBookCleanup(id, atomic)
 }
 function current(root: Root, id: string) {
   if (root.active !== id || !root.sources[id]) throw new Error('数据源已切换，请在当前页面重试')
@@ -66,7 +73,7 @@ export function schedule(id: string, delay = 600) {
   scheduled.set(id, setTimeout(() => {
     scheduled.delete(id)
     void atomic(root => root.sources[id]?.config).then(config => {
-      if (!config) void cleanupImages(id)
+      if (!config) { void cleanupImages(id); void cleanupBooks(id) }
       else void synchronize(id)
     })
   }, delay))
@@ -94,11 +101,13 @@ async function synchronizeSource(id: string, repairing = false) {
       const before = source.doc
       source.doc = prune(source.doc)
       queueDocumentImageChanges(root, id, before, source.doc)
+      queueBookChanges(root, id, before, source.doc)
       source.status = 'syncing'; source.error = ''
       return structuredClone(source)
     })
     if (!initial || !initial.config) {
       await cleanupImages(id)
+      await cleanupBooks(id)
       return
     }
     broadcast()
@@ -129,6 +138,7 @@ async function synchronizeSource(id: string, repairing = false) {
       const before = source.doc
       source.doc = prune(result.doc); source.conflicts = includeCloudConflicts(result.conflicts, source.resolvedRevision === remote.etag ? [] : remote.conflicts)
       queueDocumentImageChanges(root, id, before, source.doc)
+      queueBookChanges(root, id, before, source.doc)
       source.base = remote.doc ?? emptyDocument(); source.etag = remote.etag
       if (source.conflicts.length) { source.status = 'conflict'; return null }
       readDocument(source.doc)
@@ -169,13 +179,13 @@ async function synchronizeSource(id: string, repairing = false) {
   } finally {
     syncing.delete(id); broadcast()
     if (retry) schedule(id, 1000)
-    else await cleanupImages(id)
+    else { await cleanupImages(id); await cleanupBooks(id) }
   }
 }
 function hasLocalContent(previous: WorkspaceSource | null | undefined): boolean {
   if (!previous) return false
   const list = active(previous.doc)
-  if (list.some(e => e.kind === 'link' || e.kind === 'note' || e.kind === 'share')) return true
+  if (list.some(e => e.kind === 'link' || e.kind === 'note' || e.kind === 'book' || e.kind === 'share')) return true
   const spaces = list.filter(e => e.kind === 'space')
   const collections = list.filter(e => e.kind === 'collection')
   if (spaces.length !== 1 || spaces[0].title !== '我的空间') return true
@@ -244,6 +254,7 @@ async function connect(request: ConnectRequest): Promise<Result> {
     }
     root.sources[id] = { config, doc: prune(doc), base: remote.doc ?? emptyDocument(), etag: remote.etag, resolvedRevision: cached?.resolvedRevision, pendingNoteIds: cached?.pendingNoteIds, conflicts, status: conflicts.length ? 'conflict' : 'pending', error: '', lastSync: cached?.lastSync ?? null }
     queueDocumentImageChanges(root, id, doc, root.sources[id].doc)
+    queueBookChanges(root, id, doc, root.sources[id].doc)
     if (cached) queueDocumentImageChanges(root, id, cached.doc, root.sources[id].doc)
     if (fromLocal || request.mode === 'migrate') queueNoteChanges(root.sources[id], beforeMigration)
     if (fromLocal && root.active === 'local' && id !== 'local') delete root.sources['local']
@@ -373,11 +384,56 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     await synchronize(request.sourceId)
     return atomic(root => ({ ok: true, snapshot: snapshot(root) } as const))
   }
+  if (request.type === 'upload-book-quark') {
+    const task = bookUploadChain.catch(() => undefined).then(async () => {
+      const info = await atomic(root => {
+        const source = current(root, request.sourceId)
+        if (!source.config || !isQuark(source.config)) throw new Error('请先在设置中连接夸克网盘')
+        const book = source.doc.entities[request.bookId]
+        if (!book || book.kind !== 'book' || !isActive(source.doc, book)) throw new Error('电子书已不存在')
+        return { config: source.config, book: { id: book.id, title: book.title } }
+      })
+      const bytes = await getBookBytes(info.book.id)
+      if (!bytes) throw new Error('未找到本机电子书文件，请重新拖入后重试')
+      const uploaded = await uploadBookToQuark(await accountClient(info.config), info.config.folderId, info.book, bytes)
+      const result = await atomic(root => {
+        const source = current(root, request.sourceId)
+        const book = source.doc.entities[info.book.id]
+        if (!book || book.kind !== 'book' || !isActive(source.doc, book)) throw new Error('电子书在上传期间已被删除')
+        source.doc = apply(source.doc, {
+          type: 'edit',
+          id: book.id,
+          patch: { storage: 'quark', quarkFid: uploaded.fid },
+        })
+        source.status = source.conflicts.length ? 'conflict' : 'pending'
+        source.error = ''
+        schedule(request.sourceId)
+        return { ok: true, snapshot: snapshot(root) } as const
+      })
+      broadcast()
+      return result
+    })
+    bookUploadChain = task
+    return task
+  }
+  if (request.type === 'download-book-quark') {
+    const info = await atomic(root => {
+      const source = current(root, request.sourceId)
+      if (!source.config || !isQuark(source.config)) throw new Error('请先在设置中连接夸克网盘，以读取云端电子书')
+      const book = source.doc.entities[request.bookId]
+      if (!book || book.kind !== 'book' || !isActive(source.doc, book)) throw new Error('电子书已删除或不存在')
+      if (book.storage !== 'quark' || !book.quarkFid) throw new Error('该电子书仅保存在原设备本地，未上传到夸克网盘')
+      return { config: source.config, id: book.id, fid: book.quarkFid }
+    })
+    const bytes = await (await accountClient(info.config)).downloadFileBytes(info.fid)
+    await putBookBytes(info.id, bytes)
+    return { ok: true }
+  }
   const result = await atomic(root => {
     if (request.type === 'snapshot') {
       if (root.active) {
         const source = root.sources[root.active], cleaned = prune(source.doc)
-        if (!equal(cleaned, source.doc)) { const before = source.doc; source.doc = cleaned; queueDocumentImageChanges(root, root.active, before, cleaned); source.status = 'pending'; schedule(root.active) }
+        if (!equal(cleaned, source.doc)) { const before = source.doc; source.doc = cleaned; queueDocumentImageChanges(root, root.active, before, cleaned); queueBookChanges(root, root.active, before, cleaned); source.status = 'pending'; schedule(root.active) }
         if (source.status === 'syncing' && !syncing.has(root.active)) { source.status = 'pending'; schedule(root.active) }
       }
       return { ok: true, snapshot: snapshot(root) } as const
@@ -405,12 +461,13 @@ export async function handle(request: Request, tabId?: number): Promise<Result> 
     } else if (request.type === 'import') {
       if (source.conflicts.length) throw new Error('请先解决同步冲突再导入')
       const imported = prune(readDocument(request.data))
-      if (!request.confirmed && active(source.doc).some(e => e.kind === 'link' || e.kind === 'note')) return { ok: true, confirmation: '导入会合并备份与当前收藏，重复网址独立保留。是否继续？' } as const
+      if (!request.confirmed && active(source.doc).some(e => e.kind === 'link' || e.kind === 'note' || e.kind === 'book')) return { ok: true, confirmation: '导入会合并备份与当前收藏，重复网址独立保留。是否继续？' } as const
       const combined = merge(emptyDocument(), source.doc, imported)
       source.doc = combined.doc; source.conflicts = combined.conflicts
     }
     queueNoteChanges(source, before)
     queueDocumentImageChanges(root, request.sourceId, before, source.doc)
+    queueBookChanges(root, request.sourceId, before, source.doc)
     const isOnlyCollapsed = request.type === 'action' && request.action.type === 'edit' && Object.keys(request.action.patch).length === 1 && 'collapsed' in request.action.patch
     if (!isOnlyCollapsed) {
       source.status = source.conflicts.length ? 'conflict' : 'pending'

@@ -12,6 +12,13 @@ export const linkCard = tv({
     location: 'flex items-center gap-[4px] truncate text-[8px] text-[#9eaa92] min-w-0',
     secondary: 'ml-auto flex opacity-0 pointer-events-auto group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(max-width:650px)]:opacity-100',
   },
-  defaultVariants: { note: false },
-  variants: { search: { true: { base: 'cursor-default' } }, note: { true: { base: 'bg-[#f2e6cc] hover:bg-[#f6ebd4]' }, false: { base: 'bg-[#eaf0e2] hover:bg-[#e3ecd8]' } } },
+  defaultVariants: { kind: 'link' },
+  variants: {
+    search: { true: { base: 'cursor-default' } },
+    kind: {
+      link: { base: 'bg-[#eaf0e2] hover:bg-[#e3ecd8]' },
+      note: { base: 'bg-[#f2e6cc] hover:bg-[#f6ebd4]' },
+      book: { base: 'bg-[#e4ecf2] hover:bg-[#dbe6ef] hover:border-[#a7bfd2]' },
+    },
+  },
 })

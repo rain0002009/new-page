@@ -1,6 +1,7 @@
 import {
   equal,
   isActive,
+  isTaggedEntity,
   parents,
   readDocument,
   tagKey,
@@ -8,7 +9,6 @@ import {
   type Document,
   type Entity,
   type Tag,
-  type TaggedEntity,
 } from './model'
 
 export const emptyDocument = (): Document => ({ format: 'new-page', version: 1, entities: {} })
@@ -29,12 +29,11 @@ export function refreshConflicts(previous: Conflict[], next: Conflict[], doc: Do
   }
   return [...result.values()]
 }
-type TaggedRecord = Extract<Entity, { kind: 'collection' | 'link' | 'note' }>
 function isTag(entity: Entity | undefined): entity is Tag {
   return entity?.kind === 'tag'
 }
-function isTagged(entity: Entity | undefined): entity is TaggedRecord {
-  return entity?.kind === 'collection' || entity?.kind === 'link' || entity?.kind === 'note'
+function isTagged(entity: Entity | undefined) {
+  return isTaggedEntity(entity)
 }
 function withTagAliases(doc: Document, aliases: Map<string, string>, canonicalTags: Map<string, Tag>): Document {
   const next = structuredClone(doc)

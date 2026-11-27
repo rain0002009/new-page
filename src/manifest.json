@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/chrome-manifest.json",
   "manifest_version": 3,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "name": "页墟 · Page Garden",
   "description": "以空间整理收藏，用 Todo 标记待办，本地优先，支持夸克网盘与 WebDAV 同步。",
   "permissions": [
@@ -46,7 +46,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "document/index.html"
+        "document/index.html",
+        "reader/index.html"
       ],
       "matches": [
         "<all_urls>"

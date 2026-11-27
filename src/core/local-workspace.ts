@@ -4,8 +4,9 @@ import type { Snapshot } from './protocol'
 import type { Connection } from './remote'
 import type { ImageCleanup, ImageOwner, LocalImageDocument } from './hosted-images'
 
+export type BookCleanup = { sourceId: string; fid: string; accountId: string; folderId: string }
 export type WorkspaceSource = { config: Connection | null; doc: Document; base: Document; etag: string | null; resolvedRevision?: string | null; pendingNoteIds?: string[]; conflicts: Conflict[]; status: Snapshot['status']; error: string; lastSync: number | null }
-export type StoredWorkspace = { active: string | null; sources: Record<string, WorkspaceSource>; editors?: Record<string, { tabId: number; token: string }>; imageCleanup?: ImageCleanup[]; imageDocuments?: Record<string, LocalImageDocument>; imageOwners?: Record<string, ImageOwner> }
+export type StoredWorkspace = { active: string | null; sources: Record<string, WorkspaceSource>; editors?: Record<string, { tabId: number; token: string }>; imageCleanup?: ImageCleanup[]; imageDocuments?: Record<string, LocalImageDocument>; imageOwners?: Record<string, ImageOwner>; bookCleanup?: BookCleanup[] }
 export const storageKey = 'new-page.workspace.v1'
 
 export function ensureLocalWorkspace(root: StoredWorkspace): StoredWorkspace {

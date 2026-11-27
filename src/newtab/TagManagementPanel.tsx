@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, Folder, Link2, LocateFixed, Pencil, Plus, Search, Tag, Unlink } from 'lucide-react'
+import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, Link2, LocateFixed, Pencil, Plus, Search, Tag, Unlink } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { active, tagUsagesByTag, type Document, type TaggedEntity, type TagUsage, type Tag as TagRecord } from '../core/model'
 import type { Act } from './Editor'
@@ -36,9 +36,10 @@ const styles = tv({
 
 const panelStyles = styles()
 
-function UsageIcon({ kind }: { kind: 'collection' | 'link' | 'note' }) {
+function UsageIcon({ kind }: { kind: 'collection' | 'link' | 'note' | 'book' }) {
   if (kind === 'collection') return <Folder size={15} />
   if (kind === 'link') return <Link2 size={15} />
+  if (kind === 'book') return <BookOpen size={15} />
   return <FileText size={15} />
 }
 
