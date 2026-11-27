@@ -1,20 +1,20 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, Folder, Link2, LocateFixed, Pencil, Search, Tag, Unlink } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Folder, Link2, LocateFixed, Pencil, Plus, Search, Tag, Unlink } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { active, tagUsagesByTag, type Document, type TaggedEntity, type TagUsage, type Tag as TagRecord } from '../core/model'
 import type { Act } from './Editor'
 import { Button } from './ui'
-import { ColorPicker, TagChip, TagEditModal } from './Tags'
+import { ColorPicker, TagChip, TagCreateModal, TagEditModal } from './Tags'
 
 type TagColorChoice = TagRecord['color'] | 'transparent'
 
 const styles = tv({
   slots: {
-    toolbar: 'flex items-center gap-[10px] mt-[16px] mb-[18px] [@media(max-width:650px)]:flex-col [@media(max-width:650px)]:items-stretch',
-    search: 'relative flex-1 min-w-0',
+    toolbar: 'flex flex-col mt-[16px] mb-[18px]',
+    search: 'relative w-full min-w-0',
     searchInput: 'w-full rounded-[10px] border border-solid border-form-line bg-form-surface py-[9px] pl-[34px] pr-[12px] text-[12px] text-form-ink outline-none focus:border-form-focus focus:shadow-[0_0_0_3px_#eaf0df]',
     section: 'p-[25px] border border-solid border-white rounded-[13px] bg-ui-dialog mb-[20px] backdrop-blur-[25px] shadow-[0_10px_35px_#4c683410] [@media(max-width:650px)]:p-[18px]',
-    sectionHeader: 'flex w-full items-center gap-[8px] rounded-[8px] border-0 bg-transparent p-0 text-left text-[15px] font-semibold text-ui-ink cursor-pointer',
+    sectionHeader: 'flex min-w-0 flex-1 items-center gap-[8px] rounded-[8px] border-0 bg-transparent p-0 text-left text-[15px] font-semibold text-ui-ink cursor-pointer',
     list: 'space-y-[8px]',
     tag: 'rounded-[12px] border border-solid border-[#e1e8d8] bg-[#fffffbd9] overflow-hidden',
     tagHeader: 'flex min-h-[52px] items-center gap-[10px] px-[14px] py-[10px]',
@@ -48,6 +48,7 @@ export default function TagManagementPanel({ doc, act, onLocateEntity }: { doc: 
   const [color, setColor] = useState<TagColorChoice>('transparent')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [editing, setEditing] = useState<TagRecord | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const tags = useMemo(() => active(doc)
     .filter((entity): entity is TagRecord => entity.kind === 'tag')
@@ -76,11 +77,14 @@ export default function TagManagementPanel({ doc, act, onLocateEntity }: { doc: 
   }
 
   return <section className={panelStyles.section()} aria-label="标签管理内容">
-    <button type="button" className={panelStyles.sectionHeader()} aria-expanded={!collapsed} aria-label={`${collapsed ? '展开' : '收起'}标签管理`} onClick={() => setCollapsed(value => !value)}>
-      {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-      <Tag size={16} />
-      <span>标签管理</span>
-    </button>
+    <div className="flex items-center gap-[10px]">
+      <button type="button" className={panelStyles.sectionHeader()} aria-expanded={!collapsed} aria-label={`${collapsed ? '展开' : '收起'}标签管理`} onClick={() => setCollapsed(value => !value)}>
+        {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+        <Tag size={16} />
+        <span>标签管理</span>
+      </button>
+      <Button tone="primary" size="custom" className="shrink-0 rounded-[8px] px-[10px] py-[7px] text-[11px]" onClick={() => setCreating(true)}><Plus size={14} />新建标签</Button>
+    </div>
     {!collapsed && <>
     <div className={panelStyles.toolbar()}>
       <div className={panelStyles.search()}>
@@ -136,5 +140,6 @@ export default function TagManagementPanel({ doc, act, onLocateEntity }: { doc: 
 
     {editing && <TagEditModal tag={editing} doc={doc} act={act} close={() => setEditing(null)} />}
     </>}
+    {creating && <TagCreateModal doc={doc} act={act} close={() => setCreating(false)} />}
   </section>
 }

@@ -253,3 +253,24 @@ test('标签管理搜索颜色与闲置标签', async () => {
   await page.getByRole('dialog', { name: '永久删除标签' }).getByRole('button', { name: '永久删除' }).click()
   await expect(page.getByRole('button', { name: '展开标签 已编辑' })).toBeHidden()
 })
+
+test('设置页标签管理筛选分两行并新建标签', async () => {
+  const { page } = await openSeededClient()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+
+  const search = page.getByLabel('搜索标签名称')
+  const colors = page.getByRole('radiogroup', { name: '标签颜色' })
+  const searchBox = await search.boundingBox()
+  const colorsBox = await colors.boundingBox()
+  expect(searchBox).not.toBeNull()
+  expect(colorsBox).not.toBeNull()
+  expect(colorsBox!.y).toBeGreaterThanOrEqual(searchBox!.y + searchBox!.height)
+
+  await page.getByRole('button', { name: '新建标签' }).click()
+  const editor = page.getByRole('dialog', { name: '新建标签' })
+  await editor.getByRole('textbox', { name: '名称' }).fill('新标签')
+  await editor.getByRole('radio', { name: '橙色' }).click()
+  await editor.getByRole('button', { name: '创建' }).click()
+
+  await expect(page.getByRole('button', { name: '展开标签 新标签' })).toBeVisible()
+})

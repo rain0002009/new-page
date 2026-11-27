@@ -306,6 +306,30 @@ export function TagEditModal({ tag, doc, act, close }: { tag: TagRecord; doc: Do
   </Modal>}</>
 }
 
+export function TagCreateModal({ doc, act, close }: { doc: Document; act: TagAct; close: () => void }) {
+  const [name, setName] = useState('')
+  const [color, setColor] = useState<TagColorChoice>('grey')
+  const [busy, setBusy] = useState(false)
+  const nameLength = tagNameLength(name.trim())
+  const duplicate = activeTags(doc).some(tag => tag.title === name.trim() && tag.color === color)
+
+  async function save() {
+    if (!name.trim() || nameLength > 20 || duplicate) return
+    setBusy(true)
+    if (await act({ type: 'add-tag', id: crypto.randomUUID(), name, color: color as TagColor })) close()
+    setBusy(false)
+  }
+
+  return <Modal title="新建标签" close={close}>
+    <label className="block text-[11px] font-semibold text-form-label">名称
+      <input className="mt-[7px] w-full rounded-[8px] border border-solid border-form-line bg-form-surface px-[11px] py-[9px] text-[12px] outline-none focus:border-form-focus" value={name} onChange={e => { if (tagNameLength(e.target.value) <= 20) setName(e.target.value) }} autoFocus />
+    </label>
+    <div className="mt-[16px]"><span className="block text-[11px] font-semibold text-form-label">颜色</span><ColorPicker value={color} onChange={setColor} allowTransparent={false} /></div>
+    {duplicate && <p className="mt-[8px] text-[9px] leading-[1.5] text-[#a56b55]">同名同色标签已存在。</p>}
+    <div className="mt-[24px] flex justify-end gap-[8px]"><Button onClick={close}>取消</Button><Button tone="primary" disabled={busy || !name.trim() || nameLength > 20 || duplicate} onClick={() => void save()}>{busy ? '创建中…' : '创建'}</Button></div>
+  </Modal>
+}
+
 export function TagActionMenu({
   doc,
   target,

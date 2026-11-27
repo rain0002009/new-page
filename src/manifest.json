@@ -3,7 +3,7 @@
   "manifest_version": 3,
   "version": "1.5.0",
   "name": "页墟 · Page Garden",
-  "description": "以空间整理收藏，用 Todo 标记待办，自动保存到夸克网盘。",
+  "description": "以空间整理收藏，用 Todo 标记待办，本地优先，支持夸克网盘与 WebDAV 同步。",
   "permissions": [
     "storage",
     "tabs",
