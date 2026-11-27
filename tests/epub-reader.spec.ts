@@ -52,11 +52,11 @@ function makeTestEpub(options?: { title?: string; longChapter?: boolean }) {
       `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章 初见</h1><img src="../Images/cover.png" alt="封面"/>${longPara}</body></html>`,
     ),
     'OEBPS/Text/ch2.xhtml': strToU8(
-      `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="part2">第二章 深入</h1>${longPara}</body></html>`,
+      `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="part2">第二章 深入</h1>${longPara}<h2 id="sub2">2.2 深入后半</h2>${longPara}</body></html>`,
     ),
     'OEBPS/Images/cover.png': pngBytes,
     'OEBPS/nav.xhtml': strToU8(
-      `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="Text/ch1.xhtml">第一章 初见</a></li><li><a href="Text/ch2.xhtml#part2">第二章 深入</a></li></ol></nav></body></html>`,
+      `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="Text/ch1.xhtml">第一章 初见</a></li><li><a href="Text/ch2.xhtml#part2">第二章 深入</a><ol><li><a href="Text/ch2.xhtml#part2">2.1 深入前半</a></li><li><a href="Text/ch2.xhtml#sub2">2.2 深入后半</a></li></ol></li></ol></nav></body></html>`,
     ),
   })
 }
@@ -225,7 +225,7 @@ test('拖入本地 EPUB 弹窗记住选择、设置页修改、卡片样式标�
   expect(remainingKeys).toHaveLength(1)
 })
 
-test('单击进入无流体动画左右分栏阅读页、调整字号字重行高、目录跳转与进度同步回卡片', async () => {
+test('单击进入无流体动画左右分栏阅读页、多级目录折叠与子章跳转、无滚动条分页滚轮翻页及进度写回', async () => {
   const { context, page } = await openExtensionClient()
   const epub = makeTestEpub({ title: '风之名', longChapter: true })
 
@@ -242,10 +242,21 @@ test('单击进入无流体动画左右分栏阅读页、调整字号字重行�
   ])
   await readerPage.waitForLoadState('domcontentloaded')
 
-  // 无流体动画 canvas
+  // 无流体动画 canvas，且整页无滚动条、右侧占满剩余宽度
   await expect(readerPage.locator('canvas')).toHaveCount(0)
-  await expect(readerPage.getByRole('complementary', { name: '阅读器侧栏' })).toBeVisible()
-  await expect(readerPage.getByRole('main', { name: '阅读主区域' })).toBeVisible()
+  const sidebar = readerPage.getByRole('complementary', { name: '阅读器侧栏' })
+  const mainArea = readerPage.getByRole('main', { name: '阅读主区域' })
+  await expect(sidebar).toBeVisible()
+  await expect(mainArea).toBeVisible()
+
+  const layoutMetrics = await readerPage.evaluate(() => ({
+    docScrollH: document.documentElement.scrollHeight,
+    winH: window.innerHeight,
+    mainRight: document.querySelector('main')!.getBoundingClientRect().right,
+    winW: window.innerWidth,
+  }))
+  expect(layoutMetrics.docScrollH).toBeLessThanOrEqual(layoutMetrics.winH)
+  expect(layoutMetrics.mainRight).toBeGreaterThanOrEqual(layoutMetrics.winW - 2)
 
   // 内嵌图片正常还原渲染
   const img = readerPage.locator('[data-reader-body] img')
@@ -269,16 +280,36 @@ test('单击进入无流体动画左右分栏阅读页、调整字号字重行�
   expect(bodyStyles.fontWeight).toBe('600')
   expect(parseFloat(bodyStyles.lineHeight)).toBeCloseTo(44, 0)
 
-  // 点击目录跳转第二章并滚动到底部
-  await readerPage.getByRole('navigation', { name: '章节目录' }).getByRole('button', { name: '第二章 深入' }).click()
-  await expect(readerPage.locator('[data-reader-body]')).toContainText('第二章 深入')
-  await readerPage.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-  await expect(readerPage.getByLabel('阅读进度')).toContainText('100%')
+  // 滚轮向下触发翻页，并简易显示当前页码
+  const pageIndicator = readerPage.getByLabel('页码')
+  await expect(pageIndicator).toContainText('第 1 /')
+  const mainBox = (await mainArea.boundingBox())!
+  await readerPage.mouse.move(mainBox.x + mainBox.width / 2, mainBox.y + mainBox.height / 2)
+  await readerPage.mouse.wheel(0, 240)
+  await expect(pageIndicator).toContainText('第 2 /')
 
-  // 等待防抖写回并验证侧栏折叠 + 重新打开持久保留排版设置与进度
+  // 点击子章节「2.2 深入后半」：可精准跳转且仅该子目录项激活（不激活整棵子树）
+  const toc = readerPage.getByRole('navigation', { name: '章节目录' })
+  await toc.getByRole('button', { name: '2.2 深入后半' }).click()
+  await expect(toc.locator('[aria-current="location"]')).toHaveCount(1)
+  await expect(toc.locator('[aria-current="location"]')).toHaveText('2.2 深入后半')
+
+  // 多级目录支持折叠与展开
+  await toc.getByRole('button', { name: '收起 第二章 深入' }).click()
+  await expect(toc.getByRole('button', { name: '2.2 深入后半' })).toBeHidden()
+  await toc.getByRole('button', { name: '展开 第二章 深入' }).click()
+  await expect(toc.getByRole('button', { name: '2.2 深入后半' })).toBeVisible()
+
+  // 翻页到全书末尾，进度变为 100% 并同步回卡片
+  while (!(await readerPage.getByRole('button', { name: '下一页' }).isDisabled())) {
+    await readerPage.getByRole('button', { name: '下一页' }).click()
+  }
+  await expect(readerPage.getByLabel('阅读进度')).toContainText('100%')
   await expect(card).toContainText('100%', { timeout: 5000 })
+
+  // 侧栏可收起，重开阅读页保持排版设置与章节进度
   await readerPage.getByRole('button', { name: '收起侧栏' }).click()
-  await expect(readerPage.getByRole('complementary', { name: '阅读器侧栏' })).toBeHidden()
+  await expect(sidebar).toBeHidden()
   await readerPage.close()
 
   const [reopened] = await Promise.all([

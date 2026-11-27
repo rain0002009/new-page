@@ -57,7 +57,7 @@ function buildSampleEpub(options?: { title?: string; author?: string; useNav?: b
           <nav epub:type="toc">
             <ol>
               <li><a href="Text/chapter1.xhtml">第一章 启程</a></li>
-              <li><a href="Text/chapter2.xhtml#sec2">第二章 沙海</a>
+              <li><a href="Text/CHAPTER2.xhtml#sec2">第二章 沙海</a>
                 <ol><li><a href="Text/chapter2.xhtml#sub">2.1 沙虫</a></li></ol>
               </li>
             </ol>
@@ -183,6 +183,7 @@ describe('EPUB 解析与阅读进度计算', () => {
   test('正确解析 EPUB 3 Nav 嵌套目录与无标题回退', () => {
     const parsed = parseEpub(buildSampleEpub({ title: '   ', useNav: true }), 'my-book.epub')
     expect(parsed.title).toBe('my-book')
+    expect(parsed.toc[1].chapterIndex).toBe(1)
     expect(parsed.toc[1].children).toHaveLength(1)
     expect(parsed.toc[1].children[0].title).toBe('2.1 沙虫')
     expect(parsed.toc[1].children[0].chapterIndex).toBe(1)

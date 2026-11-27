@@ -116,7 +116,11 @@ function findMatchingTagEnd(source: string, tagName: string, searchFrom: number)
   return -1
 }
 
-function parseNcxNavPoints(xml: string, ncxHref: string, chapterByPath: Map<string, number>, counter: { value: number }): EpubTocItem[] {
+function lookupChapterIndex(chapterByPath: Map<string, number>, chapterByLowerPath: Map<string, number>, path: string): number {
+  return chapterByPath.get(path) ?? chapterByLowerPath.get(path.toLowerCase()) ?? 0
+}
+
+function parseNcxNavPoints(xml: string, ncxHref: string, chapterByPath: Map<string, number>, chapterByLowerPath: Map<string, number>, counter: { value: number }): EpubTocItem[] {
   const items: EpubTocItem[] = []
   const openRe = /<navPoint\b([^>]*)>/gi
   let pos = 0
@@ -134,8 +138,8 @@ function parseNcxNavPoints(xml: string, ncxHref: string, chapterByPath: Map<stri
     const contentMatch = /<content\b([^>]*)\/?>/i.exec(ownHead)
     const src = contentMatch ? parseAttributes(contentMatch[1]).src ?? '' : ''
     const resolved = src ? resolveEpubHref(ncxHref, src) : { path: '' }
-    const chapterIndex = chapterByPath.get(resolved.path) ?? 0
-    const children = firstNested >= 0 ? parseNcxNavPoints(inner.slice(firstNested), ncxHref, chapterByPath, counter) : []
+    const chapterIndex = lookupChapterIndex(chapterByPath, chapterByLowerPath, resolved.path)
+    const children = firstNested >= 0 ? parseNcxNavPoints(inner.slice(firstNested), ncxHref, chapterByPath, chapterByLowerPath, counter) : []
     items.push({
       id: `toc-${counter.value++}`,
       title: labelMatch ? stripTags(labelMatch[1]) || '无标题章节' : '无标题章节',
@@ -149,7 +153,7 @@ function parseNcxNavPoints(xml: string, ncxHref: string, chapterByPath: Map<stri
   return items
 }
 
-function parseNavList(olInner: string, navHref: string, chapterByPath: Map<string, number>, counter: { value: number }): EpubTocItem[] {
+function parseNavList(olInner: string, navHref: string, chapterByPath: Map<string, number>, chapterByLowerPath: Map<string, number>, counter: { value: number }): EpubTocItem[] {
   const items: EpubTocItem[] = []
   const liRe = /<li\b[^>]*>/gi
   let pos = 0
@@ -170,7 +174,7 @@ function parseNavList(olInner: string, navHref: string, chapterByPath: Map<strin
       if (subTagMatch) {
         const olStart = subOlStart + subTagMatch.index + subTagMatch[0].length
         const olEnd = findMatchingTagEnd(inner, 'ol', olStart)
-        if (olEnd >= 0) children = parseNavList(inner.slice(olStart, olEnd), navHref, chapterByPath, counter)
+        if (olEnd >= 0) children = parseNavList(inner.slice(olStart, olEnd), navHref, chapterByPath, chapterByLowerPath, counter)
       }
     }
     if (anchorMatch) {
@@ -181,18 +185,30 @@ function parseNavList(olInner: string, navHref: string, chapterByPath: Map<strin
         title: stripTags(anchorMatch[2]) || '无标题章节',
         href: resolved.path,
         fragment: resolved.fragment,
-        chapterIndex: chapterByPath.get(resolved.path) ?? 0,
+        chapterIndex: lookupChapterIndex(chapterByPath, chapterByLowerPath, resolved.path),
         children,
       })
     } else if (children.length) {
-      items.push(...children)
+      const headingText = stripTags(ownPart)
+      if (headingText) {
+        items.push({
+          id: `toc-${counter.value++}`,
+          title: headingText,
+          href: children[0].href,
+          fragment: children[0].fragment,
+          chapterIndex: children[0].chapterIndex,
+          children,
+        })
+      } else {
+        items.push(...children)
+      }
     }
     pos = bodyEnd + '</li>'.length
   }
   return items
 }
 
-function parseNavXhtml(xhtml: string, navHref: string, chapterByPath: Map<string, number>): EpubTocItem[] {
+function parseNavXhtml(xhtml: string, navHref: string, chapterByPath: Map<string, number>, chapterByLowerPath: Map<string, number>): EpubTocItem[] {
   const navRe = /<nav\b([^>]*)>/gi
   let selectedInner = ''
   let fallbackInner = ''
@@ -216,7 +232,7 @@ function parseNavXhtml(xhtml: string, navHref: string, chapterByPath: Map<string
   const olStart = olMatch.index + olMatch[0].length
   const olEnd = findMatchingTagEnd(target, 'ol', olStart)
   if (olEnd < 0) return []
-  return parseNavList(target.slice(olStart, olEnd), navHref, chapterByPath, { value: 1 })
+  return parseNavList(target.slice(olStart, olEnd), navHref, chapterByPath, chapterByLowerPath, { value: 1 })
 }
 
 function applyTocTitlesToChapters(toc: EpubTocItem[], chapters: EpubChapter[]) {
@@ -293,6 +309,7 @@ export function parseEpub(bytes: Uint8Array, fallbackFileName = '未命名电子
   const spineBody = spineMatch?.[2] ?? ''
   const chapters: EpubChapter[] = []
   const chapterByPath = new Map<string, number>()
+  const chapterByLowerPath = new Map<string, number>()
 
   const itemrefRe = /<itemref\b([^>]*)\/?>/gi
   let refMatch: RegExpExecArray | null
@@ -304,6 +321,7 @@ export function parseEpub(bytes: Uint8Array, fallbackFileName = '未命名电子
     if (!content) continue
     const index = chapters.length
     chapterByPath.set(item.href, index)
+    chapterByLowerPath.set(item.href.toLowerCase(), index)
     chapters.push({
       index,
       id: idref,
@@ -320,14 +338,14 @@ export function parseEpub(bytes: Uint8Array, fallbackFileName = '未命名电子
   const navItem = [...manifest.values()].find(entry => /\bnav\b/i.test(entry.properties))
   if (navItem) {
     const navXml = readText(navItem.href)
-    if (navXml) toc = parseNavXhtml(navXml, navItem.href, chapterByPath)
+    if (navXml) toc = parseNavXhtml(navXml, navItem.href, chapterByPath, chapterByLowerPath)
   }
   if (!toc.length) {
     const ncxItem = (spineAttrs.toc ? manifest.get(spineAttrs.toc) : undefined)
       ?? [...manifest.values()].find(entry => entry.mediaType === 'application/x-dtbncx+xml')
     if (ncxItem) {
       const ncxXml = readText(ncxItem.href)
-      if (ncxXml) toc = parseNcxNavPoints(ncxXml, ncxItem.href, chapterByPath, { value: 1 })
+      if (ncxXml) toc = parseNcxNavPoints(ncxXml, ncxItem.href, chapterByPath, chapterByLowerPath, { value: 1 })
     }
   }
   if (!toc.length) {

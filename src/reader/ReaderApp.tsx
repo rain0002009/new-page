@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, SlidersHorizontal, ListTree } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ListTree, PanelLeftClose, PanelLeftOpen, SlidersHorizontal } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { computeReadingProgress, parseEpub, type EpubTocItem, type ParsedEpub } from '../core/epub'
 import { defaultEpubReaderSettings, readEpubReaderSettings, saveEpubReaderSettings, type EpubFontWeight, type EpubReaderSettings } from '../core/epub-preferences'
@@ -14,16 +14,16 @@ import { renderChapterHtml } from './chapter-renderer'
 
 const readerStyles = tv({
   slots: {
-    shell: 'min-h-dvh flex flex-col bg-ui-canvas text-ui-text',
-    topbar: 'sticky top-0 z-20 flex items-center justify-between gap-[12px] px-[20px] py-[12px] bg-[#f7f8efeb] backdrop-blur-[12px] border-b border-b-solid border-ui-line [@media(max-width:650px)]:px-[14px]',
-    layout: 'flex flex-1 min-h-0 max-w-[1520px] w-full mx-auto gap-[24px] px-[24px] py-[20px] [@media(max-width:850px)]:flex-col [@media(max-width:650px)]:px-[14px]',
-    sidebar: 'w-[290px] shrink-0 flex flex-col gap-[16px] [@media(max-width:850px)]:w-full',
-    panel: 'rounded-[16px] bg-ui-surface border border-solid border-white p-[16px] shadow-[0_6px_24px_#4c683408]',
-    panelTitle: 'flex items-center gap-[7px] text-[13px] font-semibold text-[#384730] mb-[12px]',
-    main: 'flex-1 min-w-0 flex flex-col gap-[16px]',
-    paper: 'rounded-[22px] bg-ui-surface border border-solid border-white px-[40px] py-[34px] shadow-[0_10px_35px_#4c68340a] [@media(max-width:650px)]:px-[18px] [@media(max-width:650px)]:py-[20px]',
-    content: 'mx-auto max-w-[760px] text-[#2f392a] [overflow-wrap:anywhere] [&_img]:max-w-full [&_img]:h-auto [&_img]:mx-auto [&_img]:my-[16px] [&_img]:block [&_img]:rounded-[8px] [&_svg]:max-w-full [&_svg]:h-auto [&_h1]:text-[1.6em] [&_h1]:leading-[1.35] [&_h1]:mt-[0.4em] [&_h1]:mb-[0.7em] [&_h2]:text-[1.35em] [&_h2]:leading-[1.4] [&_h2]:mt-[1.1em] [&_h2]:mb-[0.55em] [&_h3]:text-[1.15em] [&_h3]:mt-[1em] [&_h3]:mb-[0.45em] [&_p]:my-[0.75em] [&_blockquote]:border-l-[3px] [&_blockquote]:border-l-solid [&_blockquote]:border-[#b2c495] [&_blockquote]:pl-[14px] [&_blockquote]:text-[#5a6652] [&_a]:text-[#4e7238] [&_a]:underline [&_pre]:overflow-x-auto [&_pre]:rounded-[10px] [&_pre]:bg-[#f2f5eb] [&_pre]:p-[12px]',
-    navBar: 'flex items-center justify-between gap-[12px] pt-[12px]',
+    shell: 'h-dvh w-full overflow-hidden flex bg-ui-canvas text-ui-text [@media(max-width:850px)]:flex-col',
+    sidebar: 'w-[300px] shrink-0 h-full flex flex-col gap-[14px] p-[16px] border-r border-r-solid border-ui-line bg-[#f2f5ea] overflow-hidden [@media(max-width:850px)]:w-full [@media(max-width:850px)]:h-auto [@media(max-width:850px)]:max-h-[42dvh] [@media(max-width:850px)]:border-r-0 [@media(max-width:850px)]:border-b [@media(max-width:850px)]:border-b-solid [@media(max-width:850px)]:border-ui-line',
+    panel: 'rounded-[14px] bg-ui-surface border border-solid border-white p-[14px] shadow-[0_4px_18px_#4c683408]',
+    panelTitle: 'flex items-center gap-[7px] text-[13px] font-semibold text-[#384730] mb-[10px]',
+    main: 'flex-1 min-w-0 h-full flex flex-col overflow-hidden px-[24px] py-[16px] gap-[12px] [@media(max-width:650px)]:px-[12px] [@media(max-width:650px)]:py-[10px]',
+    header: 'shrink-0 flex items-center justify-between gap-[12px] min-h-[34px]',
+    paper: 'flex-1 min-h-0 flex flex-col rounded-[20px] bg-ui-surface border border-solid border-white px-[36px] py-[28px] shadow-[0_10px_35px_#4c68340a] overflow-hidden [@media(max-width:650px)]:px-[18px] [@media(max-width:650px)]:py-[18px]',
+    viewport: 'flex-1 min-h-0 w-full overflow-hidden relative',
+    content: 'text-[#2f392a] [overflow-wrap:anywhere] [&_img]:max-w-full [&_img]:max-h-[var(--reader-page-h)] [&_img]:w-auto [&_img]:h-auto [&_img]:object-contain [&_img]:mx-auto [&_img]:my-[12px] [&_img]:block [&_img]:rounded-[8px] [&_img]:break-inside-avoid [&_svg]:max-w-full [&_svg]:max-h-[var(--reader-page-h)] [&_svg]:h-auto [&_h1]:text-[1.5em] [&_h1]:leading-[1.35] [&_h1]:mt-[0.2em] [&_h1]:mb-[0.65em] [&_h1]:break-after-avoid [&_h2]:text-[1.3em] [&_h2]:leading-[1.4] [&_h2]:mt-[0.9em] [&_h2]:mb-[0.5em] [&_h2]:break-after-avoid [&_h3]:text-[1.12em] [&_h3]:mt-[0.8em] [&_h3]:mb-[0.4em] [&_h3]:break-after-avoid [&_p]:my-[0.65em] [&_blockquote]:border-l-[3px] [&_blockquote]:border-l-solid [&_blockquote]:border-[#b2c495] [&_blockquote]:pl-[14px] [&_blockquote]:text-[#5a6652] [&_blockquote]:break-inside-avoid [&_a]:text-[#4e7238] [&_a]:underline [&_pre]:overflow-hidden [&_pre]:rounded-[10px] [&_pre]:bg-[#f2f5eb] [&_pre]:p-[10px] [&_pre]:break-inside-avoid',
+    footer: 'shrink-0 flex items-center justify-between gap-[12px]',
   },
 })()
 
@@ -38,7 +38,7 @@ const weightButton = tv({
 })
 
 const tocButton = tv({
-  base: 'block w-full text-left border-0 rounded-[8px] px-[8px] py-[6px] text-[12px] leading-[1.45] cursor-pointer transition-colors [overflow-wrap:anywhere]',
+  base: 'flex-1 min-w-0 text-left border-0 rounded-[7px] px-[7px] py-[5px] text-[12px] leading-[1.45] cursor-pointer transition-colors [overflow-wrap:anywhere]',
   variants: {
     active: {
       true: 'bg-[#e4ecf2] text-[#2e485d] font-semibold',
@@ -54,6 +54,38 @@ const fontWeights: { value: EpubFontWeight; label: string }[] = [
   { value: 700, label: '粗体' },
 ]
 
+function collectExpandableIds(items: EpubTocItem[]): string[] {
+  const ids: string[] = []
+  const visit = (list: EpubTocItem[]) => {
+    for (const item of list) {
+      if (item.children.length) {
+        ids.push(item.id)
+        visit(item.children)
+      }
+    }
+  }
+  visit(items)
+  return ids
+}
+
+function findFirstTocIdForChapter(items: EpubTocItem[], chapterIndex: number): string | undefined {
+  for (const item of items) {
+    if (item.chapterIndex === chapterIndex) return item.id
+    const nested = findFirstTocIdForChapter(item.children, chapterIndex)
+    if (nested) return nested
+  }
+  return undefined
+}
+
+function findAncestorIds(items: EpubTocItem[], targetId: string, path: string[] = []): string[] | null {
+  for (const item of items) {
+    if (item.id === targetId) return path
+    const nested = findAncestorIds(item.children, targetId, [...path, item.id])
+    if (nested) return nested
+  }
+  return null
+}
+
 export default function ReaderApp() {
   const params = new URLSearchParams(location.search)
   const bookId = params.get('book') ?? ''
@@ -66,24 +98,31 @@ export default function ReaderApp() {
   const [available, setAvailable] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [chapterIndex, setChapterIndex] = useState(0)
-  const [navSeq, setNavSeq] = useState(0)
+  const [pageIndex, setPageIndex] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [activeTocId, setActiveTocId] = useState<string | undefined>(undefined)
+  const [expandedTocIds, setExpandedTocIds] = useState<Set<string>>(() => new Set())
   const [progress, setProgress] = useState(0)
   const [settings, setSettings] = useState<EpubReaderSettings>(defaultEpubReaderSettings)
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
 
-  const articleRef = useRef<HTMLDivElement | null>(null)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const flowingRef = useRef<HTMLDivElement | null>(null)
   const pendingFragment = useRef<string | undefined>(undefined)
+  const pendingLastPage = useRef(false)
   const initialRestoreRatio = useRef<number | null>(null)
+  const preserveRatioOnLayout = useRef<number | null>(null)
+  const navLockRef = useRef(0)
   const saveTimer = useRef<number | undefined>(undefined)
   const availableRef = useRef(true)
-  const parsedRef = useRef<ParsedEpub | null>(null)
   const latestPosition = useRef<{ chapterIndex: number; scrollRatio: number; progress: number }>({
     chapterIndex: 0,
     scrollRatio: 0,
     progress: 0,
   })
+  const [jumpSeq, setJumpSeq] = useState(0)
 
   availableRef.current = available
-  parsedRef.current = parsed
 
   useDocumentTitle(book?.title ?? parsed?.title)
 
@@ -115,7 +154,7 @@ export default function ReaderApp() {
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = undefined
       void persistProgress(nextChapter, nextRatio, nextProgress)
-    }, 350)
+    }, 300)
   }, [persistProgress])
 
   useEffect(() => {
@@ -159,6 +198,8 @@ export default function ReaderApp() {
           progress: entity.progress,
         }
         setParsed(epub)
+        setExpandedTocIds(new Set(collectExpandableIds(epub.toc)))
+        setActiveTocId(findFirstTocIdForChapter(epub.toc, restoredChapter))
         setChapterIndex(restoredChapter)
         setProgress(entity.progress)
         setAvailable(true)
@@ -205,6 +246,22 @@ export default function ReaderApp() {
     }
   }, [bookId, sourceId, persistProgress])
 
+  useEffect(() => {
+    const node = viewportRef.current
+    if (!node) return
+    const measure = () => {
+      const width = Math.floor(node.clientWidth)
+      const height = Math.floor(node.clientHeight)
+      if (width > 0 && height > 0) {
+        setViewportSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }))
+      }
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [loading, available, sidebarOpen])
+
   const currentChapter = parsed?.chapters[chapterIndex]
   const rendered = useMemo(() => {
     if (!parsed || !currentChapter) return { html: '', objectUrls: [] as string[] }
@@ -217,61 +274,158 @@ export default function ReaderApp() {
     }
   }, [rendered])
 
-  useEffect(() => {
-    if (!parsed || !available) return
-    const raf = requestAnimationFrame(() => {
+  const colsPerPage = viewportSize.width >= 820 ? 2 : 1
+  const colGap = colsPerPage === 2 ? 48 : 32
+  const colWidth = viewportSize.width > 0
+    ? Math.max(200, colsPerPage === 2 ? Math.floor((viewportSize.width - colGap) / 2) : viewportSize.width)
+    : 600
+  const pageStride = colsPerPage * (colWidth + colGap)
+
+  const syncPageState = useCallback((nextPage: number, nextTotalPages: number) => {
+    if (!parsed) return
+    const clampedPage = Math.max(0, Math.min(nextTotalPages - 1, nextPage))
+    setPageIndex(clampedPage)
+    const ratio = nextTotalPages <= 1 ? 1 : clampedPage / (nextTotalPages - 1)
+    const nextProgress = computeReadingProgress(parsed.chapters, chapterIndex, ratio)
+    scheduleSave(chapterIndex, ratio, nextProgress)
+  }, [parsed, chapterIndex, scheduleSave])
+
+  useLayoutEffect(() => {
+    const el = flowingRef.current
+    if (!el || !parsed || !available || viewportSize.width <= 0 || viewportSize.height <= 0) return
+
+    const measurePages = () => {
+      const totalColumns = Math.max(1, Math.round((el.scrollWidth + colGap) / (colWidth + colGap)))
+      const pages = Math.max(1, Math.ceil(totalColumns / colsPerPage))
+      setTotalPages(pages)
+
       const fragment = pendingFragment.current
       pendingFragment.current = undefined
-      const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
-
       if (fragment) {
-        const target = articleRef.current?.querySelector<HTMLElement>(`#${CSS.escape(fragment)}`)
-        if (target) target.scrollIntoView({ block: 'start' })
-        else window.scrollTo({ top: 0, behavior: 'auto' })
-      } else if (initialRestoreRatio.current !== null) {
+        const target = el.querySelector<HTMLElement>(`#${CSS.escape(fragment)}`)
+          ?? el.querySelector<HTMLElement>(`[name="${CSS.escape(fragment)}"]`)
+        if (target) {
+          const offsetX = target.getBoundingClientRect().left - el.getBoundingClientRect().left
+          const colIndex = Math.max(0, Math.floor((offsetX + 4) / (colWidth + colGap)))
+          const targetPage = Math.min(pages - 1, Math.floor(colIndex / colsPerPage))
+          syncPageState(targetPage, pages)
+          return
+        }
+      }
+
+      if (pendingLastPage.current) {
+        pendingLastPage.current = false
+        syncPageState(pages - 1, pages)
+        return
+      }
+
+      if (initialRestoreRatio.current !== null) {
         const ratio = initialRestoreRatio.current
         initialRestoreRatio.current = null
-        window.scrollTo({ top: Math.round(maxScroll * ratio), behavior: 'auto' })
-        if (maxScroll <= 0) {
+        const targetPage = pages <= 1 ? 0 : Math.min(pages - 1, Math.round(ratio * (pages - 1)))
+        setPageIndex(targetPage)
+        if (pages <= 1) {
           scheduleSave(chapterIndex, 1, computeReadingProgress(parsed.chapters, chapterIndex, 1))
         }
         return
-      } else {
-        window.scrollTo({ top: 0, behavior: 'auto' })
       }
 
-      if (navSeq > 0 || maxScroll <= 0) {
-        const ratio = maxScroll <= 0 ? 1 : Math.max(0, Math.min(1, window.scrollY / maxScroll))
-        scheduleSave(chapterIndex, ratio, computeReadingProgress(parsed.chapters, chapterIndex, ratio))
+      if (preserveRatioOnLayout.current !== null) {
+        const ratio = preserveRatioOnLayout.current
+        preserveRatioOnLayout.current = null
+        const targetPage = pages <= 1 ? 0 : Math.min(pages - 1, Math.round(ratio * (pages - 1)))
+        setPageIndex(targetPage)
+        return
       }
-    })
+
+      setPageIndex(prev => {
+        const clamped = Math.max(0, Math.min(pages - 1, prev))
+        if (pages <= 1) {
+          scheduleSave(chapterIndex, 1, computeReadingProgress(parsed.chapters, chapterIndex, 1))
+        }
+        return clamped
+      })
+    }
+
+    const raf = requestAnimationFrame(measurePages)
     return () => cancelAnimationFrame(raf)
-  }, [chapterIndex, navSeq, parsed, available, rendered.html, scheduleSave])
+  }, [rendered.html, viewportSize.width, viewportSize.height, colWidth, colGap, colsPerPage, settings.fontSize, settings.fontWeight, settings.lineHeight, jumpSeq, parsed, available, chapterIndex, scheduleSave, syncPageState])
+
+  const openChapter = useCallback((targetIndex: number, options?: { fragment?: string; lastPage?: boolean; tocId?: string }) => {
+    if (!parsed) return
+    const clamped = Math.max(0, Math.min(parsed.chapters.length - 1, targetIndex))
+    pendingFragment.current = options?.fragment
+    pendingLastPage.current = options?.lastPage ?? false
+    initialRestoreRatio.current = null
+    preserveRatioOnLayout.current = null
+    const resolvedTocId = options?.tocId ?? findFirstTocIdForChapter(parsed.toc, clamped)
+    setActiveTocId(resolvedTocId)
+    if (resolvedTocId) {
+      const ancestors = findAncestorIds(parsed.toc, resolvedTocId)
+      if (ancestors?.length) {
+        setExpandedTocIds(prev => {
+          const next = new Set(prev)
+          for (const id of ancestors) next.add(id)
+          return next
+        })
+      }
+    }
+    if (clamped !== chapterIndex) {
+      setPageIndex(0)
+      setChapterIndex(clamped)
+      if (!options?.fragment && !options?.lastPage) {
+        scheduleSave(clamped, 0, computeReadingProgress(parsed.chapters, clamped, 0))
+      }
+    } else if (!options?.fragment) {
+      syncPageState(options?.lastPage ? totalPages - 1 : 0, totalPages)
+    }
+    setJumpSeq(seq => seq + 1)
+  }, [parsed, chapterIndex, totalPages, scheduleSave, syncPageState])
+
+  const turnPage = useCallback((delta: 1 | -1) => {
+    if (!parsed || !available) return
+    if (delta > 0) {
+      if (pageIndex < totalPages - 1) {
+        syncPageState(pageIndex + 1, totalPages)
+      } else if (chapterIndex < parsed.chapters.length - 1) {
+        openChapter(chapterIndex + 1)
+      }
+    } else {
+      if (pageIndex > 0) {
+        syncPageState(pageIndex - 1, totalPages)
+      } else if (chapterIndex > 0) {
+        openChapter(chapterIndex - 1, { lastPage: true })
+      }
+    }
+  }, [parsed, available, pageIndex, totalPages, chapterIndex, syncPageState, openChapter])
 
   useEffect(() => {
     if (!parsed || !available) return
-    const onScroll = () => {
-      const epub = parsedRef.current
-      if (!epub || !availableRef.current) return
-      const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
-      const ratio = maxScroll <= 0 ? 1 : Math.max(0, Math.min(1, window.scrollY / maxScroll))
-      const nextProgress = computeReadingProgress(epub.chapters, chapterIndex, ratio)
-      scheduleSave(chapterIndex, ratio, nextProgress)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === ' ') {
+        event.preventDefault()
+        turnPage(1)
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'PageUp') {
+        event.preventDefault()
+        turnPage(-1)
+      }
     }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [parsed, available, chapterIndex, scheduleSave])
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [parsed, available, turnPage])
 
-  function goToChapter(targetIndex: number, fragment?: string) {
-    if (!parsed) return
-    const clamped = Math.max(0, Math.min(parsed.chapters.length - 1, targetIndex))
-    pendingFragment.current = fragment
-    initialRestoreRatio.current = null
-    setChapterIndex(clamped)
-    setNavSeq(seq => seq + 1)
+  function handleWheel(event: React.WheelEvent<HTMLElement>) {
+    if (Math.abs(event.deltaY) < 8 && Math.abs(event.deltaX) < 8) return
+    const now = Date.now()
+    if (now - navLockRef.current < 160) return
+    navLockRef.current = now
+    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+    turnPage(delta > 0 ? 1 : -1)
   }
 
   function updateSettings(patch: Partial<EpubReaderSettings>) {
+    preserveRatioOnLayout.current = totalPages <= 1 ? 0 : pageIndex / (totalPages - 1)
     const next = { ...settings, ...patch }
     setSettings(next)
     void saveEpubReaderSettings(next).then(setSettings)
@@ -284,28 +438,54 @@ export default function ReaderApp() {
     const rawHref = anchor.getAttribute('data-epub-href')
     if (!rawHref) return
     const resolved = parsed.resolveHref(currentChapter.href, rawHref)
-    const targetChapter = parsed.chapters.findIndex(chapter => chapter.href === resolved.path)
+    const targetChapter = parsed.chapters.findIndex(chapter => chapter.href.toLowerCase() === resolved.path.toLowerCase())
     if (targetChapter >= 0) {
-      goToChapter(targetChapter, resolved.fragment)
+      openChapter(targetChapter, { fragment: resolved.fragment })
     }
+  }
+
+  function toggleTocBranch(id: string) {
+    setExpandedTocIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   function renderTocItems(items: EpubTocItem[], depth = 0) {
     return (
       <ol className={`list-none m-0 p-0 space-y-[2px] ${depth > 0 ? 'pl-[14px]' : ''}`}>
         {items.map(item => {
-          const activeItem = item.chapterIndex === chapterIndex
+          const hasChildren = item.children.length > 0
+          const isExpanded = expandedTocIds.has(item.id)
+          const activeItem = activeTocId === item.id
           return (
             <li key={item.id}>
-              <button
-                type="button"
-                aria-current={activeItem ? 'location' : undefined}
-                className={tocButton({ active: activeItem })}
-                onClick={() => goToChapter(item.chapterIndex, item.fragment)}
-              >
-                {item.title}
-              </button>
-              {item.children.length > 0 && renderTocItems(item.children, depth + 1)}
+              <div className="flex items-start gap-[2px]">
+                {hasChildren ? (
+                  <button
+                    type="button"
+                    aria-label={`${isExpanded ? '收起' : '展开'} ${item.title}`}
+                    aria-expanded={isExpanded}
+                    className="mt-[3px] grid h-[22px] w-[20px] shrink-0 place-items-center rounded-[5px] border-0 bg-transparent p-0 text-ui-muted cursor-pointer hover:bg-[#e5ebd9] hover:text-ui-ink"
+                    onClick={() => toggleTocBranch(item.id)}
+                  >
+                    {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  </button>
+                ) : (
+                  <span className="w-[20px] shrink-0" aria-hidden="true" />
+                )}
+                <button
+                  type="button"
+                  aria-current={activeItem ? 'location' : undefined}
+                  className={tocButton({ active: activeItem })}
+                  onClick={() => openChapter(item.chapterIndex, { fragment: item.fragment, tocId: item.id })}
+                >
+                  {item.title}
+                </button>
+              </div>
+              {hasChildren && isExpanded && renderTocItems(item.children, depth + 1)}
             </li>
           )
         })}
@@ -313,163 +493,190 @@ export default function ReaderApp() {
     )
   }
 
+  const atBookStart = chapterIndex <= 0 && pageIndex <= 0
+  const atBookEnd = !!parsed && chapterIndex >= parsed.chapters.length - 1 && pageIndex >= totalPages - 1
+
   return (
     <div className={readerStyles.shell()}>
-      <header className={readerStyles.topbar()}>
-        <div className="flex items-center gap-[10px] min-w-0">
-          <Tooltip content={sidebarOpen ? '收起侧栏' : '展开侧栏'}>
-            <Button
-              aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
-              size="custom"
-              className="h-[32px] w-[32px] shrink-0 p-0"
-              onClick={() => setSidebarOpen(open => !open)}
-            >
-              {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
-            </Button>
-          </Tooltip>
-          <BookOpen size={16} className="shrink-0 text-[#4c6b85]" aria-hidden="true" />
-          <h1 className="m-0 text-[15px] font-semibold text-[#303b2c] truncate">
-            {book?.title ?? parsed?.title ?? 'EPUB 阅读器'}
-          </h1>
-          {parsed?.author && (
-            <span className="text-[12px] text-ui-muted truncate [@media(max-width:650px)]:hidden">· {parsed.author}</span>
-          )}
-        </div>
-        <div className="flex items-center gap-[12px] shrink-0 text-[12px] text-ui-muted">
-          {currentChapter && <span className="truncate max-w-[260px] [@media(max-width:850px)]:hidden">{currentChapter.title}</span>}
+      {sidebarOpen && (
+        <aside className={readerStyles.sidebar()} aria-label="阅读器侧栏">
+          <div className="flex items-center justify-between gap-[8px] px-[2px]">
+            <div className="flex items-center gap-[8px] min-w-0">
+              <BookOpen size={16} className="shrink-0 text-[#4c6b85]" aria-hidden="true" />
+              <h1 className="m-0 text-[14px] font-semibold text-[#303b2c] truncate">
+                {book?.title ?? parsed?.title ?? 'EPUB 阅读器'}
+              </h1>
+            </div>
+            <Tooltip content="收起侧栏">
+              <Button
+                aria-label="收起侧栏"
+                size="custom"
+                className="h-[28px] w-[28px] shrink-0 p-0"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <PanelLeftClose size={15} />
+              </Button>
+            </Tooltip>
+          </div>
+
+          <section className={readerStyles.panel()} aria-label="阅读器设置">
+            <h2 className={readerStyles.panelTitle()}>
+              <SlidersHorizontal size={14} />
+              <span>阅读设置</span>
+            </h2>
+            <div className="flex flex-col gap-[12px]">
+              <label className="flex flex-col gap-[5px] text-[12px] text-form-label">
+                <span className="flex items-center justify-between">
+                  <span>字体大小</span>
+                  <span className="text-ui-ink font-medium tabular-nums">{settings.fontSize}px</span>
+                </span>
+                <input
+                  type="range"
+                  aria-label="字体大小"
+                  min={14}
+                  max={28}
+                  step={1}
+                  value={settings.fontSize}
+                  onChange={event => updateSettings({ fontSize: Number(event.target.value) })}
+                />
+              </label>
+
+              <div className="flex flex-col gap-[5px] text-[12px] text-form-label">
+                <span>字重</span>
+                <div className="grid grid-cols-4 gap-[4px]" role="group" aria-label="字重">
+                  {fontWeights.map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={settings.fontWeight === option.value}
+                      className={weightButton({ selected: settings.fontWeight === option.value })}
+                      onClick={() => updateSettings({ fontWeight: option.value })}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="flex flex-col gap-[5px] text-[12px] text-form-label">
+                <span className="flex items-center justify-between">
+                  <span>行高</span>
+                  <span className="text-ui-ink font-medium tabular-nums">{settings.lineHeight.toFixed(2)}</span>
+                </span>
+                <input
+                  type="range"
+                  aria-label="行高"
+                  min={1.4}
+                  max={2.2}
+                  step={0.05}
+                  value={settings.lineHeight}
+                  onChange={event => updateSettings({ lineHeight: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className={`${readerStyles.panel()} flex-1 min-h-0 flex flex-col overflow-hidden`} aria-label="书籍目录">
+            <h2 className={readerStyles.panelTitle()}>
+              <ListTree size={14} />
+              <span>目录</span>
+            </h2>
+            <nav className="flex-1 min-h-0 overflow-y-auto pr-[2px]" aria-label="章节目录">
+              {parsed ? renderTocItems(parsed.toc) : <p className="m-0 text-[12px] text-ui-muted">正在加载目录…</p>}
+            </nav>
+          </section>
+        </aside>
+      )}
+
+      <main className={readerStyles.main()} aria-label="阅读主区域" onWheel={handleWheel}>
+        <header className={readerStyles.header()}>
+          <div className="flex items-center gap-[10px] min-w-0">
+            {!sidebarOpen && (
+              <Tooltip content="展开侧栏">
+                <Button
+                  aria-label="展开侧栏"
+                  size="custom"
+                  className="h-[30px] w-[30px] shrink-0 p-0"
+                  onClick={() => setSidebarOpen(true)}
+                >
+                  <PanelLeftOpen size={15} />
+                </Button>
+              </Tooltip>
+            )}
+            <span className="text-[13px] font-medium text-[#4a5940] truncate">
+              {currentChapter?.title ?? book?.title ?? 'EPUB 阅读'}
+            </span>
+            {parsed?.author && (
+              <span className="text-[12px] text-ui-muted truncate [@media(max-width:650px)]:hidden">· {parsed.author}</span>
+            )}
+          </div>
           <span
             aria-label="阅读进度"
-            className="px-[9px] py-[3px] rounded-[99px] bg-[#e4ecf2] text-[#3c5970] font-medium tabular-nums"
+            className="px-[9px] py-[3px] rounded-[99px] bg-[#e4ecf2] text-[#3c5970] text-[12px] font-medium tabular-nums shrink-0"
           >
             {progress}%
           </span>
-        </div>
-      </header>
+        </header>
 
-      {loading ? (
-        <main className="flex-1 grid place-items-center p-[32px] text-ui-muted text-[14px]">
-          正在加载电子书…
-        </main>
-      ) : !available || !parsed ? (
-        <main className="flex-1 grid place-items-center p-[32px]">
-          <div className="max-w-[440px] rounded-[18px] bg-ui-surface border border-solid border-white p-[24px] text-center shadow-[0_10px_35px_#4c68340a]">
-            <p className="m-0 text-[14px] text-action-danger">{error || '无法打开电子书'}</p>
+        {loading ? (
+          <div className={`${readerStyles.paper()} items-center justify-center text-ui-muted text-[14px]`}>
+            正在加载电子书…
           </div>
-        </main>
-      ) : (
-        <div className={readerStyles.layout()}>
-          {sidebarOpen && (
-            <aside className={readerStyles.sidebar()} aria-label="阅读器侧栏">
-              <section className={readerStyles.panel()} aria-label="阅读器设置">
-                <h2 className={readerStyles.panelTitle()}>
-                  <SlidersHorizontal size={14} />
-                  <span>阅读设置</span>
-                </h2>
-                <div className="flex flex-col gap-[14px]">
-                  <label className="flex flex-col gap-[6px] text-[12px] text-form-label">
-                    <span className="flex items-center justify-between">
-                      <span>字体大小</span>
-                      <span className="text-ui-ink font-medium tabular-nums">{settings.fontSize}px</span>
-                    </span>
-                    <input
-                      type="range"
-                      aria-label="字体大小"
-                      min={14}
-                      max={28}
-                      step={1}
-                      value={settings.fontSize}
-                      onChange={event => updateSettings({ fontSize: Number(event.target.value) })}
-                    />
-                  </label>
-
-                  <div className="flex flex-col gap-[6px] text-[12px] text-form-label">
-                    <span>字重</span>
-                    <div className="grid grid-cols-4 gap-[4px]" role="group" aria-label="字重">
-                      {fontWeights.map(option => {
-                        const selected = settings.fontWeight === option.value
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            aria-pressed={selected}
-                            className={weightButton({ selected })}
-                            onClick={() => updateSettings({ fontWeight: option.value })}
-                          >
-                            {option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  <label className="flex flex-col gap-[6px] text-[12px] text-form-label">
-                    <span className="flex items-center justify-between">
-                      <span>行高</span>
-                      <span className="text-ui-ink font-medium tabular-nums">{settings.lineHeight.toFixed(2)}</span>
-                    </span>
-                    <input
-                      type="range"
-                      aria-label="行高"
-                      min={1.4}
-                      max={2.2}
-                      step={0.05}
-                      value={settings.lineHeight}
-                      onChange={event => updateSettings({ lineHeight: Number(event.target.value) })}
-                    />
-                  </label>
-                </div>
-              </section>
-
-              <section className={`${readerStyles.panel()} flex-1 min-h-0 flex flex-col`} aria-label="书籍目录">
-                <h2 className={readerStyles.panelTitle()}>
-                  <ListTree size={14} />
-                  <span>目录</span>
-                </h2>
-                <nav className="max-h-[58vh] overflow-y-auto pr-[4px]" aria-label="章节目录">
-                  {renderTocItems(parsed.toc)}
-                </nav>
-              </section>
-            </aside>
-          )}
-
-          <main className={readerStyles.main()} aria-label="阅读主区域">
-            <article className={readerStyles.paper()}>
+        ) : !available || !parsed ? (
+          <div className={`${readerStyles.paper()} items-center justify-center`}>
+            <p className="m-0 text-[14px] text-action-danger text-center">{error || '无法打开电子书'}</p>
+          </div>
+        ) : (
+          <article className={readerStyles.paper()}>
+            <div
+              ref={viewportRef}
+              className={readerStyles.viewport()}
+              style={{ ['--reader-page-h' as string]: `${Math.max(120, viewportSize.height - 24)}px` }}
+            >
               <div
-                ref={articleRef}
-                data-reader-body
-                className={readerStyles.content()}
-                style={{
-                  fontSize: `${settings.fontSize}px`,
-                  fontWeight: settings.fontWeight,
-                  lineHeight: settings.lineHeight,
-                }}
-                onClick={handleContentClick}
-                dangerouslySetInnerHTML={{ __html: rendered.html }}
-              />
-            </article>
+                className="h-full overflow-hidden mx-auto"
+                style={{ width: `${colsPerPage === 2 ? colWidth * 2 + colGap : colWidth}px` }}
+              >
+                <div
+                  ref={flowingRef}
+                  data-reader-body
+                  className={readerStyles.content()}
+                  style={{
+                    width: `${colWidth}px`,
+                    height: `${Math.max(120, viewportSize.height)}px`,
+                    columnWidth: `${colWidth}px`,
+                    columnGap: `${colGap}px`,
+                    columnFill: 'auto',
+                    transform: `translateX(-${pageIndex * pageStride}px)`,
+                    transition: 'transform 160ms ease-out',
+                    fontSize: `${settings.fontSize}px`,
+                    fontWeight: settings.fontWeight,
+                    lineHeight: settings.lineHeight,
+                  }}
+                  onClick={handleContentClick}
+                  dangerouslySetInnerHTML={{ __html: rendered.html }}
+                />
+              </div>
+            </div>
+          </article>
+        )}
 
-            <nav className={readerStyles.navBar()} aria-label="章节导航">
-              <Button
-                disabled={chapterIndex <= 0}
-                onClick={() => goToChapter(chapterIndex - 1)}
-              >
-                <ChevronLeft size={16} />
-                上一章
-              </Button>
-              <span className="text-[12px] text-ui-muted tabular-nums">
-                {chapterIndex + 1} / {parsed.chapters.length}
-              </span>
-              <Button
-                disabled={chapterIndex >= parsed.chapters.length - 1}
-                onClick={() => goToChapter(chapterIndex + 1)}
-              >
-                下一章
-                <ChevronRight size={16} />
-              </Button>
-            </nav>
-          </main>
-        </div>
-      )}
+        {parsed && available && !loading && (
+          <footer className={readerStyles.footer()} aria-label="翻页导航">
+            <Button disabled={atBookStart} onClick={() => turnPage(-1)}>
+              <ChevronLeft size={16} />
+              上一页
+            </Button>
+            <span aria-label="页码" className="text-[12px] text-ui-muted tabular-nums">
+              第 {pageIndex + 1} / {totalPages} 页 · {chapterIndex + 1}/{parsed.chapters.length} 章
+            </span>
+            <Button disabled={atBookEnd} onClick={() => turnPage(1)}>
+              下一页
+              <ChevronRight size={16} />
+            </Button>
+          </footer>
+        )}
+      </main>
 
       <Toast message={error} onClose={() => setError('')} />
     </div>
