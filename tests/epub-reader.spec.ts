@@ -288,6 +288,14 @@ test('单击进入无流体动画左右分栏阅读页、多级目录折叠与�
   await readerPage.mouse.wheel(0, 240)
   await expect(pageIndicator).toContainText('第 2 /')
 
+  // 翻页跨越第一章末页进入第二章时不应触发反向从左向右的动画
+  const nextBtn = readerPage.getByRole('button', { name: '下一页' })
+  while (!(await pageIndicator.textContent())?.includes('2/2 章')) {
+    await nextBtn.click()
+  }
+  await expect(pageIndicator).toContainText('第 1 /')
+  expect(await readerPage.locator('[data-reader-body]').evaluate(el => getComputedStyle(el).transitionProperty)).toBe('none')
+
   // 点击子章节「2.2 深入后半」：可精准跳转且仅该子目录项激活（不激活整棵子树）
   const toc = readerPage.getByRole('navigation', { name: '章节目录' })
   await toc.getByRole('button', { name: '2.2 深入后半' }).click()

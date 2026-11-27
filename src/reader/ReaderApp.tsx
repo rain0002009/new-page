@@ -100,6 +100,7 @@ export default function ReaderApp() {
   const [chapterIndex, setChapterIndex] = useState(0)
   const [pageIndex, setPageIndex] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
+  const [animateTurn, setAnimateTurn] = useState(false)
   const [activeTocId, setActiveTocId] = useState<string | undefined>(undefined)
   const [expandedTocIds, setExpandedTocIds] = useState<Set<string>>(() => new Set())
   const [progress, setProgress] = useState(0)
@@ -253,6 +254,7 @@ export default function ReaderApp() {
       const width = Math.floor(node.clientWidth)
       const height = Math.floor(node.clientHeight)
       if (width > 0 && height > 0) {
+        setAnimateTurn(false)
         setViewportSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }))
       }
     }
@@ -371,12 +373,14 @@ export default function ReaderApp() {
       }
     }
     if (clamped !== chapterIndex) {
+      setAnimateTurn(false)
       setPageIndex(0)
       setChapterIndex(clamped)
       if (!options?.fragment && !options?.lastPage) {
         scheduleSave(clamped, 0, computeReadingProgress(parsed.chapters, clamped, 0))
       }
     } else if (!options?.fragment) {
+      setAnimateTurn(false)
       syncPageState(options?.lastPage ? totalPages - 1 : 0, totalPages)
     }
     setJumpSeq(seq => seq + 1)
@@ -386,12 +390,14 @@ export default function ReaderApp() {
     if (!parsed || !available) return
     if (delta > 0) {
       if (pageIndex < totalPages - 1) {
+        setAnimateTurn(true)
         syncPageState(pageIndex + 1, totalPages)
       } else if (chapterIndex < parsed.chapters.length - 1) {
         openChapter(chapterIndex + 1)
       }
     } else {
       if (pageIndex > 0) {
+        setAnimateTurn(true)
         syncPageState(pageIndex - 1, totalPages)
       } else if (chapterIndex > 0) {
         openChapter(chapterIndex - 1, { lastPage: true })
@@ -425,6 +431,7 @@ export default function ReaderApp() {
   }
 
   function updateSettings(patch: Partial<EpubReaderSettings>) {
+    setAnimateTurn(false)
     preserveRatioOnLayout.current = totalPages <= 1 ? 0 : pageIndex / (totalPages - 1)
     const next = { ...settings, ...patch }
     setSettings(next)
@@ -638,6 +645,7 @@ export default function ReaderApp() {
                 style={{ width: `${colsPerPage === 2 ? colWidth * 2 + colGap : colWidth}px` }}
               >
                 <div
+                  key={chapterIndex}
                   ref={flowingRef}
                   data-reader-body
                   className={readerStyles.content()}
@@ -648,7 +656,7 @@ export default function ReaderApp() {
                     columnGap: `${colGap}px`,
                     columnFill: 'auto',
                     transform: `translateX(-${pageIndex * pageStride}px)`,
-                    transition: 'transform 160ms ease-out',
+                    transition: animateTurn ? 'transform 160ms ease-out' : 'none',
                     fontSize: `${settings.fontSize}px`,
                     fontWeight: settings.fontWeight,
                     lineHeight: settings.lineHeight,
