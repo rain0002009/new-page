@@ -922,7 +922,9 @@ test('笔记卡片自动摘要、全文搜索并与链接混排跨块移动', as
   await newNote(page, context, '可搜索的手记', '摘要文字 独有检索词')
   const card = page.getByRole('article', { name: '笔记 可搜索的手记', exact: true })
   await expect(card).toContainText('摘要文字 独有检索词')
-  await expect(card.getByRole('button', { name: '删除笔记', exact: true })).toBeAttached()
+  await card.getByRole('button', { name: '更多操作 可搜索的手记', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: '删除笔记', exact: true })).toBeAttached()
+  await page.keyboard.press('Escape')
   await expect(card.getByRole('button', { name: '加入 Todo', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '搜索收藏', exact: true }).click()
   await page.getByRole('searchbox', { name: '搜索全部收藏', exact: true }).fill('独有检索词')
@@ -934,6 +936,15 @@ test('笔记卡片自动摘要、全文搜索并与链接混排跨块移动', as
   await expect(target.getByRole('link', { name: '可搜索的手记', exact: true })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('region', { name: '收藏块 笔记归档', exact: true }).getByRole('link', { name: '可搜索的手记', exact: true })).toBeVisible()
+})
+
+test('笔记卡片移除 Markdown 标签并显示正文摘要', async () => {
+  const { page, context } = await openClient(undefined, true)
+  await connectQuark(page)
+  await newNote(page, context, '摘要手记', '卡片正文摘要')
+  const card = page.getByRole('article', { name: '笔记 摘要手记', exact: true })
+  await expect(card).toContainText('卡片正文摘要')
+  await expect(card.getByText('Markdown 笔记', { exact: true })).toHaveCount(0)
 })
 
 test('单篇笔记永久删除停止编辑，父级删除仍可恢复正文', async () => {

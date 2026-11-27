@@ -116,7 +116,6 @@ function NoteCard({ note, doc, act, search = false, onShare }: { note: Note; doc
       )}
       <TagActionMenu doc={doc} target={note} label={note.title} act={act} onDelete={() => void act({ type: 'delete', id: note.id })} deleteLabel="删除笔记" />
     </div>
-    <span className={styles.domain()}>Markdown 笔记</span>
     {tags.length ? <TagList tags={tags} label={note.title} className="mt-[6px] min-h-[17px]" /> : <p className={styles.note()}>{markdownDescription(note.body)}</p>}<Toast message={error} onClose={() => setError('')}><Button onClick={() => { setError(''); void open() }}>重试打开</Button></Toast>
   </article>
 }
