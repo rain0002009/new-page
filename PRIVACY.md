@@ -1,6 +1,6 @@
 # 页墟 · Page Garden 隐私政策
 
-更新日期：2026-11-24。适用版本：1.4.0+。
+更新日期：2026-11-27。适用版本：1.6.0+。
 
 ## 维护者与联系方式
 
@@ -11,20 +11,21 @@
 页墟将 Chrome 新标签页用作个人网页资料与笔记的整理入口。为提供用户选择的功能，扩展处理以下数据：
 
 - 当前窗口标签页的网址、标题、图标、排列与原生标签组信息，用于展示待选网页、收藏和标签组操作。扩展没有申请 chrome.history 权限，不读取完整历史记录数据库。
-- 空间、收藏块、收藏链接、标题、备注、Todo、排序、托管 Markdown 笔记正文、回收站内容、昵称和个人偏好，用于保存、搜索、恢复和同步收藏库。
+- 空间、收藏块、收藏链接、标题、备注、Todo、排序、托管 Markdown 笔记正文、EPUB 电子书元数据与阅读进度、回收站内容、昵称和个人偏好，用于保存、搜索、恢复和同步收藏库。
+- 用户主动拖入收藏块的本地 `.epub` 电子书文件，用于在内置阅读器中解析目录、正文与内嵌图片，并按用户选择保存在本机或上传到用户自己的夸克网盘。
 - 用户连接服务所需的账号信息：夸克登录会话 Cookie 与账号标识、WebDAV 地址/用户名/密码，以及可选 s.ee API Key。
 - 用户主动打开或授权的本地 Markdown 文件内容、草稿、基线、文件和目录句柄与路径，用于阅读、写回原文件、浏览目录及在写入失败后恢复。
 - 用户主动打开的在线 Markdown、文档引用的图片、用户选择上传的图片，以及主动通过 s.ee 分享的 Markdown 笔记正文与访问密码，用于阅读、编辑与公开短链分享。用户主动输入的内容可能包含个人或敏感信息。
 
 ## 本机存储
 
-收藏库、完整托管笔记、同步基线、冲突、配置、未上传修改、登录凭据和图片清理记录保存在当前 Chrome 配置的扩展本地存储中。本地 Markdown 的完整正文、草稿和文件/目录句柄另保存在扩展的 IndexedDB 中。凭据在本机没有额外的应用层加密，应使用可信设备并保护 Chrome 配置。
+收藏库、完整托管笔记、同步基线、冲突、配置、未上传修改、登录凭据、图片清理记录、EPUB 阅读器偏好与目录折叠状态保存在当前 Chrome 配置的扩展本地存储中。本地 Markdown 的完整正文、草稿和文件/目录句柄，以及用户拖入或缓存的 EPUB 电子书二进制内容另保存在扩展的 IndexedDB 中。凭据在本机没有额外的应用层加密，应使用可信设备并保护 Chrome 配置。
 
 首次使用收藏库需要连接夸克或兼容的 WebDAV；已有本地副本在暂时离线或登录失效时可继续编辑。切换账号或数据源会保留各自的缓存、凭据和待上传修改，后台仍可能重试所有已连接数据源。当前没有在设置中一键退出并清除所有数据源的功能。
 
 ## 云端同步与第三方服务
 
-- 连接夸克后，扩展直接请求夸克登录和网盘接口及其上传服务，将收藏库保存为用户网盘中的「页墟收藏/收藏.json」，并按笔记操作维护「笔记」目录中的 Markdown 副本。收藏 JSON 含完整托管笔记正文。夸克上传可能使用关联 UC 域名与阿里云对象存储。
+- 连接夸克后，扩展直接请求夸克登录和网盘接口及其上传服务，将收藏库保存为用户网盘中的「页墟收藏/收藏.json」，并按笔记操作维护「笔记」目录中的 Markdown 副本；当用户选择将电子书上传到夸克网盘时，扩展会将 `.epub` 文件上传至「页墟收藏/电子书/」供跨设备下载缓存。收藏 JSON 含完整托管笔记正文与电子书进度/文件标识，不含电子书二进制本体。夸克上传可能使用关联 UC 域名与阿里云对象存储。
 - 连接 WebDAV 后，扩展使用用户提供的 HTTPS 地址和认证信息，将收藏库保存到所选目录下的 new-page/data-v1.json。
 - 夸克 Cookie 和 WebDAV 密码仅存于本机，不进入收藏业务 JSON 或导出备份；为完成认证，会发送给相应服务。
 - s.ee API Key 是收藏库配置的一部分，会同步到已连接的云端，并包含在 JSON 导出备份中。任何能够读取这些文件的人都可能取得该 Key。云端文件与备份没有扩展提供的端到端加密。
@@ -40,7 +41,7 @@
 
 可以在扩展中编辑或删除收藏内容，导出备份，在设置中关闭自动接管 Markdown 或清除 s.ee Key。清除 Key 不会自动删除已上传的图片，也不会追溯修改旧备份。
 
-链接、收藏块和空间删除后进入最长 30 天的回收站，可提前永久清除；单独删除一篇笔记立即永久生效，随父级删除的笔记则随父级进入回收站。后台清理可能在扩展下次运行或同步时完成；同步成功前，远端仍可能保留旧内容。删除标记、同步基线、冲突或尚未联网的其他设备也可能保留相关副本，不能保证所有副本立即消失。
+链接、收藏块和空间删除后进入最长 30 天的回收站，可提前永久清除；单独删除一篇笔记或一本电子书立即永久生效（并清理对应本机 IndexedDB 缓存与夸克网盘电子书文件），随父级删除的笔记或电子书则随父级进入回收站并在彻底清理后释放文件。后台清理可能在扩展下次运行或同步时完成；同步成功前，远端仍可能保留旧内容。删除标记、同步基线、冲突或尚未联网的其他设备也可能保留相关副本，不能保证所有副本立即消失。
 
 云端不提供同步历史恢复。旧导出备份、本地磁盘原文件和第三方服务自己的备份需由用户另行管理。Markdown 副本由扩展向网盘单向更新，手动修改网盘副本不会自动回写扩展。
 
@@ -56,17 +57,17 @@
 
 Page Garden is maintained by GitHub user rain0002009. Contact: https://github.com/rain0002009/new-page/issues . Do not post credentials or private content in public issues.
 
-The extension processes current-window tab URLs, titles, icons and groups; saved links, notes, Todo items, preferences, note shares and recycle-bin data; credentials for user-selected services; and Markdown files/images the user opens, uploads, or explicitly shares. It does not request Chrome history database access. Workspace data and credentials are stored in chrome.storage.local; full local Markdown contents, drafts, paths and file/directory handles are also stored in extension IndexedDB. Local credentials have no additional application-level encryption.
+The extension processes current-window tab URLs, titles, icons and groups; saved links, notes, EPUB book metadata and reading progress, Todo items, preferences, note shares and recycle-bin data; credentials for user-selected services; local `.epub` books imported by the user; and Markdown files/images the user opens, uploads, or explicitly shares. It does not request Chrome history database access. Workspace data, reader preferences, TOC fold state and credentials are stored in chrome.storage.local; full local Markdown contents, drafts, paths, file/directory handles, and imported or cached EPUB binaries are stored in extension IndexedDB. Local credentials have no additional application-level encryption.
 
 Initial workspace use requires Quark or a compatible HTTPS WebDAV connection. Existing local data remains editable offline. Switching sources retains previous caches and credentials; background retries can include all connected sources. There is currently no one-click sign-out-and-clear-all-sources feature.
 
-Workspace data, including managed note bodies, is synchronized directly to the user's Quark or WebDAV account. Quark uses its login/storage endpoints and associated upload services, potentially including UC and Alibaba Cloud domains. Quark cookies and WebDAV passwords stay out of workspace exports but are sent to their respective services for authentication. The optional s.ee API key is an exception: it is included in workspace synchronization and exported backups. These files are not end-to-end encrypted by the extension.
+Workspace data, including managed note bodies and book progress metadata, is synchronized directly to the user's Quark or WebDAV account; when the user chooses Quark mode for an EPUB, the `.epub` binary is uploaded to `页墟收藏/电子书/` in the user's Quark Drive for cross-device download and local caching. Quark uses its login/storage endpoints and associated upload services, potentially including UC and Alibaba Cloud domains. Quark cookies and WebDAV passwords stay out of workspace exports but are sent to their respective services for authentication. The optional s.ee API key is an exception: it is included in workspace synchronization and exported backups. These files are not end-to-end encrypted by the extension.
 
 Explicit note text sharing sends the note body, password and expiration to s.ee and creates a public shortlink; deleting a local note does not automatically retract public shares (use the Share Management panel). Explicit image uploads send the image and authentication to s.ee and insert a publicly accessible image URL. Remote Markdown, external images and site icons can contact their source hosts, which receive ordinary connection information such as IP addresses. Local and remote Markdown files are not automatically synchronized as whole managed notes; explicit image uploads still use the image host.
 
 The current extension has no developer-operated business-data server, advertising or analytics telemetry. Data is used to provide the described features, not sold or used for unrelated advertising, creditworthiness or lending. Third-party services operate under their own privacy policies. Voluntary support reports are handled by their platform and used by the maintainer to respond and resolve issues.
 
-Links and deleted parent containers use a recycle bin for up to 30 days; separately deleting one managed note is permanent immediately. Remote deletion depends on successful synchronization. Tombstones, synchronization baselines, conflicts, offline devices and previous exports may retain copies. There is no cloud synchronization-history recovery. Local disk files, exports and third-party backups require separate management.
+Links and deleted parent containers use a recycle bin for up to 30 days; separately deleting one managed note or one EPUB book is permanent immediately (clearing local IndexedDB cache and queued Quark EPUB files). Remote deletion depends on successful synchronization. Tombstones, synchronization baselines, conflicts, offline devices and previous exports may retain copies. There is no cloud synchronization-history recovery. Local disk files, exports and third-party backups require separate management.
 
 Image cleanup waits at least 30 seconds and requires successful synchronization, ownership checks and no locally known references. Failures retry later; deletion is not guaranteed without the original key or confirmed ownership. Deleting a hosted image can break references in external backups unknown to this device. Clearing the s.ee key does not itself delete uploaded images.
 
