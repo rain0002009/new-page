@@ -263,7 +263,7 @@ test('单击进入无流体动画左右分栏阅读页、多级目录折叠与�
   await expect(img).toBeVisible()
   expect(await img.getAttribute('src')).toMatch(/^blob:/)
 
-  // 调节字号、字重、行高
+  // 调节字号、字重、行高、分栏（单栏/双栏）与关闭翻页动画
   const fontSizeInput = readerPage.getByLabel('字体大小')
   await fontSizeInput.fill('22')
   await fontSizeInput.dispatchEvent('change')
@@ -271,22 +271,28 @@ test('单击进入无流体动画左右分栏阅读页、多级目录折叠与�
   const lineHeightInput = readerPage.getByLabel('行高')
   await lineHeightInput.fill('2')
   await lineHeightInput.dispatchEvent('change')
+  await expect(readerPage.getByRole('button', { name: '单栏' })).toHaveAttribute('aria-pressed', 'true')
+  await readerPage.getByRole('button', { name: '双栏' }).click()
+  await expect(readerPage.getByRole('button', { name: '双栏' })).toHaveAttribute('aria-pressed', 'true')
+  await readerPage.getByRole('switch', { name: '翻页动画' }).click()
 
   const bodyStyles = await readerPage.locator('[data-reader-body]').evaluate(el => {
     const cs = getComputedStyle(el)
-    return { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight }
+    return { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, transitionProperty: cs.transitionProperty }
   })
   expect(bodyStyles.fontSize).toBe('22px')
   expect(bodyStyles.fontWeight).toBe('600')
   expect(parseFloat(bodyStyles.lineHeight)).toBeCloseTo(44, 0)
+  expect(bodyStyles.transitionProperty).toBe('none')
 
-  // 滚轮向下触发翻页，并简易显示当前页码
+  // 滚轮向下触发翻页（关闭动画后同章翻页也无过渡动画），并简易显示当前页码
   const pageIndicator = readerPage.getByLabel('页码')
   await expect(pageIndicator).toContainText('第 1 /')
   const mainBox = (await mainArea.boundingBox())!
   await readerPage.mouse.move(mainBox.x + mainBox.width / 2, mainBox.y + mainBox.height / 2)
   await readerPage.mouse.wheel(0, 240)
   await expect(pageIndicator).toContainText('第 2 /')
+  expect(await readerPage.locator('[data-reader-body]').evaluate(el => getComputedStyle(el).transitionProperty)).toBe('none')
 
   // 翻页跨越第一章末页进入第二章时不应触发反向从左向右的动画
   const nextBtn = readerPage.getByRole('button', { name: '下一页' })
@@ -296,17 +302,14 @@ test('单击进入无流体动画左右分栏阅读页、多级目录折叠与�
   await expect(pageIndicator).toContainText('第 1 /')
   expect(await readerPage.locator('[data-reader-body]').evaluate(el => getComputedStyle(el).transitionProperty)).toBe('none')
 
-  // 点击子章节「2.2 深入后半」：可精准跳转且仅该子目录项激活（不激活整棵子树）
+  // 多级目录默认全部折叠：子章节「2.2 深入后半」初始隐藏；手动展开后可跳转且仅该子目录项激活
   const toc = readerPage.getByRole('navigation', { name: '章节目录' })
-  await toc.getByRole('button', { name: '2.2 深入后半' }).click()
-  await expect(toc.locator('[aria-current="location"]')).toHaveCount(1)
-  await expect(toc.locator('[aria-current="location"]')).toHaveText('2.2 深入后半')
-
-  // 多级目录支持折叠与展开
-  await toc.getByRole('button', { name: '收起 第二章 深入' }).click()
   await expect(toc.getByRole('button', { name: '2.2 深入后半' })).toBeHidden()
   await toc.getByRole('button', { name: '展开 第二章 深入' }).click()
   await expect(toc.getByRole('button', { name: '2.2 深入后半' })).toBeVisible()
+  await toc.getByRole('button', { name: '2.2 深入后半' }).click()
+  await expect(toc.locator('[aria-current="location"]')).toHaveCount(1)
+  await expect(toc.locator('[aria-current="location"]')).toHaveText('2.2 深入后半')
 
   // 翻页到全书末尾，进度变为 100% 并同步回卡片
   while (!(await readerPage.getByRole('button', { name: '下一页' }).isDisabled())) {
@@ -315,7 +318,7 @@ test('单击进入无流体动画左右分栏阅读页、多级目录折叠与�
   await expect(readerPage.getByLabel('阅读进度')).toContainText('100%')
   await expect(card).toContainText('100%', { timeout: 5000 })
 
-  // 侧栏可收起，重开阅读页保持排版设置与章节进度
+  // 侧栏可收起，重开阅读页保持排版设置、分栏、动画开关、目录折叠状态与章节进度
   await readerPage.getByRole('button', { name: '收起侧栏' }).click()
   await expect(sidebar).toBeHidden()
   await readerPage.close()
@@ -328,6 +331,9 @@ test('单击进入无流体动画左右分栏阅读页、多级目录折叠与�
   await expect(reopened.locator('[data-reader-body]')).toContainText('第二章 深入')
   await expect(reopened.locator('[data-reader-body]')).toHaveCSS('font-size', '22px')
   await expect(reopened.locator('[data-reader-body]')).toHaveCSS('font-weight', '600')
+  await expect(reopened.getByRole('button', { name: '双栏' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(reopened.getByRole('switch', { name: '翻页动画' })).not.toBeChecked()
+  await expect(reopened.getByRole('navigation', { name: '章节目录' }).getByRole('button', { name: '2.2 深入后半' })).toBeVisible()
 })
 
 test('夸克网盘 EPUB 分片上传、清空本机缓存后跨设备按需下载与删卡同步删除网盘文件', async () => {

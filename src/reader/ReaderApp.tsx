@@ -2,12 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ListTree, PanelLeftClose, PanelLeftOpen, SlidersHorizontal } from 'lucide-react'
 import { tv } from 'tailwind-variants/lite'
 import { computeReadingProgress, parseEpub, type EpubTocItem, type ParsedEpub } from '../core/epub'
-import { defaultEpubReaderSettings, readEpubReaderSettings, saveEpubReaderSettings, type EpubFontWeight, type EpubReaderSettings } from '../core/epub-preferences'
+import { defaultEpubReaderSettings, readEpubExpandedTocIds, readEpubReaderSettings, saveEpubExpandedTocIds, saveEpubReaderSettings, type EpubColumnsMode, type EpubFontWeight, type EpubReaderSettings } from '../core/epub-preferences'
 import { getBookBytes } from '../core/epub-storage'
 import { readLocalSnapshot, storageKey } from '../core/local-workspace'
 import { isActive, type Book } from '../core/model'
 import { rpc } from '../core/protocol'
 import { Button, Tooltip } from '../newtab/ui'
+import Switch from '../newtab/Switch'
 import { Toast } from '../shared/Toast'
 import { useDocumentTitle } from '../document/useDocumentTitle'
 import { renderChapterHtml } from './chapter-renderer'
@@ -27,7 +28,7 @@ const readerStyles = tv({
   },
 })()
 
-const weightButton = tv({
+const optionButton = tv({
   base: 'py-[5px] px-[4px] rounded-[7px] text-[11px] border border-solid cursor-pointer transition-colors',
   variants: {
     selected: {
@@ -54,19 +55,10 @@ const fontWeights: { value: EpubFontWeight; label: string }[] = [
   { value: 700, label: '粗体' },
 ]
 
-function collectExpandableIds(items: EpubTocItem[]): string[] {
-  const ids: string[] = []
-  const visit = (list: EpubTocItem[]) => {
-    for (const item of list) {
-      if (item.children.length) {
-        ids.push(item.id)
-        visit(item.children)
-      }
-    }
-  }
-  visit(items)
-  return ids
-}
+const columnOptions: { value: EpubColumnsMode; label: string }[] = [
+  { value: 'single', label: '单栏' },
+  { value: 'double', label: '双栏' },
+]
 
 function findFirstTocIdForChapter(items: EpubTocItem[], chapterIndex: number): string | undefined {
   for (const item of items) {
@@ -75,15 +67,6 @@ function findFirstTocIdForChapter(items: EpubTocItem[], chapterIndex: number): s
     if (nested) return nested
   }
   return undefined
-}
-
-function findAncestorIds(items: EpubTocItem[], targetId: string, path: string[] = []): string[] | null {
-  for (const item of items) {
-    if (item.id === targetId) return path
-    const nested = findAncestorIds(item.children, targetId, [...path, item.id])
-    if (nested) return nested
-  }
-  return null
 }
 
 export default function ReaderApp() {
@@ -190,6 +173,7 @@ export default function ReaderApp() {
         if (!bytes) throw new Error('无法读取电子书文件内容，请重试')
 
         const epub = parseEpub(bytes, entity.fileName)
+        const savedExpanded = await readEpubExpandedTocIds(entity.id)
         if (disposed) return
         const restoredChapter = Math.max(0, Math.min(epub.chapters.length - 1, entity.chapterIndex))
         initialRestoreRatio.current = entity.scrollRatio
@@ -199,7 +183,7 @@ export default function ReaderApp() {
           progress: entity.progress,
         }
         setParsed(epub)
-        setExpandedTocIds(new Set(collectExpandableIds(epub.toc)))
+        setExpandedTocIds(new Set(savedExpanded))
         setActiveTocId(findFirstTocIdForChapter(epub.toc, restoredChapter))
         setChapterIndex(restoredChapter)
         setProgress(entity.progress)
@@ -276,7 +260,7 @@ export default function ReaderApp() {
     }
   }, [rendered])
 
-  const colsPerPage = viewportSize.width >= 820 ? 2 : 1
+  const colsPerPage = settings.columns === 'double' && viewportSize.width >= 720 ? 2 : 1
   const colGap = colsPerPage === 2 ? 48 : 32
   const colWidth = viewportSize.width > 0
     ? Math.max(200, colsPerPage === 2 ? Math.floor((viewportSize.width - colGap) / 2) : viewportSize.width)
@@ -351,7 +335,7 @@ export default function ReaderApp() {
 
     const raf = requestAnimationFrame(measurePages)
     return () => cancelAnimationFrame(raf)
-  }, [rendered.html, viewportSize.width, viewportSize.height, colWidth, colGap, colsPerPage, settings.fontSize, settings.fontWeight, settings.lineHeight, jumpSeq, parsed, available, chapterIndex, scheduleSave, syncPageState])
+  }, [rendered.html, viewportSize.width, viewportSize.height, colWidth, colGap, colsPerPage, settings.columns, settings.fontSize, settings.fontWeight, settings.lineHeight, jumpSeq, parsed, available, chapterIndex, scheduleSave, syncPageState])
 
   const openChapter = useCallback((targetIndex: number, options?: { fragment?: string; lastPage?: boolean; tocId?: string }) => {
     if (!parsed) return
@@ -360,27 +344,15 @@ export default function ReaderApp() {
     pendingLastPage.current = options?.lastPage ?? false
     initialRestoreRatio.current = null
     preserveRatioOnLayout.current = null
-    const resolvedTocId = options?.tocId ?? findFirstTocIdForChapter(parsed.toc, clamped)
-    setActiveTocId(resolvedTocId)
-    if (resolvedTocId) {
-      const ancestors = findAncestorIds(parsed.toc, resolvedTocId)
-      if (ancestors?.length) {
-        setExpandedTocIds(prev => {
-          const next = new Set(prev)
-          for (const id of ancestors) next.add(id)
-          return next
-        })
-      }
-    }
+    setActiveTocId(options?.tocId ?? findFirstTocIdForChapter(parsed.toc, clamped))
+    setAnimateTurn(false)
     if (clamped !== chapterIndex) {
-      setAnimateTurn(false)
       setPageIndex(0)
       setChapterIndex(clamped)
       if (!options?.fragment && !options?.lastPage) {
         scheduleSave(clamped, 0, computeReadingProgress(parsed.chapters, clamped, 0))
       }
     } else if (!options?.fragment) {
-      setAnimateTurn(false)
       syncPageState(options?.lastPage ? totalPages - 1 : 0, totalPages)
     }
     setJumpSeq(seq => seq + 1)
@@ -456,6 +428,7 @@ export default function ReaderApp() {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
+      if (bookId) void saveEpubExpandedTocIds(bookId, [...next])
       return next
     })
   }
@@ -531,7 +504,7 @@ export default function ReaderApp() {
               <SlidersHorizontal size={14} />
               <span>阅读设置</span>
             </h2>
-            <div className="flex flex-col gap-[12px]">
+            <div className="flex flex-col gap-[10px]">
               <label className="flex flex-col gap-[5px] text-[12px] text-form-label">
                 <span className="flex items-center justify-between">
                   <span>字体大小</span>
@@ -556,7 +529,7 @@ export default function ReaderApp() {
                       key={option.value}
                       type="button"
                       aria-pressed={settings.fontWeight === option.value}
-                      className={weightButton({ selected: settings.fontWeight === option.value })}
+                      className={optionButton({ selected: settings.fontWeight === option.value })}
                       onClick={() => updateSettings({ fontWeight: option.value })}
                     >
                       {option.label}
@@ -580,6 +553,29 @@ export default function ReaderApp() {
                   onChange={event => updateSettings({ lineHeight: Number(event.target.value) })}
                 />
               </label>
+
+              <div className="flex flex-col gap-[5px] text-[12px] text-form-label">
+                <span>分栏</span>
+                <div className="grid grid-cols-2 gap-[4px]" role="group" aria-label="分栏">
+                  {columnOptions.map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={settings.columns === option.value}
+                      className={optionButton({ selected: settings.columns === option.value })}
+                      onClick={() => updateSettings({ columns: option.value })}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <Switch
+                label="翻页动画"
+                checked={settings.pageAnimation}
+                onChange={pageAnimation => updateSettings({ pageAnimation })}
+              />
             </div>
           </section>
 
@@ -656,7 +652,7 @@ export default function ReaderApp() {
                     columnGap: `${colGap}px`,
                     columnFill: 'auto',
                     transform: `translateX(-${pageIndex * pageStride}px)`,
-                    transition: animateTurn ? 'transform 160ms ease-out' : 'none',
+                    transition: animateTurn && settings.pageAnimation ? 'transform 160ms ease-out' : 'none',
                     fontSize: `${settings.fontSize}px`,
                     fontWeight: settings.fontWeight,
                     lineHeight: settings.lineHeight,
