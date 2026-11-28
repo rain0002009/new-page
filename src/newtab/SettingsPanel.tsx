@@ -97,19 +97,21 @@ export default function SettingsPanel({ data, act, receive, onError, onLocateEnt
             <span className="block text-[13px] font-medium text-ui-ink">拖入本地 EPUB 时</span>
             <span className="block text-[11px] text-ui-muted mt-[2px]">控制把本地电子书拖入收藏块时的保存与阅读方式</span>
           </div>
-          <Select
-            size="control"
-            className="w-[180px] shrink-0 [@media(max-width:650px)]:w-full"
-            label="拖入本地 EPUB 时"
-            value={epubDropMode}
-            disabled={busy}
-            options={[
-              { value: 'ask', label: '每次询问' },
-              { value: 'local', label: '本地直接阅读' },
-              { value: 'quark', label: '上传到夸克网盘' },
-            ]}
-            onChange={mode => { void execute(async () => { await saveEpubDropMode(mode); setEpubDropMode(mode) }) }}
-          />
+          <div className="w-[180px] shrink-0 [@media(max-width:650px)]:w-full">
+            <Select
+              size="control"
+              className="w-full"
+              label="拖入本地 EPUB 时"
+              value={epubDropMode}
+              disabled={busy}
+              options={[
+                { value: 'ask', label: '每次询问' },
+                { value: 'local', label: '本地直接阅读' },
+                { value: 'quark', label: '上传到夸克网盘' },
+              ]}
+              onChange={mode => { void execute(async () => { await saveEpubDropMode(mode); setEpubDropMode(mode) }) }}
+            />
+          </div>
         </div>
       </div>
       <label className={fields.label({ className: 'mt-[22px]' })}>显示昵称<input className={fields.control()} aria-label="显示昵称" value={nickname} maxLength={80} onChange={event => { const value = event.target.value; setNickname(value); if (value.trim()) void act({ type: 'edit', id: 'profile', patch: { title: value } }) }} /></label>
