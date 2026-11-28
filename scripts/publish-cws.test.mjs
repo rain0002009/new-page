@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -15,6 +15,7 @@ import {
   resolveZipPath,
   runAuthFlow,
   runCli,
+  upsertEnvVar,
 } from './publish-cws.mjs'
 
 function makeTempDir(t) {
@@ -46,6 +47,7 @@ test('parseArgs parses flags and rejects conflicting modes or invalid values', (
     publish: false,
     status: false,
     auth: false,
+    noOpen: false,
     zip: null,
     port: 0,
   })
@@ -56,10 +58,13 @@ test('parseArgs parses flags and rejects conflicting modes or invalid values', (
     publish: true,
     status: false,
     auth: false,
+    noOpen: false,
     zip: 'out.zip',
     port: 0,
   })
-  assert.equal(parseArgs(['--auth', '--port=43123']).port, 43123)
+  const authOpts = parseArgs(['--auth', '--no-open', '--port=43123'])
+  assert.equal(authOpts.port, 43123)
+  assert.equal(authOpts.noOpen, true)
   assert.throws(() => parseArgs(['--upload-only', '--publish']), /mutually exclusive/)
   assert.throws(() => parseArgs(['--status', '--auth']), /mutually exclusive/)
   assert.throws(() => parseArgs(['--zip']), /Missing value/)
@@ -243,15 +248,29 @@ test('runCli --status calls :fetchStatus and never uploads', async t => {
   assert.equal(calls[1].url, 'https://chromewebstore.googleapis.com/v2/publishers/pub-1/items/ext-1:fetchStatus')
 })
 
-test('runAuthFlow completes loopback OAuth2 callback and exchanges code for refresh_token', async () => {
+test('runAuthFlow completes loopback OAuth2 callback, honors noOpen, and runCli saves CWS_REFRESH_TOKEN silently', async t => {
+  const dir = makeTempDir(t)
+  const envPath = join(dir, '.env.local')
+  writeFileSync(envPath, 'CWS_CLIENT_ID=cid\nCWS_CLIENT_SECRET=csec\nCWS_REFRESH_TOKEN=old-tok\n')
+
+  upsertEnvVar(envPath, 'CWS_REFRESH_TOKEN', 'mid-tok')
+  upsertEnvVar(envPath, 'CWS_PUBLISHER_ID', 'pub-1')
+  assert.equal(
+    readFileSync(envPath, 'utf8'),
+    'CWS_CLIENT_ID=cid\nCWS_CLIENT_SECRET=csec\nCWS_REFRESH_TOKEN=mid-tok\nCWS_PUBLISHER_ID=pub-1\n',
+  )
+
   const tokenRequests = []
+  const openedUrls = []
   const fetchImpl = async (url, init) => {
     tokenRequests.push({ url, body: init.body })
-    return new Response(JSON.stringify({ refresh_token: 'rt-new', access_token: 'at-new' }), { status: 200 })
+    return new Response(JSON.stringify({ refresh_token: 'rt-secret-value', access_token: 'at-secret-value' }), { status: 200 })
   }
 
-  const tokens = await runAuthFlow({
+  const tokensNoOpen = await runAuthFlow({
     config: { clientId: 'cid', clientSecret: 'csec' },
+    noOpen: true,
+    openBrowser: url => openedUrls.push(url),
     fetchImpl,
     onReady: async ({ authUrl, redirectUri, state }) => {
       const parsedAuth = new URL(authUrl)
@@ -262,7 +281,31 @@ test('runAuthFlow completes loopback OAuth2 callback and exchanges code for refr
     },
   })
 
-  assert.equal(tokens.refresh_token, 'rt-new')
+  assert.equal(tokensNoOpen.refresh_token, 'rt-secret-value')
+  assert.equal(openedUrls.length, 0)
   assert.equal(tokenRequests.length, 1)
   assert.equal(tokenRequests[0].url, 'https://oauth2.googleapis.com/token')
+
+  const logs = []
+  const origLog = console.log
+  console.log = (...args) => logs.push(args.join(' '))
+  try {
+    await runCli(['--auth', '--no-open'], {
+      rootDir: dir,
+      env: {},
+      fetchImpl,
+      openBrowser: url => openedUrls.push(url),
+      onAuthReady: async ({ redirectUri, state }) => {
+        const res = await fetch(`${redirectUri}?code=auth-code-2&state=${state}`)
+        assert.equal(res.status, 200)
+      },
+    })
+  } finally {
+    console.log = origLog
+  }
+
+  assert.equal(openedUrls.length, 0)
+  assert.ok(!logs.join('\n').includes('rt-secret-value'))
+  assert.ok(!logs.join('\n').includes('at-secret-value'))
+  assert.ok(readFileSync(envPath, 'utf8').includes('CWS_REFRESH_TOKEN=rt-secret-value\n'))
 })

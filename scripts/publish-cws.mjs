@@ -1,5 +1,6 @@
+import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -34,7 +35,8 @@ export function getHelpText() {
     '  --upload-only    Upload ZIP package only without submitting for publish (default)',
     '  --publish        Upload ZIP package and submit for Chrome Web Store review',
     '  --status         Fetch current item status via :fetchStatus',
-    '  --auth           Start local loopback OAuth2 server to obtain CWS_REFRESH_TOKEN',
+    '  --auth           Start local loopback OAuth2 server and save CWS_REFRESH_TOKEN to .env.local',
+    '  --no-open        Print OAuth2 URL only during --auth without launching a browser',
     '  --port <port>    Loopback port for --auth (default: 0, ephemeral port)',
     '  -h, --help       Show this help message',
     '',
@@ -47,7 +49,7 @@ export function getHelpText() {
     '',
     'Examples:',
     '  node scripts/publish-cws.mjs --dry-run --zip ../dist/page-garden-1.6.1.zip',
-    '  node scripts/publish-cws.mjs --auth',
+    '  node scripts/publish-cws.mjs --auth --no-open',
     '  node scripts/publish-cws.mjs --status',
     '  node scripts/publish-cws.mjs --upload-only',
     '  node scripts/publish-cws.mjs --publish',
@@ -62,6 +64,7 @@ export function parseArgs(argv) {
     publish: false,
     status: false,
     auth: false,
+    noOpen: false,
     zip: null,
     port: 0,
   }
@@ -80,6 +83,8 @@ export function parseArgs(argv) {
       options.status = true
     } else if (arg === '--auth') {
       options.auth = true
+    } else if (arg === '--no-open') {
+      options.noOpen = true
     } else if (arg === '--zip' || arg.startsWith('--zip=')) {
       const value = arg === '--zip' ? argv[++i] : arg.slice('--zip='.length)
       if (!value) throw new Error('Missing value for --zip')
@@ -524,7 +529,51 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch])
 }
 
-export async function runAuthFlow({ config, port = 0, fetchImpl = fetch, timeoutMs = 300000, onReady }) {
+export function upsertEnvVar(envPath, key, value) {
+  const existing = existsSync(envPath) ? readFileSync(envPath, 'utf8') : ''
+  const eol = existing.includes('\r\n') ? '\r\n' : '\n'
+  const lines = existing ? existing.split(/\r?\n/) : []
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+
+  const matcher = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=`)
+  let updated = false
+  const nextLines = lines.map(line => {
+    if (!updated && matcher.test(line)) {
+      updated = true
+      return `${key}=${value}`
+    }
+    return line
+  })
+  if (!updated) nextLines.push(`${key}=${value}`)
+
+  writeFileSync(envPath, `${nextLines.join(eol)}${eol}`, { mode: 0o600 })
+}
+
+export function openBrowserUrl(url, platform = process.platform) {
+  try {
+    const [command, args] =
+      platform === 'win32'
+        ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
+        : platform === 'darwin'
+          ? ['open', [url]]
+          : ['xdg-open', [url]]
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true })
+    child.unref()
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function runAuthFlow({
+  config,
+  port = 0,
+  noOpen = false,
+  openBrowser = openBrowserUrl,
+  fetchImpl = fetch,
+  timeoutMs = 300000,
+  onReady,
+}) {
   const missing = getMissingConfigKeys(config, ['clientId', 'clientSecret'])
   if (missing.length > 0) {
     throw new Error(`Missing required environment variable(s) for --auth: ${missing.join(', ')}`)
@@ -616,6 +665,7 @@ export async function runAuthFlow({ config, port = 0, fetchImpl = fetch, timeout
         codeChallenge,
       })
 
+      if (!noOpen) openBrowser(authUrl)
       if (onReady) {
         onReady({ authUrl, redirectUri, state, port: boundPort })
       } else {
@@ -658,9 +708,17 @@ export async function runCli(argv, deps = {}) {
   }
 
   if (options.auth) {
-    const tokens = await runAuthFlow({ config, port: options.port, fetchImpl })
-    console.log('\nAdd this to .env.local (never commit .env.local):')
-    console.log(`CWS_REFRESH_TOKEN=${tokens.refresh_token}`)
+    const tokens = await runAuthFlow({
+      config,
+      port: options.port,
+      noOpen: options.noOpen,
+      openBrowser: deps.openBrowser,
+      fetchImpl,
+      onReady: deps.onAuthReady,
+    })
+    const envPath = join(rootDir, '.env.local')
+    upsertEnvVar(envPath, 'CWS_REFRESH_TOKEN', tokens.refresh_token)
+    console.log('\nSaved CWS_REFRESH_TOKEN to .env.local (value redacted).')
     return
   }
 
